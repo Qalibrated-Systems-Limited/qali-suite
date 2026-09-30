@@ -83,6 +83,8 @@ export default async function BudgetPage({ params }) {
           canManageCostCodes={canManageCostCodes}
           expenseAccounts={expenseAccounts}
           defaultAccountId={project.defaultCostAccountId || ""}
+          contractValue={project.contractValue || 0}
+          vatRate={project.vatRate || 16}
         />
       )}
 

@@ -51,7 +51,7 @@ import {
 } from "@/components/ui/dialog";
 import { createParty } from "@/app/db/actions/party-actions";
 
-function PartyCombobox({ value, onValueChange, parties, placeholder, label }) {
+export function PartyCombobox({ value, onValueChange, parties, placeholder, label }) {
   const [open, setOpen] = useState(false);
   const selected = value ? parties.find((p) => p._id === value) : null;
 
@@ -116,7 +116,7 @@ function PartyCombobox({ value, onValueChange, parties, placeholder, label }) {
   );
 }
 
-function FieldError({ errors, field }) {
+export function FieldError({ errors, field }) {
   if (!errors?.[field]) return null;
   return <p className="text-sm text-red-500">{errors[field][0]}</p>;
 }

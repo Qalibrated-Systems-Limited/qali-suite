@@ -1110,6 +1110,8 @@ export interface BudgetLineInput {
   /** A cost code, not an account — 0073. The account is derived from it. */
   costCodeId: string;
   description?: string | null;
+  /** Cost category for the line — Materials, Labour, … (0122). */
+  category?: string | null;
   amount: string;
 }
 
@@ -1194,9 +1196,9 @@ export async function replaceBudgetLines(
   for (const [i, line] of lines.entries()) {
     const [row] = (await tx.execute(sql`
       INSERT INTO project_budget_lines
-        (company_id, budget_id, line_number, cost_code_id, description, amount)
+        (company_id, budget_id, line_number, cost_code_id, description, category, amount)
       VALUES (${companyId}, ${budgetId}, ${i + 1}, ${line.costCodeId},
-              ${line.description ?? ""}, ${line.amount})
+              ${line.description ?? ""}, ${line.category ?? null}, ${line.amount})
       RETURNING id::text AS id, account_id::text AS "accountId",
                 account_code_at_budget AS "accountCodeAtBudget",
                 account_name_at_budget AS "accountNameAtBudget"
@@ -1369,9 +1371,50 @@ export interface CreateProjectInput {
   budgetAmount?: string;
   budgetCurrency?: string;
   tags?: string[];
+  // Project data sheet — 0122
+  contractNumber?: string | null;
+  county?: string | null;
+  scope?: string | null;
+  contractSumSource?: string | null;
+  vatRate?: string | null;
+  retentionPercent?: string | null;
+  defectsMonths?: number | null;
+  advanceAmount?: string | null;
+  bondCost?: string | null;
+  insuranceCost?: string | null;
+  financeCost?: string | null;
+  statutoryCost?: string | null;
+  contractMonths?: number | null;
+  bankAccount?: string | null;
+  siteAgentName?: string | null;
+  qsName?: string | null;
+  fundsRingfenced?: boolean;
+  boqOnFile?: boolean;
   createdById?: string | null;
   createdByName: string;
 }
+
+/** The data-sheet columns, shared by the insert and the update helpers — 0122. */
+const DATA_SHEET_COLUMNS = [
+  "contractNumber",
+  "county",
+  "scope",
+  "contractSumSource",
+  "vatRate",
+  "retentionPercent",
+  "defectsMonths",
+  "advanceAmount",
+  "bondCost",
+  "insuranceCost",
+  "financeCost",
+  "statutoryCost",
+  "contractMonths",
+  "bankAccount",
+  "siteAgentName",
+  "qsName",
+  "fundsRingfenced",
+  "boqOnFile",
+] as const;
 
 export async function createProject(tx: Tx, input: CreateProjectInput) {
   const projectNumber = await nextProjectNumber(tx, input.companyId);
@@ -1399,6 +1442,25 @@ export async function createProject(tx: Tx, input: CreateProjectInput) {
       budgetAmount: input.budgetAmount ?? "0",
       budgetCurrency: input.budgetCurrency || "KES",
       tags: input.tags ?? [],
+      // Project data sheet — 0122
+      contractNumber: input.contractNumber ?? null,
+      county: input.county ?? null,
+      scope: input.scope ?? null,
+      contractSumSource: input.contractSumSource ?? null,
+      vatRate: input.vatRate ?? null,
+      retentionPercent: input.retentionPercent ?? null,
+      defectsMonths: input.defectsMonths ?? null,
+      advanceAmount: input.advanceAmount ?? null,
+      bondCost: input.bondCost ?? null,
+      insuranceCost: input.insuranceCost ?? null,
+      financeCost: input.financeCost ?? null,
+      statutoryCost: input.statutoryCost ?? null,
+      contractMonths: input.contractMonths ?? null,
+      bankAccount: input.bankAccount ?? null,
+      siteAgentName: input.siteAgentName ?? null,
+      qsName: input.qsName ?? null,
+      fundsRingfenced: input.fundsRingfenced ?? false,
+      boqOnFile: input.boqOnFile ?? false,
       createdById: input.createdById ?? null,
       createdByName: input.createdByName,
     })
@@ -1450,6 +1512,8 @@ export async function updateProject(
   set("budgetAmount", "budgetAmount");
   set("budgetCurrency", "budgetCurrency");
   set("tags", "tags");
+  // Project data sheet — 0122: each column has the same name here as on the row.
+  for (const col of DATA_SHEET_COLUMNS) set(col, col);
   set("lastModifiedById", "lastModifiedById");
   set("lastModifiedByName", "lastModifiedByName");
 

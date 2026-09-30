@@ -124,6 +124,31 @@ export const projects = pgTable(
     budgetAmount: money("budget_amount").notNull().default("0"),
     budgetCurrency: text("budget_currency").notNull().default("KES"),
 
+    // ── Project data sheet — 0122 (QSL Project Control template) ────────────
+    /** Identification */
+    contractNumber: text("contract_number"),
+    county: text("county"),
+    scope: text("scope"),
+    /** Commercial */
+    contractSumSource: text("contract_sum_source"),
+    vatRate: numeric("vat_rate", { precision: 9, scale: 4, mode: "string" }),
+    retentionPercent: numeric("retention_percent", { precision: 9, scale: 4, mode: "string" }),
+    defectsMonths: integer("defects_months"),
+    advanceAmount: money("advance_amount"),
+    /** Cost of being paid */
+    bondCost: money("bond_cost"),
+    insuranceCost: money("insurance_cost"),
+    financeCost: money("finance_cost"),
+    statutoryCost: money("statutory_cost"),
+    /** Programme */
+    contractMonths: integer("contract_months"),
+    /** Control */
+    bankAccount: text("bank_account"),
+    siteAgentName: text("site_agent_name"),
+    qsName: text("qs_name"),
+    fundsRingfenced: boolean("funds_ringfenced").notNull().default(false),
+    boqOnFile: boolean("boq_on_file").notNull().default(false),
+
     /**
      * The default expense account a budget line charges — 0119.
      *
@@ -388,6 +413,8 @@ export const projectBudgetLines = pgTable(
     accountNameAtBudget: text("account_name_at_budget").notNull().default(""),
 
     description: text("description").notNull().default(""),
+    /** Cost category for the line — Materials, Labour, Plant hire, … (0122). */
+    category: text("category"),
     amount: money("amount").notNull(),
   },
   (t) => [

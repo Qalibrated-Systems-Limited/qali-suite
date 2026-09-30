@@ -47,8 +47,24 @@ const blankLine = (mode = "boq", defaultAccountId = "") => ({
   // no account chosen at all — 0119.
   accountId: mode === "boq" ? defaultAccountId || "" : "",
   description: "",
+  category: "Materials",
   amount: "",
 });
+
+/** The cost categories a budget line is grouped under — 0122 (template). */
+const BUDGET_CATEGORIES = [
+  "Materials",
+  "Labour",
+  "Plant hire",
+  "Plant purchase",
+  "Transport",
+  "Subcontract",
+  "Bonds and insurance",
+  "Bank and finance",
+  "Statutory and permits",
+  "Preliminaries",
+  "Overhead",
+];
 
 export default function BudgetForm({
   projectId,
@@ -59,6 +75,8 @@ export default function BudgetForm({
   canManageCostCodes = false,
   expenseAccounts = [],
   defaultAccountId = "",
+  contractValue = 0,
+  vatRate = 16,
 }) {
   const hasBoq = boqItems.length > 0;
   /**
@@ -206,12 +224,14 @@ export default function BudgetForm({
               ? {
                   costCodeId: l.costCodeId,
                   description: l.description,
+                  category: l.category || null,
                   amount: parseFloat(l.amount) || 0,
                 }
               : {
                   boqItemIds: l.boqItemIds,
                   accountId: l.accountId,
                   description: l.description,
+                  category: l.category || null,
                   amount: parseFloat(l.amount) || 0,
                 },
           ),
@@ -267,8 +287,22 @@ export default function BudgetForm({
           <Label>Budget Lines</Label>
           {lines.map((line, index) => (
             <div key={line._id} className="rounded-lg border p-3 space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-medium text-muted-foreground">Line {index + 1}</span>
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-medium text-muted-foreground">Line {index + 1}</span>
+                  <select
+                    aria-label="Cost category"
+                    value={line.category || ""}
+                    onChange={(e) => updateLine(index, "category", e.target.value)}
+                    className="h-7 rounded-md border bg-background px-1.5 text-xs"
+                  >
+                    {BUDGET_CATEGORIES.map((c) => (
+                      <option key={c} value={c}>
+                        {c}
+                      </option>
+                    ))}
+                  </select>
+                </div>
                 <div className="flex items-center gap-2">
                   {hasBoq && (
                     <div className="inline-flex rounded-md border overflow-hidden text-xs">
@@ -415,11 +449,41 @@ export default function BudgetForm({
           </Button>
         </div>
 
-        {/* Total */}
-        <div className="flex justify-end mb-4 text-sm">
-          <span className="text-muted-foreground mr-2">Total:</span>
-          <span className="font-bold">KES {formatCurrency(total)}</span>
-        </div>
+        {/* Commercial check — Contract less tax vs Budget vs Margin (0122) */}
+        {(() => {
+          const contract = Number(contractValue) || 0;
+          const vat = Number(vatRate) || 0;
+          const net = contract > 0 ? contract / (1 + vat / 100) : 0;
+          const marginPct = net > 0 ? Math.round(((net - total) / net) * 100) : null;
+          const loss = net > 0 && total > net;
+          return (
+            <div className="mb-4 space-y-2">
+              <div className="grid grid-cols-3 gap-2 text-center">
+                <div className="rounded-lg border p-2">
+                  <p className="text-xs text-muted-foreground">Contract less tax</p>
+                  <p className="text-sm font-semibold">KES {formatCurrency(net)}</p>
+                </div>
+                <div className="rounded-lg border p-2">
+                  <p className="text-xs text-muted-foreground">Budget</p>
+                  <p className="text-sm font-semibold">KES {formatCurrency(total)}</p>
+                </div>
+                <div className={`rounded-lg border p-2 ${loss ? "border-red-300 bg-red-50 dark:bg-red-900/20" : ""}`}>
+                  <p className="text-xs text-muted-foreground">Margin</p>
+                  <p className={`text-sm font-semibold ${loss ? "text-red-600" : "text-emerald-600"}`}>
+                    {marginPct === null ? "—" : `${marginPct}%`}
+                  </p>
+                </div>
+              </div>
+              {loss && (
+                <p className="rounded-md border border-red-300 bg-red-50 p-2 text-xs text-red-700 dark:bg-red-900/20 dark:text-red-400">
+                  This budget is above the contract value — the job is planned to
+                  lose KES {formatCurrency(total - net)}. Check the figures before
+                  posting for approval.
+                </p>
+              )}
+            </div>
+          );
+        })()}
 
         {/* Revision Notes */}
         <div className="space-y-2 mb-4">

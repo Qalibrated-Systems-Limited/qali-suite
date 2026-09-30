@@ -128,6 +128,26 @@ function toScreenProject(
       totalCosts: actuals.costs,
       totalCommitted: actuals.committed,
     },
+    defaultCostAccountId: row.defaultCostAccountId ?? null,
+    // Project data sheet — 0122
+    contractNumber: row.contractNumber ?? "",
+    county: row.county ?? "",
+    scope: row.scope ?? "",
+    contractSumSource: row.contractSumSource ?? "",
+    vatRate: row.vatRate ?? "",
+    retentionPercent: row.retentionPercent ?? "",
+    defectsMonths: row.defectsMonths ?? "",
+    advanceAmount: row.advanceAmount ?? "",
+    bondCost: row.bondCost ?? "",
+    insuranceCost: row.insuranceCost ?? "",
+    financeCost: row.financeCost ?? "",
+    statutoryCost: row.statutoryCost ?? "",
+    contractMonths: row.contractMonths ?? "",
+    bankAccount: row.bankAccount ?? "",
+    siteAgentName: row.siteAgentName ?? "",
+    qsName: row.qsName ?? "",
+    fundsRingfenced: Boolean(row.fundsRingfenced),
+    boqOnFile: Boolean(row.boqOnFile),
     createdBy: { id: row.createdById ?? null, name: row.createdByName ?? "" },
     lastModifiedBy: {
       id: row.lastModifiedById ?? null,
@@ -450,6 +470,25 @@ const projectSchema = z.object({
   ),
   contractValue: optionalText,
   progressPercent: optionalText,
+  // ── Project data sheet — 0122 ─────────────────────────────────────────────
+  contractNumber: optionalText,
+  county: optionalText,
+  scope: optionalTextMax(500, "Scope too long"),
+  contractSumSource: optionalTextMax(300, "Too long"),
+  vatRate: optionalText,
+  retentionPercent: optionalText,
+  defectsMonths: optionalText,
+  advanceAmount: optionalText,
+  bondCost: optionalText,
+  insuranceCost: optionalText,
+  financeCost: optionalText,
+  statutoryCost: optionalText,
+  contractMonths: optionalText,
+  bankAccount: optionalText,
+  siteAgentName: optionalText,
+  qsName: optionalText,
+  fundsRingfenced: optionalText,
+  boqOnFile: optionalText,
 });
 
 const budgetLineSchema = z
@@ -463,6 +502,7 @@ const budgetLineSchema = z
     boqItemIds: z.array(z.string()).optional().default([]),
     accountId: optionalText,
     description: optionalTextMax(500, "Description too long"),
+    category: optionalText,
     amount: z.coerce.number().min(0, "Amount must be positive"),
   })
   .refine(
@@ -510,6 +550,25 @@ function projectFields(formData: FormData) {
     billingModel: formData.get("billingModel"),
     contractValue: formData.get("contractValue"),
     progressPercent: formData.get("progressPercent"),
+    // Project data sheet — 0122
+    contractNumber: formData.get("contractNumber"),
+    county: formData.get("county"),
+    scope: formData.get("scope"),
+    contractSumSource: formData.get("contractSumSource"),
+    vatRate: formData.get("vatRate"),
+    retentionPercent: formData.get("retentionPercent"),
+    defectsMonths: formData.get("defectsMonths"),
+    advanceAmount: formData.get("advanceAmount"),
+    bondCost: formData.get("bondCost"),
+    insuranceCost: formData.get("insuranceCost"),
+    financeCost: formData.get("financeCost"),
+    statutoryCost: formData.get("statutoryCost"),
+    contractMonths: formData.get("contractMonths"),
+    bankAccount: formData.get("bankAccount"),
+    siteAgentName: formData.get("siteAgentName"),
+    qsName: formData.get("qsName"),
+    fundsRingfenced: formData.get("fundsRingfenced"),
+    boqOnFile: formData.get("boqOnFile"),
   };
 }
 
@@ -573,8 +632,40 @@ function toRepoInput(data: z.infer<typeof projectSchema>) {
       .split(",")
       .map((t) => t.trim())
       .filter(Boolean),
+    // Project data sheet — 0122
+    contractNumber: data.contractNumber || null,
+    county: data.county || null,
+    scope: data.scope || null,
+    contractSumSource: data.contractSumSource || null,
+    vatRate: numOrNull(data.vatRate),
+    retentionPercent: numOrNull(data.retentionPercent),
+    defectsMonths: intOrNull(data.defectsMonths),
+    advanceAmount: money(data.advanceAmount),
+    bondCost: money(data.bondCost),
+    insuranceCost: money(data.insuranceCost),
+    financeCost: money(data.financeCost),
+    statutoryCost: money(data.statutoryCost),
+    contractMonths: intOrNull(data.contractMonths),
+    bankAccount: data.bankAccount || null,
+    siteAgentName: data.siteAgentName || null,
+    qsName: data.qsName || null,
+    fundsRingfenced: boolFrom(data.fundsRingfenced),
+    boqOnFile: boolFrom(data.boqOnFile),
   };
 }
+
+const numOrNull = (s: string | null | undefined) => {
+  if (s == null || s === "") return null;
+  const n = Number(s);
+  return Number.isFinite(n) ? String(n) : null;
+};
+const intOrNull = (s: string | null | undefined) => {
+  if (s == null || s === "") return null;
+  const n = parseInt(s, 10);
+  return Number.isNaN(n) ? null : n;
+};
+const boolFrom = (s: string | null | undefined) =>
+  s === "true" || s === "on" || s === "1" || s === "yes";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Writes
@@ -820,10 +911,10 @@ async function resolveBudgetLines(
   tx: Parameters<typeof repo.createBudget>[0],
   companyId: string,
   projectId: string,
-  lines: Array<{ costCodeId?: string; boqItemIds?: string[]; accountId?: string; description?: string; amount: number }>,
+  lines: Array<{ costCodeId?: string; boqItemIds?: string[]; accountId?: string; description?: string; category?: string; amount: number }>,
   actor: { id: string | null; name: string },
 ) {
-  const out: Array<{ costCodeId: string; description: string; amount: string }> = [];
+  const out: Array<{ costCodeId: string; description: string; category: string | null; amount: string }> = [];
   for (const l of lines) {
     let costCodeId = l.costCodeId || "";
     if (!costCodeId) {
@@ -835,7 +926,7 @@ async function resolveBudgetLines(
         actor,
       });
     }
-    out.push({ costCodeId, description: l.description || "", amount: l.amount.toFixed(4) });
+    out.push({ costCodeId, description: l.description || "", category: l.category || null, amount: l.amount.toFixed(4) });
   }
   return out;
 }
