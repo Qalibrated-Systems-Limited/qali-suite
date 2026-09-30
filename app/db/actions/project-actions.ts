@@ -130,6 +130,7 @@ function toScreenProject(
     },
     defaultCostAccountId: row.defaultCostAccountId ?? null,
     // Project data sheet — 0122
+    awardedToCompany: row.awardedToCompany ?? "",
     contractNumber: row.contractNumber ?? "",
     county: row.county ?? "",
     scope: row.scope ?? "",
@@ -471,6 +472,7 @@ const projectSchema = z.object({
   contractValue: optionalText,
   progressPercent: optionalText,
   // ── Project data sheet — 0122 ─────────────────────────────────────────────
+  awardedToCompany: optionalText,
   contractNumber: optionalText,
   county: optionalText,
   scope: optionalTextMax(500, "Scope too long"),
@@ -551,6 +553,7 @@ function projectFields(formData: FormData) {
     contractValue: formData.get("contractValue"),
     progressPercent: formData.get("progressPercent"),
     // Project data sheet — 0122
+    awardedToCompany: formData.get("awardedToCompany"),
     contractNumber: formData.get("contractNumber"),
     county: formData.get("county"),
     scope: formData.get("scope"),
@@ -633,6 +636,7 @@ function toRepoInput(data: z.infer<typeof projectSchema>) {
       .map((t) => t.trim())
       .filter(Boolean),
     // Project data sheet — 0122
+    awardedToCompany: data.awardedToCompany || null,
     contractNumber: data.contractNumber || null,
     county: data.county || null,
     scope: data.scope || null,

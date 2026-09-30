@@ -38,7 +38,7 @@ export default async function EditProjectPage({ params }) {
   }
 
   return (
-    <div className="flex flex-col gap-4 p-4 sm:p-5 lg:p-6 max-w-4xl mx-auto">
+    <div className="flex flex-col gap-4 p-4 sm:p-5 lg:p-6 max-w-7xl mx-auto">
       <ProjectDataSheet clients={clients} users={users} projectTypes={projectTypes} project={project} />
     </div>
   );

@@ -1372,6 +1372,7 @@ export interface CreateProjectInput {
   budgetCurrency?: string;
   tags?: string[];
   // Project data sheet — 0122
+  awardedToCompany?: string | null;
   contractNumber?: string | null;
   county?: string | null;
   scope?: string | null;
@@ -1396,6 +1397,7 @@ export interface CreateProjectInput {
 
 /** The data-sheet columns, shared by the insert and the update helpers — 0122. */
 const DATA_SHEET_COLUMNS = [
+  "awardedToCompany",
   "contractNumber",
   "county",
   "scope",
@@ -1443,6 +1445,7 @@ export async function createProject(tx: Tx, input: CreateProjectInput) {
       budgetCurrency: input.budgetCurrency || "KES",
       tags: input.tags ?? [],
       // Project data sheet — 0122
+      awardedToCompany: input.awardedToCompany ?? null,
       contractNumber: input.contractNumber ?? null,
       county: input.county ?? null,
       scope: input.scope ?? null,

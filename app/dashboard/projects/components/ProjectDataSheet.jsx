@@ -7,7 +7,6 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectTrigger,
@@ -22,14 +21,14 @@ import { PartyCombobox, FieldError } from "./ProjectForm";
 /**
  * "Start a project" — the project data sheet, after the QSL Project Control
  * template: five groups (Identification, Commercial, Programme, Cost of being
- * paid, Control), the fields marked required, and a readiness bar that fills as
- * they are completed. Completion date is derived from the possession date and
- * the contract period, like the template. Built in the app's own theme.
+ * paid, Control) laid out four fields wide, the fields marked required, and a
+ * readiness bar that fills as they are completed. Completion date is derived
+ * from the possession date and the contract period. Built in the app's theme.
  */
 
-// The fields that count toward "ready" — the template's mandatory data sheet.
 const REQUIRED = [
   "name",
+  "awardedToCompany",
   "clientPartyId",
   "contractNumber",
   "county",
@@ -43,23 +42,29 @@ const REQUIRED = [
   "projectManagerUserId",
 ];
 
-function Group({ title, children }) {
+const COLS = {
+  2: "sm:grid-cols-2",
+  3: "sm:grid-cols-2 lg:grid-cols-3",
+  4: "sm:grid-cols-2 lg:grid-cols-4",
+};
+
+function Group({ title, cols = 4, children }) {
   return (
     <div className="space-y-3">
       <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
         {title}
       </h3>
-      <div className="grid gap-4 sm:grid-cols-2">{children}</div>
+      <div className={`grid grid-cols-1 gap-4 ${COLS[cols]}`}>{children}</div>
     </div>
   );
 }
 
-function Field({ label, required, help, children, full }) {
+function Field({ label, required, help, children, span }) {
   return (
-    <div className={`space-y-1.5 ${full ? "sm:col-span-2" : ""}`}>
+    <div className={`space-y-1.5 ${span === 2 ? "sm:col-span-2" : ""}`}>
       <Label className="text-sm">
         {label}
-        {required && <span className="ml-0.5 text-red-500">*</span>}
+        {required && <span className="ml-1 text-xs font-semibold text-red-500">required</span>}
       </Label>
       {children}
       {help && <p className="text-xs text-muted-foreground">{help}</p>}
@@ -83,7 +88,6 @@ export default function ProjectDataSheet({
   const [pmUserId, setPmUserId] = useState(project?.projectManager?.userId || "");
   const [pmName, setPmName] = useState(project?.projectManager?.name || "");
 
-  // Controlled so the completion date can follow possession + period.
   const iso = (d) => (d ? new Date(d).toISOString().split("T")[0] : "");
   const [startDate, setStartDate] = useState(iso(project?.startDate));
   const [months, setMonths] = useState(project?.contractMonths ?? "");
@@ -109,7 +113,6 @@ export default function ProjectDataSheet({
     }
     setFilled(next);
   };
-  // Recompute once mounted (defaults) and whenever combobox/date state changes.
   useEffect(() => {
     recompute();
   }, [clientPartyId, pmUserId, startDate, months]);
@@ -183,12 +186,15 @@ export default function ProjectDataSheet({
 
         <Card className="space-y-8 p-4 sm:p-6">
           {/* Identification */}
-          <Group title="Identification">
-            <Field label="Project name" required full>
+          <Group title="Identification" cols={4}>
+            <Field label="Project name" required>
               <Input name="name" placeholder="e.g. Otho Road construction" defaultValue={dv("name")} required />
               <FieldError errors={errors} field="name" />
             </Field>
-            <Field label="Client or employer" help="A project's client is a customer — add them under Parties if missing.">
+            <Field label="Company the work is awarded to" required>
+              <Input name="awardedToCompany" placeholder="Group entity holding the contract" defaultValue={dv("awardedToCompany")} />
+            </Field>
+            <Field label="Client or employer" required help="A project's client is a customer — add under Parties if missing.">
               <PartyCombobox
                 value={clientPartyId}
                 onValueChange={setClientPartyId}
@@ -197,7 +203,13 @@ export default function ProjectDataSheet({
                 label="customers"
               />
             </Field>
-            <Field label="Kind of work">
+            <Field label="Contract number" required>
+              <Input name="contractNumber" defaultValue={dv("contractNumber")} placeholder="e.g. RWC/772/2024" />
+            </Field>
+            <Field label="County" required>
+              <Input name="county" defaultValue={dv("county")} placeholder="e.g. Mombasa" />
+            </Field>
+            <Field label="Kind of work" required>
               <Select name="typeId" defaultValue={project?.typeId || state?.values?.typeId || "none"}>
                 <SelectTrigger className="h-9">
                   <SelectValue placeholder="Choose" />
@@ -212,27 +224,21 @@ export default function ProjectDataSheet({
                 </SelectContent>
               </Select>
             </Field>
-            <Field label="Contract number">
-              <Input name="contractNumber" defaultValue={dv("contractNumber")} placeholder="e.g. RWC/772/2024" />
-            </Field>
-            <Field label="County">
-              <Input name="county" defaultValue={dv("county")} placeholder="e.g. Mombasa" />
-            </Field>
-            <Field label="Scope in one sentence" full>
-              <Textarea name="scope" rows={2} defaultValue={dv("scope")} placeholder="What the works are, in a sentence." />
+            <Field label="Scope in one sentence" required span={2}>
+              <Input name="scope" defaultValue={dv("scope")} placeholder="What the works are, in a sentence." />
             </Field>
           </Group>
 
           {/* Commercial */}
-          <Group title="Commercial">
-            <Field label="Contract sum including tax (KES)">
+          <Group title="Commercial" cols={4}>
+            <Field label="Contract sum including tax (KES)" required>
               <Input name="contractValue" type="number" min="0" step="1" defaultValue={dv("contractValue")} />
               <FieldError errors={errors} field="contractValue" />
             </Field>
-            <Field label="Document the contract sum is taken from" help="Name the signed document and its date.">
+            <Field label="Document the contract sum is taken from" required help="Name the signed document and its date.">
               <Input name="contractSumSource" defaultValue={dv("contractSumSource")} />
             </Field>
-            <Field label="VAT rate applied (%)">
+            <Field label="VAT rate applied (%)" required>
               <Input name="vatRate" type="number" step="any" min="0" defaultValue={dv("vatRate", "16")} />
             </Field>
             <Field label="Advance payment expected (KES)">
@@ -247,11 +253,11 @@ export default function ProjectDataSheet({
           </Group>
 
           {/* Programme */}
-          <Group title="Programme">
-            <Field label="Site possession date">
+          <Group title="Programme" cols={3}>
+            <Field label="Site possession date" required>
               <Input name="startDate" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
             </Field>
-            <Field label="Contract period (months)">
+            <Field label="Contract period (months)" required>
               <Input name="contractMonths" type="number" min="0" step="1" value={months} onChange={(e) => setMonths(e.target.value)} />
             </Field>
             <Field label="Contractual completion date" help="Filled from possession date + period; edit if it differs.">
@@ -260,7 +266,7 @@ export default function ProjectDataSheet({
           </Group>
 
           {/* Cost of being paid */}
-          <Group title="Cost of being paid">
+          <Group title="Cost of being paid" cols={4}>
             <Field label="Performance bond & guarantees (KES)" help="Enter zero only if none are required.">
               <Input name="bondCost" type="number" min="0" step="1" defaultValue={dv("bondCost")} />
             </Field>
@@ -276,11 +282,11 @@ export default function ProjectDataSheet({
           </Group>
 
           {/* Control */}
-          <Group title="Control">
-            <Field label="Bank account this project runs on" help="One account per project — do not mix contracts.">
+          <Group title="Control" cols={4}>
+            <Field label="Bank account this project runs on" required help="One account per project — do not mix contracts.">
               <Input name="bankAccount" defaultValue={dv("bankAccount")} />
             </Field>
-            <Field label="Project manager">
+            <Field label="Project manager" required>
               <PartyCombobox
                 value={pmUserId}
                 onValueChange={(id, name) => {
@@ -311,7 +317,7 @@ export default function ProjectDataSheet({
                 </SelectContent>
               </Select>
             </Field>
-            <div className="space-y-2 sm:col-span-2">
+            <div className="flex flex-col justify-end gap-2 sm:col-span-2 lg:col-span-3">
               <label className="flex items-center gap-2 text-sm">
                 <input type="checkbox" name="fundsRingfenced" value="true" defaultChecked={!!project?.fundsRingfenced} className="h-4 w-4" />
                 Funds are ring-fenced to this project

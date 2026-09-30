@@ -126,6 +126,7 @@ export const projects = pgTable(
 
     // ── Project data sheet — 0122 (QSL Project Control template) ────────────
     /** Identification */
+    awardedToCompany: text("awarded_to_company"),
     contractNumber: text("contract_number"),
     county: text("county"),
     scope: text("scope"),
