@@ -269,6 +269,48 @@ export async function getProjectBudgetVsActual(projectId: string) {
   );
 }
 
+/** A short, stable checksum of the approved figures — the budget's "seal". */
+function sealHash(lines: Array<{ costCode?: string | null; budgeted: number }>) {
+  const s = lines
+    .map((l) => `${l.costCode ?? ""}:${Math.round(l.budgeted)}`)
+    .join("|");
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return h.toString(16).toUpperCase().padStart(8, "0").slice(-8);
+}
+
+/**
+ * The "sealed budgets" list — every project with an approved budget, each with
+ * its contract-less-tax, sealed total, margin, the budget lines (budget /
+ * committed / spent / left) and a seal checksum (0124, QSL template).
+ */
+export async function getSealedBudgets() {
+  return withAuthorizedTenant([], async (tx) => {
+    const heads = await repo.listApprovedBudgetProjects(tx);
+    const out = [];
+    for (const h of heads) {
+      const bva = await repo.getProjectBudgetVsActual(tx, h.id);
+      const lines = bva?.lines ?? [];
+      const total = bva?.totalBudgeted ?? 0;
+      const vat = h.vatRate == null ? 16 : h.vatRate;
+      const net = h.contractValue > 0 ? h.contractValue / (1 + vat / 100) : 0;
+      const margin = net > 0 ? Math.round(((net - total) / net) * 1000) / 10 : null;
+      out.push({
+        ...h,
+        lines,
+        total,
+        committed: lines.reduce((s, l) => s + (l.committed || 0), 0),
+        spent: lines.reduce((s, l) => s + (l.actual || 0), 0),
+        left: lines.reduce((s, l) => s + (l.available || 0), 0),
+        contractLessTax: net,
+        margin,
+        seal: sealHash(lines),
+      });
+    }
+    return out;
+  });
+}
+
 export async function getProjectTransactions(
   projectId: string,
   type: "all" | "claims" | "invoices" | "bills" | "expenses" | "requests" = "all",

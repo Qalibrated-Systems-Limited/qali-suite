@@ -828,6 +828,47 @@ export async function getProjectFinancialSummary(tx: Tx, projectId: string) {
  * said out loud here because a reader comparing the two figures deserves to
  * know why they differ.
  */
+/**
+ * Projects with an APPROVED budget — the "sealed budgets" list (0124).
+ * Carries the contract fields the card shows and the budget's approval stamp.
+ */
+export async function listApprovedBudgetProjects(tx: Tx) {
+  const rows = (await tx.execute(sql`
+    SELECT p.id::text                         AS id,
+           p.project_number                   AS "projectNumber",
+           p.name                             AS name,
+           p.status                           AS status,
+           p.client_name                      AS "clientName",
+           p.contract_number                  AS "contractNumber",
+           p.contract_value::float8           AS "contractValue",
+           p.vat_rate::float8                 AS "vatRate",
+           p.bank_account                     AS "bankAccount",
+           b.id::text                         AS "budgetId",
+           b.version                          AS version,
+           b.approved_by_name                 AS "approvedByName",
+           b.approved_at                      AS "approvedAt"
+      FROM projects p
+      JOIN project_budgets b
+        ON b.project_id = p.id AND b.status = 'approved'
+     ORDER BY p.project_number
+  `)) as unknown as Array<Record<string, unknown>>;
+  return rows.map((r) => ({
+    id: String(r.id),
+    projectNumber: String(r.projectNumber ?? ""),
+    name: String(r.name ?? ""),
+    status: String(r.status ?? ""),
+    clientName: r.clientName ? String(r.clientName) : "",
+    contractNumber: r.contractNumber ? String(r.contractNumber) : "",
+    contractValue: num(r.contractValue),
+    vatRate: r.vatRate == null ? null : num(r.vatRate),
+    bankAccount: r.bankAccount ? String(r.bankAccount) : "",
+    budgetId: String(r.budgetId),
+    version: Number(r.version ?? 1),
+    approvedByName: r.approvedByName ? String(r.approvedByName) : "",
+    approvedAt: r.approvedAt ? String(r.approvedAt) : null,
+  }));
+}
+
 export async function getProjectBudgetVsActual(tx: Tx, projectId: string) {
   const [budget] = await tx
     .select()
@@ -895,6 +936,7 @@ export async function getProjectBudgetVsActual(tx: Tx, projectId: string) {
       costCode: line.costCode,
       costCodeName: line.costCodeName,
       description: line.description,
+      category: line.category ?? null,
       budgeted,
       actual: spent,
       committed: pledged,
@@ -1041,6 +1083,7 @@ async function budgetLinesFor(tx: Tx, budgetIds: readonly string[]) {
       accountCodeAtBudget: projectBudgetLines.accountCodeAtBudget,
       accountNameAtBudget: projectBudgetLines.accountNameAtBudget,
       description: projectBudgetLines.description,
+      category: projectBudgetLines.category,
       amount: projectBudgetLines.amount,
     })
     .from(projectBudgetLines)
