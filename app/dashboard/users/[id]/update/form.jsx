@@ -33,30 +33,35 @@ import { z } from "zod";
 import { updateUserPg } from "@/app/db/actions/user-actions";
 import { AlertCircle, Loader2, Save, X, Mail } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { userDepartments, userRolesMapping, userRoles } from "@/lib/utils";
-import { useState } from "react";
+import { userDepartments, userRolesMapping } from "@/lib/utils";
 
 const userUpdateSchema = z.object({
   name: z.string().min(1, "Name is required").max(50),
   email: z.string().email("Invalid email address"),
-  role: z.enum(userRoles),
+  // Canonical or custom role — validated server-side against this company.
+  role: z.string().min(1, "A role is required"),
   department: z.string().optional(),
   status: z.enum(["active", "inactive"]),
 });
 
 const DEPARTMENTS = userDepartments;
 
-// Filter roles based on user type - Admin can't assign SuperAdmin or Admin roles
-const getAvailableRoles = (isSuperAdmin) => {
-  if (isSuperAdmin) {
-    return userRolesMapping;
-  }
-  return userRolesMapping.filter(
-    (r) => r.value !== "SuperAdmin" && r.value !== "Admin"
-  );
+// Filter roles based on user type - Admin can't assign SuperAdmin or Admin roles,
+// then append this company's custom roles (0120).
+const getAvailableRoles = (isSuperAdmin, customRoles = []) => {
+  const base = isSuperAdmin
+    ? userRolesMapping
+    : userRolesMapping.filter(
+        (r) => r.value !== "SuperAdmin" && r.value !== "Admin",
+      );
+  const custom = customRoles.map((r) => ({
+    value: r.name,
+    label: `${r.name} — acts as ${r.baseRole}`,
+  }));
+  return [...base, ...custom];
 };
 
-export function EditUserForm({ user, isSuperAdmin = false }) {
+export function EditUserForm({ user, isSuperAdmin = false, customRoles = [] }) {
   const router = useRouter();
   const initialState = { message: "", errors: {} };
   const updateWithId = updateUserPg.bind(null, user.id);
@@ -65,7 +70,7 @@ export function EditUserForm({ user, isSuperAdmin = false }) {
     initialState
   );
 
-  const availableRoles = getAvailableRoles(isSuperAdmin);
+  const availableRoles = getAvailableRoles(isSuperAdmin, customRoles);
 
   const form = useForm({
     resolver: zodResolver(userUpdateSchema),

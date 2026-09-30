@@ -4,7 +4,11 @@ import Link from "next/link";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ArrowLeft, ShieldCheck, Users, KeyRound, AlertTriangle } from "lucide-react";
-import { canSeeSettingsNav } from "@/lib/permissions";
+import { canSeeSettingsNav, roleAllowed } from "@/lib/permissions";
+import { ADMIN_ROLES } from "@/lib/utils/role-gates";
+import { getCustomRoles } from "@/app/db/actions/role-actions";
+import { ROLES as CANONICAL_ROLES } from "@/lib/permission-catalog";
+import CustomRolesManager from "./CustomRolesManager";
 import {
   permissionsByModule,
   roleSummary,
@@ -26,6 +30,8 @@ export default async function RolesPermissionsPage() {
   const roles = roleSummary();
   const modules = permissionsByModule();
   const totalPermissions = PERMISSION_GROUPS.length + NAV_PERMISSIONS.length;
+  const canManage = roleAllowed(session.user.role, ADMIN_ROLES);
+  const customRoles = await getCustomRoles();
 
   return (
     <div className="max-w-5xl space-y-6 sm:p-2 lg:p-4">
@@ -105,6 +111,13 @@ export default async function RolesPermissionsPage() {
           ))}
         </div>
       </section>
+
+      {/* Custom roles — create/edit/delete, assignable to users */}
+      <CustomRolesManager
+        roles={customRoles}
+        baseRoles={CANONICAL_ROLES}
+        canManage={canManage}
+      />
 
       {/* Permissions by module */}
       <section className="space-y-4">

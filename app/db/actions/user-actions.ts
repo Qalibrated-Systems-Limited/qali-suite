@@ -12,7 +12,7 @@ import { ADMIN_ROLES } from "@/lib/utils/role-gates";
 // reaching into the mongoose model for a plain exported array and dragging
 // mongoose into the module graph as a side effect. The two lists are
 // identical, so validation is unchanged.
-import { userRoles } from "@/lib/utils";
+import { isAssignableRole } from "../repositories/customRoles";
 import * as usersRepo from "../repositories/users";
 import {
   adminUpdateUser,
@@ -43,7 +43,9 @@ export type ActionResult =
 const userSchema = z.object({
   name: z.string().min(2, "Name is required"),
   email: z.string().email("A valid email is required"),
-  role: z.enum(userRoles as [string, ...string[]]),
+  // A canonical role OR a company custom role — checked against the tenant's
+  // roles inside the action (0120), since custom roles are per-company data.
+  role: z.string().min(1, "A role is required"),
   department: z.string().optional().nullable(),
   password: z.string().min(6, "Password must be at least 6 characters").optional(),
 });
@@ -92,6 +94,15 @@ export async function createUserPg(
     return await withAuthorizedTenant(
       [...ADMIN_ROLES],
       async (_tx, { user, companyId }) => {
+        // The role must be a canonical role or one of this company's custom
+        // roles — 0120. Checked here because custom roles are per-company data.
+        if (!(await isAssignableRole(_tx, d.role))) {
+          return {
+            success: false as const,
+            error: `"${d.role}" is not a role in this company.`,
+          };
+        }
+
         // Email is a platform-wide identity, so this is checked platform-wide
         // rather than within the company (0043's unique index enforces it too).
         if (await emailExists(d.email)) {
@@ -145,11 +156,19 @@ export async function updateUserPg(
 ): Promise<ActionResult> {
   try {
     return await withAuthorizedTenant([...ADMIN_ROLES], async (_tx, { companyId }) => {
+      const newRole = (formData.get("role") as string) || null;
+      // A role change must name a canonical or company custom role — 0120.
+      if (newRole && !(await isAssignableRole(_tx, newRole))) {
+        return {
+          success: false as const,
+          error: `"${newRole}" is not a role in this company.`,
+        };
+      }
       const result = await adminUpdateUser({
         id: userId,
         name: (formData.get("name") as string) || null,
         email: (formData.get("email") as string) || null,
-        role: (formData.get("role") as string) || null,
+        role: newRole,
         department: (formData.get("department") as string) || null,
         status: (formData.get("status") as string) || null,
         // Which membership the new role applies to. Since 0064 the grant's

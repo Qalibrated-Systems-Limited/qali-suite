@@ -33,34 +33,39 @@ import { z } from "zod";
 import { createUserPg } from "@/app/db/actions/user-actions";
 import { AlertCircle, Loader2, UserPlus, X } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { userDepartments, userRolesMapping, userRoles } from "@/lib/utils";
-import { useState } from "react";
+import { userDepartments, userRolesMapping } from "@/lib/utils";
 
 const userCreateSchema = z.object({
   name: z.string().min(1, "Name is required").max(50),
   email: z.string().email("Invalid email address"),
-  role: z.enum(userRoles),
+  // Canonical or custom role — validated server-side against this company.
+  role: z.string().min(1, "A role is required"),
   department: z.string().optional(),
 });
 
 const DEPARTMENTS = userDepartments;
 
-// Filter roles based on user type - Admin can't create SuperAdmin or Admin users
-const getAvailableRoles = (isSuperAdmin) => {
-  if (isSuperAdmin) {
-    return userRolesMapping;
-  }
-  return userRolesMapping.filter(
-    (r) => r.value !== "SuperAdmin" && r.value !== "Admin"
-  );
+// Filter roles based on user type - Admin can't create SuperAdmin or Admin users,
+// then append this company's custom roles (0120).
+const getAvailableRoles = (isSuperAdmin, customRoles = []) => {
+  const base = isSuperAdmin
+    ? userRolesMapping
+    : userRolesMapping.filter(
+        (r) => r.value !== "SuperAdmin" && r.value !== "Admin",
+      );
+  const custom = customRoles.map((r) => ({
+    value: r.name,
+    label: `${r.name} — acts as ${r.baseRole}`,
+  }));
+  return [...base, ...custom];
 };
 
-export function CreateUserForm({ isSuperAdmin = false }) {
+export function CreateUserForm({ isSuperAdmin = false, customRoles = [] }) {
   const router = useRouter();
   const initialState = { message: "", errors: {} };
   const [state, dispatch, isPending] = useActionState(createUserPg, initialState);
 
-  const availableRoles = getAvailableRoles(isSuperAdmin);
+  const availableRoles = getAvailableRoles(isSuperAdmin, customRoles);
 
   const form = useForm({
     resolver: zodResolver(userCreateSchema),
