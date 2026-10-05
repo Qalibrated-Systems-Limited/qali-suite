@@ -131,6 +131,19 @@ function toScreenProject(
     defaultCostAccountId: row.defaultCostAccountId ?? null,
     // Project data sheet — 0122
     awardedToCompany: row.awardedToCompany ?? "",
+    // Contract administration — 0124
+    formOfContract: row.formOfContract ?? "",
+    engineerName: row.engineerName ?? "",
+    noticeDays: row.noticeDays ?? "",
+    detailClaimDays: row.detailClaimDays ?? "",
+    employerPaysDays: row.employerPaysDays ?? "",
+    latePaymentInterestPct: row.latePaymentInterestPct ?? "",
+    retentionLimit: row.retentionLimit ?? "",
+    ldPerDay: row.ldPerDay ?? "",
+    damagesCapPct: row.damagesCapPct ?? "",
+    variationCapPct: row.variationCapPct ?? "",
+    perfSecurityExpires: row.perfSecurityExpires ?? "",
+    advanceGuaranteeExpires: row.advanceGuaranteeExpires ?? "",
     contractNumber: row.contractNumber ?? "",
     county: row.county ?? "",
     scope: row.scope ?? "",
@@ -309,6 +322,60 @@ export async function getSealedBudgets() {
     }
     return out;
   });
+}
+
+/**
+ * Save the contract-administration fields for a project — 0124. A focused
+ * update (not the full data-sheet form), so it can be its own screen.
+ */
+export async function saveContractAdminData(projectId: string, formData: FormData) {
+  if (!projectId) return { error: "No project." };
+  const txt = (k: string) => {
+    const v = formData.get(k);
+    return v == null || String(v).trim() === "" ? null : String(v).trim();
+  };
+  const int = (k: string) => {
+    const v = txt(k);
+    if (v == null) return null;
+    const n = parseInt(v, 10);
+    return Number.isNaN(n) ? null : n;
+  };
+  const numv = (k: string) => {
+    const v = txt(k);
+    if (v == null) return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? String(n) : null;
+  };
+  try {
+    await withAuthorizedTenant(
+      PROJECT_MANAGE_ROLES as unknown as string[],
+      async (tx, { user }) => {
+        const actor = actorFrom(user);
+        await repo.updateProject(tx, projectId, {
+          formOfContract: txt("formOfContract"),
+          engineerName: txt("engineerName"),
+          noticeDays: int("noticeDays"),
+          detailClaimDays: int("detailClaimDays"),
+          employerPaysDays: int("employerPaysDays"),
+          latePaymentInterestPct: numv("latePaymentInterestPct"),
+          retentionPercent: numv("retentionPercent"),
+          retentionLimit: numv("retentionLimit"),
+          defectsMonths: int("defectsMonths"),
+          ldPerDay: numv("ldPerDay"),
+          damagesCapPct: numv("damagesCapPct"),
+          variationCapPct: numv("variationCapPct"),
+          perfSecurityExpires: txt("perfSecurityExpires"),
+          advanceGuaranteeExpires: txt("advanceGuaranteeExpires"),
+          lastModifiedById: actor.id,
+          lastModifiedByName: actor.name,
+        });
+      },
+    );
+    revalidatePath("/dashboard/projects/contract");
+    return { success: true, message: "Contract data saved." };
+  } catch (error) {
+    return { error: userMessage(error) };
+  }
 }
 
 export async function getProjectTransactions(

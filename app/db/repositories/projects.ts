@@ -1434,6 +1434,19 @@ export interface CreateProjectInput {
   qsName?: string | null;
   fundsRingfenced?: boolean;
   boqOnFile?: boolean;
+  // Contract administration — 0124
+  formOfContract?: string | null;
+  engineerName?: string | null;
+  noticeDays?: number | null;
+  detailClaimDays?: number | null;
+  employerPaysDays?: number | null;
+  latePaymentInterestPct?: string | null;
+  retentionLimit?: string | null;
+  ldPerDay?: string | null;
+  damagesCapPct?: string | null;
+  variationCapPct?: string | null;
+  perfSecurityExpires?: string | null;
+  advanceGuaranteeExpires?: string | null;
   createdById?: string | null;
   createdByName: string;
 }
@@ -1459,6 +1472,18 @@ const DATA_SHEET_COLUMNS = [
   "qsName",
   "fundsRingfenced",
   "boqOnFile",
+  "formOfContract",
+  "engineerName",
+  "noticeDays",
+  "detailClaimDays",
+  "employerPaysDays",
+  "latePaymentInterestPct",
+  "retentionLimit",
+  "ldPerDay",
+  "damagesCapPct",
+  "variationCapPct",
+  "perfSecurityExpires",
+  "advanceGuaranteeExpires",
 ] as const;
 
 export async function createProject(tx: Tx, input: CreateProjectInput) {
@@ -1507,6 +1532,18 @@ export async function createProject(tx: Tx, input: CreateProjectInput) {
       qsName: input.qsName ?? null,
       fundsRingfenced: input.fundsRingfenced ?? false,
       boqOnFile: input.boqOnFile ?? false,
+      formOfContract: input.formOfContract ?? null,
+      engineerName: input.engineerName ?? null,
+      noticeDays: input.noticeDays ?? null,
+      detailClaimDays: input.detailClaimDays ?? null,
+      employerPaysDays: input.employerPaysDays ?? null,
+      latePaymentInterestPct: input.latePaymentInterestPct ?? null,
+      retentionLimit: input.retentionLimit ?? null,
+      ldPerDay: input.ldPerDay ?? null,
+      damagesCapPct: input.damagesCapPct ?? null,
+      variationCapPct: input.variationCapPct ?? null,
+      perfSecurityExpires: input.perfSecurityExpires ?? null,
+      advanceGuaranteeExpires: input.advanceGuaranteeExpires ?? null,
       createdById: input.createdById ?? null,
       createdByName: input.createdByName,
     })

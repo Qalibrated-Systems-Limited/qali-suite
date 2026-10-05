@@ -150,6 +150,20 @@ export const projects = pgTable(
     fundsRingfenced: boolean("funds_ringfenced").notNull().default(false),
     boqOnFile: boolean("boq_on_file").notNull().default(false),
 
+    // ── Contract administration — 0124 (FIDIC conditions) ───────────────────
+    formOfContract: text("form_of_contract"),
+    engineerName: text("engineer_name"),
+    noticeDays: integer("notice_days"),
+    detailClaimDays: integer("detail_claim_days"),
+    employerPaysDays: integer("employer_pays_days"),
+    latePaymentInterestPct: numeric("late_payment_interest_pct", { precision: 9, scale: 4, mode: "string" }),
+    retentionLimit: money("retention_limit"),
+    ldPerDay: money("ld_per_day"),
+    damagesCapPct: numeric("damages_cap_pct", { precision: 9, scale: 4, mode: "string" }),
+    variationCapPct: numeric("variation_cap_pct", { precision: 9, scale: 4, mode: "string" }),
+    perfSecurityExpires: date("perf_security_expires"),
+    advanceGuaranteeExpires: date("advance_guarantee_expires"),
+
     /**
      * The default expense account a budget line charges — 0119.
      *
