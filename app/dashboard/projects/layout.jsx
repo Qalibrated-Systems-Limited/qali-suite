@@ -1,9 +1,7 @@
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import { PlanGate } from "@/components/plan-gate-boundary";
-import ProjectsNav from "./components/ProjectsNav";
-import { workspaceProjects } from "./lib/workspace";
-import { canSeeProjectsNav } from "@/lib/permissions";
+import ProjectControlNav from "./components/ProjectControlNav";
 import { Suspense } from "react";
 
 /**
@@ -33,42 +31,19 @@ export default async function ProjectsLayout({ children }) {
   if (!session?.user) redirect("/login");
 
   /**
-   * The nav needs every project's section flags, because a layout does not
-   * receive `searchParams` and so cannot know which project is selected — the
-   * client component applies `selectProject` instead, the same rule the pages
-   * use. `workspaceProjects` is React-cached, so the page below this does not
-   * repeat the query.
-   *
-   * Skipped entirely for a role that cannot see projects: the pages render
-   * their own Access Denied, and fetching a list for somebody who may not read
-   * it is work done to be thrown away.
+   * The Project Control workspace — the template's grouped sidebar replaces the
+   * old per-section tab strip. The sidebar is a client component that reads the
+   * selected project from `?project=`, so the layout hands it nothing.
    */
-  const projects = canSeeProjectsNav(session.user.role)
-    ? await workspaceProjects()
-    : [];
-
-  /**
-   * What the switcher last remembered, read here rather than in the nav.
-   *
-   * The nav is a client component, and reading `document.cookie` during its
-   * render would disagree with what the server rendered — a hydration
-   * mismatch. A server component may READ a cookie freely; it is only WRITING
-   * one that it cannot do, which is why the switcher writes it.
-   *
-   * Without this the sections vanished from the nav on the dashboard, because
-   * that URL carries no `?project=` and is not a project path — even though
-   * every section page still knew perfectly well which project was chosen.
-   */
-
   return (
     <PlanGate module="projects" feature="Project Management">
-      <div className="flex flex-col">
+      <div className="flex flex-col md:flex-row">
         {/* `useSearchParams` in the nav needs a Suspense boundary, or the whole
             module opts out of static rendering. */}
-        <Suspense fallback={<div className="h-12 border-b border-border bg-card" />}>
-          <ProjectsNav projects={projects} />
+        <Suspense fallback={<div className="shrink-0 border-b border-border bg-card md:min-h-screen md:w-60 md:border-b-0 md:border-r" />}>
+          <ProjectControlNav />
         </Suspense>
-        <main className="flex-1">{children}</main>
+        <main className="min-w-0 flex-1">{children}</main>
       </div>
     </PlanGate>
   );
