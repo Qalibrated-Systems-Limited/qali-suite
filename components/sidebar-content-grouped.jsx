@@ -2,6 +2,7 @@
 
 import {
   Activity,
+  Archive,
   ArrowLeftRight,
   Award,
   KeyRound,
@@ -38,6 +39,7 @@ import {
   Search,
   Settings,
   ShieldAlert,
+  ShieldCheck,
   ShoppingBag,
   ShoppingCart,
   Store,
@@ -453,6 +455,28 @@ const getNavigationGroups = (user) => {
         label: "Cash Requisitions",
         id: "projects-cash-requisitions",
         href: "/dashboard/projects/cash-requisitions",
+      },
+      // The portfolio registers — the screens that are about every project at
+      // once (the template's Projects and Reporting groups). They are also
+      // header buttons on the list page; here so they are one click away from
+      // anywhere, the same as the sections above.
+      {
+        icon: ShieldCheck,
+        label: "Sealed Budgets",
+        id: "projects-sealed-budgets",
+        href: "/dashboard/projects/sealed-budgets",
+      },
+      {
+        icon: Archive,
+        label: "Completed Work",
+        id: "projects-archive",
+        href: "/dashboard/projects/archive",
+      },
+      {
+        icon: ShieldAlert,
+        label: "Findings",
+        id: "projects-findings",
+        href: "/dashboard/projects/findings",
       },
     ],
   },

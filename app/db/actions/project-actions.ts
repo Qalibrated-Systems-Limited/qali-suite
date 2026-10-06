@@ -325,6 +325,60 @@ export async function getSealedBudgets() {
 }
 
 /**
+ * The findings register — what reading the books turns up.
+ *
+ * The QSL template promised this screen and it is the point of the module: a
+ * budget exists to be beaten, a job exists to earn, and a figure that proves
+ * neither is a problem the system should name rather than hide. Nothing here is
+ * entered by hand — every row is computed from the sealed budgets and the live
+ * project list, so it cannot drift from the numbers it reports on.
+ *
+ * Four checks, in order of how much they cost the business:
+ *   1. ON SITE WITH NO APPROVED BUDGET — an active job cleared to spend against
+ *      a figure nobody signed. The budget gate exists to stop exactly this.
+ *   2. NO MARGIN — a budget whose cost equals or exceeds the recoverable
+ *      contract value: the job is priced to lose money before it starts.
+ *   3. A LINE OVERSPENT — committed-plus-spent past the budgeted figure, so the
+ *      recovery the certificate assumes is already gone.
+ *   4. THIN MARGIN — under ten per cent, which a single variation erodes.
+ */
+export async function getProjectFindings() {
+  const [sealed, all] = await Promise.all([
+    getSealedBudgets(),
+    getProjectsForWorkspace(),
+  ]);
+  const sealedIds = new Set(sealed.map((s) => s.id));
+
+  const noApprovedBudget = all.filter(
+    (p) => p.status === "active" && !sealedIds.has(p.id),
+  );
+  const noMargin = sealed.filter((s) => s.margin != null && s.margin <= 0);
+  const thinMargin = sealed.filter(
+    (s) => s.margin != null && s.margin > 0 && s.margin < 10,
+  );
+  const overspent = sealed
+    .map((s) => ({
+      id: s.id,
+      name: s.name,
+      projectNumber: s.projectNumber,
+      overLines: (s.lines ?? []).filter((l) => (l.available ?? 0) < 0),
+    }))
+    .filter((s) => s.overLines.length > 0);
+
+  return {
+    noApprovedBudget,
+    noMargin,
+    thinMargin,
+    overspent,
+    total:
+      noApprovedBudget.length +
+      noMargin.length +
+      thinMargin.length +
+      overspent.length,
+  };
+}
+
+/**
  * Save the contract-administration fields for a project — 0124. A focused
  * update (not the full data-sheet form), so it can be its own screen.
  */
