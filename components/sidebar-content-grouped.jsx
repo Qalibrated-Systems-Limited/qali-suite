@@ -1052,19 +1052,19 @@ const NavGroup = ({ group, user, onItemClick, collapsed }) => {
           }
         )}
       >
-        <div className="flex items-center gap-3">
-          <group.icon className="w-5 h-5" />
-          <span>{group.label}</span>
+        <div className="flex items-center gap-3 min-w-0 flex-1">
+          <group.icon className="w-5 h-5 shrink-0" />
+          <span className="min-w-0 text-left leading-tight">{group.label}</span>
           {group.badge && (
-            <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-yellow-500 text-black font-bold">
+            <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-md bg-yellow-500 text-black font-bold">
               {group.badge}
             </span>
           )}
         </div>
         {isOpen ? (
-          <ChevronDown className="w-4 h-4 transition-transform" />
+          <ChevronDown className="w-4 h-4 shrink-0 transition-transform" />
         ) : (
-          <ChevronRight className="w-4 h-4 transition-transform" />
+          <ChevronRight className="w-4 h-4 shrink-0 transition-transform" />
         )}
       </button>
 
@@ -1321,8 +1321,14 @@ export const SidebarContentGrouped = ({ onItemClick, user, collapsed }) => {
                     collapsed={collapsed}
                   />
                 ))}
-                {sharedEntry && renderEntry(sharedEntry)}
-                {extraTop.map(renderEntry)}
+                {/* Shared services and the exec extras sit a little apart from
+                    the departments — a hairline, no heavier. */}
+                {(sharedEntry || extraTop.length > 0) && (
+                  <div className="mt-2 space-y-1 border-t border-border/60 pt-2">
+                    {sharedEntry && renderEntry(sharedEntry)}
+                    {extraTop.map(renderEntry)}
+                  </div>
+                )}
               </>
             );
           })()}
