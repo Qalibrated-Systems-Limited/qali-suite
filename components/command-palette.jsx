@@ -60,6 +60,15 @@ const PAGES = [
   { label: "Executive Overview", href: "/dashboard/executive", icon: TrendingUp, aliases: ["ceo", "exec", "overview", "snapshot"] },
   { label: "Approvals", href: "/dashboard/approvals", icon: CheckSquare },
 
+  // ── Departments (landing dashboards) ───────────────
+  { label: "Projects Dept", href: "/dashboard/departments/projects", icon: FolderKanban, category: "Departments", aliases: ["department", "project control", "commercial", "qs"] },
+  { label: "Finance Dept", href: "/dashboard/departments/finance", icon: Landmark, category: "Departments", aliases: ["department", "accounts", "accounting", "books"] },
+  { label: "Technical Dept", href: "/dashboard/departments/technical", icon: Scale, category: "Departments", aliases: ["department", "calibration", "inspection", "17025", "17020"] },
+  { label: "Business Dev & Sales Dept", href: "/dashboard/departments/business-dev", icon: Briefcase, category: "Departments", aliases: ["department", "sales", "crm", "pipeline", "bids", "tenders"] },
+  { label: "ICT, Quality & Compliance Dept", href: "/dashboard/departments/ict-quality", icon: ShieldCheck, category: "Departments", aliases: ["department", "ict", "it", "quality", "qms", "compliance", "hse", "service desk"] },
+  { label: "General Operations Dept", href: "/dashboard/departments/general-ops", icon: Package, category: "Departments", aliases: ["department", "operations", "stores", "inventory", "procurement", "fleet"] },
+  { label: "HR & Admin Dept", href: "/dashboard/departments/hr-admin", icon: Users, category: "Departments", aliases: ["department", "hr", "human resources", "payroll", "admin", "users"] },
+
   // ── Inventory ──────────────────────────────────────
   { label: "Products", href: "/dashboard/stocks", icon: Boxes, category: "Inventory" },
   { label: "Categories", href: "/dashboard/categories", icon: List, category: "Inventory" },

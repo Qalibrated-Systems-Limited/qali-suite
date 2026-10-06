@@ -96,9 +96,66 @@ import {
 } from "@/lib/permissions";
 
 // ============================================
+// DEPARTMENTS
+// ============================================
+// The ERP is divided into departments — the same modules, presented and
+// reached by the part of the business that owns them. This is organisation
+// and navigation only: nothing here grants or removes access, which is still
+// decided entirely by role + plan on each entry below (`hidden` / `hasMod`).
+//
+// `DEPARTMENTS` is the display order and the heading each one shows (and links
+// to — /dashboard/departments/<slug>). `DEPARTMENT_OF` maps a top-level nav
+// entry's `id` to the department it sits under; an entry with no mapping (the
+// Dashboard, Approvals, Executive and KPIs singles) is company-wide and stays
+// pinned above the departments. One source of truth: the sidebar headers and
+// each department's landing dashboard both read these.
+export const DEPARTMENTS = [
+  { slug: "projects", label: "Projects", icon: FolderKanban, blurb: "Project control — bills, budgets, certificates and cost." },
+  { slug: "finance", label: "Finance", icon: DollarSign, blurb: "The books — ledger, banking, tax, expenses and the financial reports." },
+  { slug: "technical", label: "Technical", icon: FlaskConical, blurb: "Calibration and inspection to ISO/IEC 17025 and 17020." },
+  { slug: "business-dev", label: "Business Dev & Sales", icon: Briefcase, blurb: "The pipeline — leads, quotes, orders, bids and the shop." },
+  { slug: "ict-quality", label: "ICT, Quality & Compliance", icon: ShieldCheck, blurb: "Quality, compliance, HSE, the service desk and integrations." },
+  { slug: "general-ops", label: "General Operations", icon: Activity, blurb: "Stores, procurement, the fleet and the task spine." },
+  { slug: "hr-admin", label: "HR & Admin", icon: Users, blurb: "People, payroll, users, the company record and settings." },
+];
+
+const DEPARTMENT_OF = {
+  projects: "projects",
+  finance: "finance",
+  tax: "finance",
+  reports: "finance",
+  expenses: "finance",
+  technical: "technical",
+  crm: "business-dev",
+  sales: "business-dev",
+  presales: "business-dev",
+  quality: "ict-quality",
+  "it-service": "ict-quality",
+  inventory: "general-ops",
+  purchases: "general-ops",
+  operations: "general-ops",
+  hr: "hr-admin",
+  people: "hr-admin",
+  company: "hr-admin",
+  licensing: "hr-admin",
+  settings: "hr-admin",
+};
+
+/** Whether a top-level nav entry has anything to show for this user. Mirrors
+ *  NavGroup's own visibility rule so a department with every child hidden shows
+ *  no header. */
+const navEntryVisible = (entry) => {
+  if (!entry || entry.hidden) return false;
+  if (entry.type === "single") return true;
+  return (entry.items || []).some((i) => !i.hidden);
+};
+
+export const departmentOf = (id) => DEPARTMENT_OF[id] ?? null;
+
+// ============================================
 // NAV GROUP CONFIGURATION - ERP FOCUSED
 // ============================================
-const getNavigationGroups = (user) => {
+export const getNavigationGroups = (user) => {
   const plan = user?.companyPlan || "free";
   const allowed = new Set(getAllowedModules(plan));
   const hasMod = (id) => user?.role === "SuperAdmin" || allowed.has(id);
@@ -712,13 +769,11 @@ const getNavigationGroups = (user) => {
     items: [
       { icon: Truck, label: "Fleet", id: "fleet", href: "/dashboard/fleet" },
       { icon: ListChecks, label: "Tasks", id: "tasks", href: "/dashboard/tasks" },
-      { icon: LifeBuoy, label: "Help Desk", id: "helpdesk", href: "/dashboard/helpdesk" },
-      { icon: HardHat, label: "HSE", id: "hse", href: "/dashboard/hse" },
     ],
   },
   {
     type: "group",
-    label: "Quality",
+    label: "Quality & Compliance",
     icon: Award,
     id: "quality",
     defaultOpen: false,
@@ -726,6 +781,26 @@ const getNavigationGroups = (user) => {
       { icon: Target, label: "Quality (QMS)", id: "qms", href: "/dashboard/qms" },
       { icon: ClipboardCheck, label: "Compliance", id: "compliance", href: "/dashboard/compliance" },
       { icon: BookOpen, label: "SOP Library", id: "sops", href: "/dashboard/sops" },
+      { icon: HardHat, label: "HSE", id: "hse", href: "/dashboard/hse" },
+    ],
+  },
+  {
+    // ICT: service desk and the integration plumbing live together — the
+    // department's "keep the lights on" bucket.
+    type: "group",
+    label: "IT & Service Desk",
+    icon: LifeBuoy,
+    id: "it-service",
+    defaultOpen: false,
+    items: [
+      { icon: LifeBuoy, label: "Help Desk", id: "helpdesk", href: "/dashboard/helpdesk" },
+      {
+        icon: Plug,
+        label: "Integrations",
+        id: "integration-item",
+        href: "/dashboard/integrations",
+        hidden: user?.role !== "Admin" || !hasMod("integration"),
+      },
     ],
   },
   {
@@ -859,18 +934,6 @@ const getNavigationGroups = (user) => {
   },
 
   // ============================================
-  // INTEGRATIONS (ungrouped, Enterprise + Admin only)
-  // ============================================
-  {
-    type: "single",
-    icon: Plug,
-    label: "Integrations",
-    id: "integration",
-    href: "/dashboard/integrations",
-    hidden: user?.role !== "Admin" || !hasMod("integration"),
-  },
-
-  // ============================================
   // LICENSING (ungrouped, platform/Admin only)
   // ============================================
   {
@@ -899,6 +962,22 @@ const getNavigationGroups = (user) => {
 // ============================================
 // COMPONENTS
 // ============================================
+
+/**
+ * A department heading in the expanded sidebar — a quiet section label that is
+ * also a link to that department's landing dashboard. Purely organisational:
+ * it groups the entries beneath it, it does not gate them.
+ */
+const DepartmentHeader = ({ dept, onItemClick }) => (
+  <Link
+    href={`/dashboard/departments/${dept.slug}`}
+    onClick={() => onItemClick?.()}
+    className="mt-4 mb-1 flex items-center gap-2 border-t border-border/60 px-3 pt-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/70 transition-colors hover:text-foreground"
+  >
+    <dept.icon className="h-3.5 w-3.5 shrink-0" />
+    <span className="truncate">{dept.label}</span>
+  </Link>
+);
 
 const NavGroup = ({ group, user, onItemClick, collapsed }) => {
   const pathname = usePathname();
@@ -1147,34 +1226,63 @@ export const SidebarContentGrouped = ({ onItemClick, user, collapsed }) => {
             </button>
           )}
 
-          {navigationGroups.map((navItem) => {
-            if (navItem.hidden) return null;
+          {(() => {
+            const renderEntry = (navItem) => {
+              if (navItem.hidden) return null;
+              if (navItem.type === "single") {
+                return (
+                  <NavItem
+                    key={navItem.id}
+                    item={navItem}
+                    onItemClick={onItemClick}
+                    collapsed={collapsed}
+                  />
+                );
+              }
+              if (navItem.type === "group") {
+                return (
+                  <NavGroup
+                    key={navItem.id}
+                    group={navItem}
+                    user={user}
+                    onItemClick={onItemClick}
+                    collapsed={collapsed}
+                  />
+                );
+              }
+              return null;
+            };
 
-            if (navItem.type === "single") {
-              return (
-                <NavItem
-                  key={navItem.id}
-                  item={navItem}
-                  onItemClick={onItemClick}
-                  collapsed={collapsed}
-                />
-              );
-            }
+            // Company-wide entries (Dashboard, Approvals, Executive, KPIs) have
+            // no department and stay pinned at the top.
+            const topEntries = navigationGroups.filter(
+              (g) => !departmentOf(g.id),
+            );
 
-            if (navItem.type === "group") {
-              return (
-                <NavGroup
-                  key={navItem.id}
-                  group={navItem}
-                  user={user}
-                  onItemClick={onItemClick}
-                  collapsed={collapsed}
-                />
-              );
-            }
+            return (
+              <>
+                {topEntries.map(renderEntry)}
 
-            return null;
-          })}
+                {DEPARTMENTS.map((dept) => {
+                  const entries = navigationGroups.filter(
+                    (g) => departmentOf(g.id) === dept.slug,
+                  );
+                  if (!entries.some(navEntryVisible)) return null;
+                  return (
+                    <div key={dept.slug} className="space-y-1">
+                      {collapsed ? (
+                        // No room for a label — a hairline keeps the grouping.
+                        <div className="my-2 border-t border-border/60" />
+                      ) : (
+                        <DepartmentHeader dept={dept} onItemClick={onItemClick} />
+                      )}
+                      {entries.map(renderEntry)}
+                    </div>
+                  );
+                })}
+              </>
+            );
+          })()}
         </nav>
 
         {/* Clock In/Out */}
