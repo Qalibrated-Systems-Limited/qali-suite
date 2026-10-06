@@ -38,6 +38,9 @@ export const SECTIONS = [
   { key: "diary", href: "/dashboard/projects/diary", label: "Site Diary" },
   { key: "timesheets", href: "/dashboard/projects/timesheets", label: "Timesheets" },
   { key: "certificates", href: "/dashboard/projects/ipc", label: "IPC & Payments" },
+  { key: "variations", href: "/dashboard/projects/variations", label: "Variations" },
+  { key: "contract", href: "/dashboard/projects/contract", label: "Contract" },
+  { key: "costs", href: "/dashboard/projects/costs", label: "Cost Lines" },
   { key: "cashRequisitions", href: "/dashboard/projects/cash-requisitions", label: "Cash Requisitions" },
 ];
 
@@ -88,6 +91,11 @@ export function sectionsFor(project) {
      */
     timesheets: true,
     certificates: project.showsCertificates !== false,
+    // Money-in and reporting screens follow the same flags: variations move the
+    // certified contract sum, cost lines are the budget's actuals.
+    variations: project.showsCertificates !== false,
+    contract: project.showsCertificates !== false,
+    costs: project.showsBoq !== false,
     cashRequisitions: project.showsCashRequisitions !== false,
   };
 }

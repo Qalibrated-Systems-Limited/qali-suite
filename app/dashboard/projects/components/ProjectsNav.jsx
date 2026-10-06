@@ -15,6 +15,9 @@ import {
   ClipboardList,
   Coins,
   ArrowLeft,
+  ScrollText,
+  Shuffle,
+  ListChecks,
 } from "lucide-react";
 import {
   SECTIONS,
@@ -79,6 +82,9 @@ const ICONS = {
   diary: BookOpen,
   timesheets: Clock,
   certificates: Receipt,
+  variations: Shuffle,
+  contract: ScrollText,
+  costs: ListChecks,
   cashRequisitions: Wallet,
 };
 
