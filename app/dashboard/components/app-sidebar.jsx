@@ -45,6 +45,13 @@ export function AppSidebar({
   // Current page title for the mobile header — desktop has the sidebar
   // for context, phones lose the h1 the moment they scroll.
   const pageTitle = titleForPath(pathname);
+  /**
+   * The Projects module is the Project Control workspace — it has its own
+   * grouped sidebar, so the global one is hidden there to avoid two sidebars.
+   * The header's menu button is shown on desktop in its place, so the rest of
+   * QaliSuite is one click away through the drawer.
+   */
+  const inProjects = pathname.startsWith("/dashboard/projects");
 
   // Avoid hydration mismatch & restore collapsed state
   React.useEffect(() => {
@@ -76,7 +83,9 @@ export function AppSidebar({
 
   return (
     <div className="flex h-dvh overflow-hidden bg-background text-foreground">
-      <PcNav user={user} collapsed={sidebarCollapsed} onToggle={toggleSidebar} />
+      {!inProjects && (
+        <PcNav user={user} collapsed={sidebarCollapsed} onToggle={toggleSidebar} />
+      )}
       <MobileNav
         mobileMenuOpen={mobileMenuOpen}
         setMobileMenuOpen={setMobileMenuOpen}
@@ -90,11 +99,11 @@ export function AppSidebar({
                   hamburger — the bottom nav's "More" sheet covers full
                   navigation there; tablets (sm–lg) have no bottom nav,
                   so they keep the drawer trigger. */}
-              <div className="flex items-center gap-1.5 lg:hidden shrink-0">
+              <div className={`flex items-center gap-1.5 shrink-0 ${inProjects ? "" : "lg:hidden"}`}>
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="hidden sm:inline-flex text-foreground hover:bg-accent h-8 w-8"
+                  className={`text-foreground hover:bg-accent h-8 w-8 ${inProjects ? "inline-flex" : "hidden sm:inline-flex"}`}
                   onClick={() => setMobileMenuOpen(true)}
                 >
                   <Menu className="w-5 h-5" />
