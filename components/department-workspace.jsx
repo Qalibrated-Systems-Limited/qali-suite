@@ -16,11 +16,8 @@ import {
   FlaskConical,
   Briefcase,
 } from "lucide-react";
-import {
-  getNavigationGroups,
-  DEPARTMENTS,
-  departmentOf,
-} from "./sidebar-content-grouped";
+import { getNavigationGroups } from "./sidebar-content-grouped";
+import { DEPARTMENTS, departmentOf } from "./departments-config";
 import SharedServicesBand from "./shared-services-band";
 
 /**

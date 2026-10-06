@@ -1,6 +1,6 @@
 import { auth } from "@/auth";
 import { redirect, notFound } from "next/navigation";
-import { DEPARTMENTS } from "@/components/sidebar-content-grouped";
+import { DEPARTMENTS } from "@/components/departments-config";
 import DepartmentWorkspace from "@/components/department-workspace";
 import { getDepartmentKpis } from "@/app/db/actions/department-kpi-actions";
 
