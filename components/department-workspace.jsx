@@ -74,7 +74,39 @@ const QUICK_ACTIONS = {
   ],
 };
 
-export default function DepartmentWorkspace({ user, slug }) {
+const TONE_CLASSES = {
+  default: "text-foreground",
+  good: "text-emerald-600 dark:text-emerald-400",
+  warn: "text-amber-600 dark:text-amber-400",
+  danger: "text-red-600 dark:text-red-400",
+};
+
+function KpiTile({ kpi }) {
+  const toneClass = TONE_CLASSES[kpi.tone || "default"];
+  const body = (
+    <>
+      <p className="text-xs font-medium text-muted-foreground">{kpi.label}</p>
+      <p className={`mt-1 text-2xl font-semibold tabular-nums ${toneClass}`}>
+        {kpi.value}
+      </p>
+      {kpi.sub && (
+        <p className="mt-0.5 text-[11px] text-muted-foreground">{kpi.sub}</p>
+      )}
+    </>
+  );
+  return kpi.href ? (
+    <Link
+      href={kpi.href}
+      className="rounded-xl border border-border bg-card p-4 transition-colors hover:border-primary/40 hover:bg-accent/40"
+    >
+      {body}
+    </Link>
+  ) : (
+    <div className="rounded-xl border border-border bg-card p-4">{body}</div>
+  );
+}
+
+export default function DepartmentWorkspace({ user, slug, kpis = [] }) {
   const dept = DEPARTMENTS.find((d) => d.slug === slug);
   if (!dept) return null;
   const DeptIcon = dept.icon;
@@ -160,6 +192,16 @@ export default function DepartmentWorkspace({ user, slug }) {
               </Button>
             );
           })}
+        </div>
+      )}
+
+      {/* Live KPIs — composed from the department's own modules (empty for a
+          department with no live figures, e.g. Technical). */}
+      {kpis.length > 0 && (
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+          {kpis.map((kpi) => (
+            <KpiTile key={kpi.key} kpi={kpi} />
+          ))}
         </div>
       )}
 

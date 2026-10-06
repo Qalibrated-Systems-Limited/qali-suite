@@ -2,6 +2,7 @@ import { auth } from "@/auth";
 import { redirect, notFound } from "next/navigation";
 import { DEPARTMENTS } from "@/components/sidebar-content-grouped";
 import DepartmentWorkspace from "@/components/department-workspace";
+import { getDepartmentKpis } from "@/app/db/actions/department-kpi-actions";
 
 /**
  * A department's landing dashboard. The ERP is divided into departments for
@@ -23,5 +24,9 @@ export default async function DepartmentPage({ params }) {
   const dept = DEPARTMENTS.find((d) => d.slug === slug);
   if (!dept) notFound();
 
-  return <DepartmentWorkspace user={session.user} slug={slug} />;
+  // Live figures, fetched server-side and passed in. getDepartmentKpis never
+  // throws — a department with no live figures just gets an empty row.
+  const kpis = await getDepartmentKpis(slug);
+
+  return <DepartmentWorkspace user={session.user} slug={slug} kpis={kpis} />;
 }
