@@ -41,6 +41,10 @@ import {
   ScrollText,
   Scale,
   CheckSquare,
+  ShieldCheck,
+  ShieldAlert,
+  Archive,
+  Tags,
 } from "lucide-react";
 import { useDebouncedCallback } from "use-debounce";
 import { globalSearch } from "@/app/db/actions/search-actions";
@@ -89,6 +93,11 @@ const PAGES = [
 
   // ── Projects ───────────────────────────────────────
   { label: "Projects", href: "/dashboard/projects", icon: FolderKanban, module: "projects" },
+  { label: "New Project", href: "/dashboard/projects/create", icon: Plus, module: "projects", aliases: ["start a project", "create project", "add project", "project gate"] },
+  { label: "Sealed Budgets", href: "/dashboard/projects/sealed-budgets", icon: ShieldCheck, module: "projects", aliases: ["budgets", "approved budgets", "commercial", "contract value", "margin"] },
+  { label: "Completed Work", href: "/dashboard/projects/archive", icon: Archive, module: "projects", aliases: ["archive", "closed projects", "completed projects", "finished"] },
+  { label: "Findings", href: "/dashboard/projects/findings", icon: ShieldAlert, module: "projects", aliases: ["problems", "exceptions", "no budget", "overspent", "no margin", "issues"] },
+  { label: "Cost Codes", href: "/dashboard/projects/cost-codes", icon: Tags, module: "projects", aliases: ["cost code", "codes", "boq codes"] },
   { label: "Technical", href: "/dashboard/technical", icon: ClipboardList, module: "projects", aliases: ["workflow reports", "report registry", "site report", "service report", "calibration record", "technical report"] },
 
   // ── Admin ──────────────────────────────────────────
