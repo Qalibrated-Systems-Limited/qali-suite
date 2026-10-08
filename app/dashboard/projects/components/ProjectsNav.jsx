@@ -1,5 +1,6 @@
 "use client";
 
+import { Fragment } from "react";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import {
@@ -18,6 +19,9 @@ import {
   ScrollText,
   Shuffle,
   ListChecks,
+  Lock,
+  Check,
+  FolderOpen,
 } from "lucide-react";
 import {
   SECTIONS,
@@ -25,6 +29,7 @@ import {
   sectionsFor,
   projectIdFromPath,
 } from "../lib/sections";
+import { computeLifecycle, PHASES, PHASE_OF_SECTION } from "../lib/phases";
 
 /**
  * Module-level sub-navigation for the Projects module — same pattern as HRNav
@@ -86,6 +91,7 @@ const ICONS = {
   contract: ScrollText,
   costs: ListChecks,
   cashRequisitions: Wallet,
+  documents: FolderOpen,
 };
 
 /**
@@ -179,9 +185,18 @@ export default function ProjectsNav({ projects = [] }) {
     ? `/dashboard/projects/${project.id}`
     : "/dashboard/projects";
 
-  const items = [
+  /**
+   * THE LIFECYCLE GATE. A section's tab is locked until its phase unlocks, and a
+   * phase unlocks only when the one before it is done (lib/phases.js). The flags
+   * it reads ride on the project row from the workspace query, so this is a pure
+   * client computation — no round trip.
+   */
+  const lifecycle = inProject ? computeLifecycle(project) : null;
+
+  const rawItems = [
     {
       label: "Overview",
+      sectionKey: "overview",
       href: projectHome,
       match: projectHome,
       icon: LayoutDashboard,
@@ -191,6 +206,7 @@ export default function ProjectsNav({ projects = [] }) {
       ? [
           {
             label: "Budget",
+            sectionKey: "budget",
             href: `${projectHome}/budget`,
             match: `${projectHome}/budget`,
             icon: Coins,
@@ -200,13 +216,55 @@ export default function ProjectsNav({ projects = [] }) {
     ...(inProject
       ? SECTIONS.filter((s) => sections[s.key]).map((s) => ({
           label: s.label,
+          sectionKey: s.key,
           href: `${s.href}?project=${project.id}`,
           // The active check compares paths, so it must not see the query string.
           match: s.href,
           icon: ICONS[s.key],
         }))
       : []),
-  ];
+  ].map((it) => ({
+    ...it,
+    phase: PHASE_OF_SECTION[it.sectionKey] ?? "setup",
+    locked: lifecycle ? lifecycle.isSectionLocked(it.sectionKey) : false,
+  }));
+
+  const renderTab = (item) => {
+    const path = item.match ?? item.href;
+    const active = item.exact
+      ? pathname === path
+      : pathname === path || pathname.startsWith(path + "/");
+    const Icon = item.icon;
+
+    if (item.locked) {
+      const needs = lifecycle?.labelOfPhase(item.phase);
+      return (
+        <span
+          key={item.match ?? item.href}
+          title={`Locked — finish ${needs ? `the ${needs} step` : "the previous step"} first`}
+          className="flex cursor-not-allowed items-center gap-2 whitespace-nowrap border-b-2 border-transparent px-3 py-3 text-sm text-muted-foreground/40"
+        >
+          <Lock className="h-3.5 w-3.5" />
+          {item.label}
+        </span>
+      );
+    }
+
+    return (
+      <Link
+        key={item.match ?? item.href}
+        href={item.href}
+        className={`flex items-center gap-2 whitespace-nowrap border-b-2 px-3 py-3 text-sm transition-colors ${
+          active
+            ? "border-primary font-medium text-primary"
+            : "border-transparent text-muted-foreground hover:text-foreground"
+        }`}
+      >
+        <Icon className="h-4 w-4" />
+        {item.label}
+      </Link>
+    );
+  };
 
   return (
     <nav className="sticky top-14 z-10 border-b border-border bg-card">
@@ -223,27 +281,43 @@ export default function ProjectsNav({ projects = [] }) {
             <span className="mx-1 h-5 w-px shrink-0 bg-border" aria-hidden />
           </>
         )}
-        {items.map((item) => {
-          const path = item.match ?? item.href;
-          const active = item.exact
-            ? pathname === path
-            : pathname === path || pathname.startsWith(path + "/");
-          const Icon = item.icon;
-          return (
-            <Link
-              key={item.match ?? item.href}
-              href={item.href}
-              className={`flex items-center gap-2 whitespace-nowrap border-b-2 px-3 py-3 text-sm transition-colors ${
-                active
-                  ? "border-primary font-medium text-primary"
-                  : "border-transparent text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              <Icon className="h-4 w-4" />
-              {item.label}
-            </Link>
-          );
-        })}
+
+        {/* No project chosen — just the portfolio Overview tab. */}
+        {!inProject && rawItems.map(renderTab)}
+
+        {/* In a project — tabs grouped by lifecycle phase, each with a small
+            numbered label, and locked until its phase unlocks. */}
+        {inProject &&
+          PHASES.filter((p) => p.key !== "close").map((phase) => {
+            const phaseItems = rawItems.filter((it) => it.phase === phase.key);
+            if (phaseItems.length === 0) return null;
+            const step = lifecycle?.steps.find((s) => s.key === phase.key);
+            return (
+              <Fragment key={phase.key}>
+                <span
+                  className={`ml-1 flex shrink-0 items-center gap-1 whitespace-nowrap pl-2 text-[10px] font-semibold uppercase tracking-wider ${
+                    step?.current
+                      ? "text-primary"
+                      : step?.done
+                        ? "text-emerald-600 dark:text-emerald-400"
+                        : step?.unlocked
+                          ? "text-muted-foreground/70"
+                          : "text-muted-foreground/40"
+                  }`}
+                >
+                  {step?.done ? (
+                    <Check className="h-3 w-3" />
+                  ) : !step?.unlocked ? (
+                    <Lock className="h-3 w-3" />
+                  ) : (
+                    <span>{phase.num}</span>
+                  )}
+                  {phase.label}
+                </span>
+                {phaseItems.map(renderTab)}
+              </Fragment>
+            );
+          })}
       </div>
     </nav>
   );

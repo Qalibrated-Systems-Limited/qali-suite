@@ -309,6 +309,15 @@ export async function listProjectsForWorkspace(tx: Tx) {
       showsDiary: sql<boolean>`COALESCE(${projectTypes.showsDiary}, true)`,
       showsCertificates: sql<boolean>`COALESCE(${projectTypes.showsCertificates}, true)`,
       showsCashRequisitions: sql<boolean>`COALESCE(${projectTypes.showsCashRequisitions}, true)`,
+      // Lifecycle gating flags — cheap EXISTS, so the sub-nav can lock a phase
+      // until the previous one is done without a second round trip. Same checks
+      // getProjectSetupState makes, per project.
+      progressPercent: projects.progressPercent,
+      hasType: sql<boolean>`(${projects.typeId} IS NOT NULL)`,
+      hasClient: sql<boolean>`(${projects.clientPartyId} IS NOT NULL)`,
+      hasBoq: sql<boolean>`EXISTS (SELECT 1 FROM project_boqs q WHERE q.project_id = ${projects.id})`,
+      hasApprovedBudget: sql<boolean>`EXISTS (SELECT 1 FROM project_budgets b WHERE b.project_id = ${projects.id} AND b.status = 'approved')`,
+      hasTasks: sql<boolean>`EXISTS (SELECT 1 FROM project_tasks t WHERE t.project_id = ${projects.id})`,
     })
     .from(projects)
     .leftJoin(projectTypes, eq(projectTypes.id, projects.typeId))
@@ -1715,8 +1724,16 @@ export async function listBudgetableBoqItems(tx: Tx, projectId: string) {
     SELECT i.id, i.item_code, i.description, i.unit,
            i.quantity, i.rate, (i.quantity * i.rate)::numeric(19,4) AS amount,
            (SELECT l.cost_code_id FROM project_cost_code_boq_items l
-             WHERE l.boq_item_id = i.id LIMIT 1) AS cost_code_id
+             WHERE l.boq_item_id = i.id LIMIT 1) AS cost_code_id,
+           -- The bill each item sits under: the root of its ltree path, whose
+           -- label is the root item's id with dashes turned to underscores.
+           root.id        AS bill_id,
+           root.item_code AS bill_code,
+           root.description AS bill_title
       FROM project_boq_items i
+      LEFT JOIN project_boq_items root
+        ON root.boq_id = i.boq_id
+       AND root.id = replace(subpath(i.path, 0, 1)::text, '_', '-')::uuid
      WHERE i.boq_id = ${boq.id}
        AND i.quantity IS NOT NULL AND i.rate IS NOT NULL
      ORDER BY i.sort_order
@@ -1730,6 +1747,9 @@ export async function listBudgetableBoqItems(tx: Tx, projectId: string) {
     rate: r.rate == null ? null : String(r.rate),
     amount: num(r.amount),
     costCodeId: r.cost_code_id == null ? null : String(r.cost_code_id),
+    billId: r.bill_id == null ? null : String(r.bill_id),
+    billCode: r.bill_code == null ? null : String(r.bill_code),
+    billTitle: r.bill_title == null ? null : String(r.bill_title),
   }));
 }
 

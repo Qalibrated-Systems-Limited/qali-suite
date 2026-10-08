@@ -134,6 +134,7 @@ const PAGES = [
   { label: "Parties", href: "/dashboard/parties", icon: Briefcase, category: "Finance", aliases: ["contacts", "people", "customer supplier"] },
   { label: "Chart of Accounts", href: "/dashboard/accounts", icon: BookOpen, category: "Finance", aliases: ["coa"] },
   { label: "Journal Entries", href: "/dashboard/journal", icon: FileSpreadsheet, category: "Finance", aliases: ["je", "manual entry"] },
+  { label: "Commissions", href: "/dashboard/commissions", icon: TrendingUp, category: "Finance", aliases: ["commission", "sales commission", "tiers", "leaderboard", "top earners", "payroll commission"] },
   { label: "Banking", href: "/dashboard/banking", icon: Landmark, category: "Finance", aliases: ["bank feed", "reconcile"] },
   { label: "Bank Statement Upload", href: "/dashboard/banking/upload", icon: Landmark, category: "Finance", aliases: ["import statement"] },
   { label: "Unallocated Transactions", href: "/dashboard/banking/unallocated", icon: Landmark, category: "Finance" },

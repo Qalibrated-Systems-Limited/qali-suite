@@ -37,6 +37,7 @@ import ProjectTeam from "../components/ProjectTeam";
 import ProjectTimesheets from "../components/ProjectTimesheets";
 import ProjectTasks from "../components/ProjectTasks";
 import ProjectSetup from "../components/ProjectSetup";
+import ProjectLifecycle from "../components/ProjectLifecycle";
 import { workspaceProjects } from "../lib/workspace";
 import { sectionsFor } from "../lib/sections";
 import { FormBanner } from "@/components/ui/form-banner";
@@ -1024,6 +1025,12 @@ export default async function ProjectDetailPage({ params, searchParams }) {
         somebody lands. It renders nothing once the steps are done, so it does
         not become furniture on a running project.
       */}
+      {/* The gated lifecycle stepper — the five phases in order, each locked
+          until the one before it is done. Always shown; the detailed "still to
+          set up" checklist below it disappears once setup is complete. */}
+      <Suspense fallback={null}>
+        <ProjectLifecycle projectId={id} project={project} sections={sections} />
+      </Suspense>
       <Suspense fallback={null}>
         <ProjectSetup projectId={id} sections={sections} />
       </Suspense>

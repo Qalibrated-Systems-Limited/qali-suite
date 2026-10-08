@@ -409,22 +409,48 @@ export default function BudgetForm({
                     <Label className="text-xs text-muted-foreground mb-1 block">
                       BOQ items — {line.boqItemIds.length} selected (pick one or more to budget together)
                     </Label>
-                    <div className="max-h-40 overflow-y-auto rounded-md border divide-y">
-                      {boqItems.map((it) => (
-                        <label
-                          key={it.id}
-                          className="flex items-center gap-2 px-2 py-1.5 text-sm cursor-pointer hover:bg-muted/50"
-                        >
-                          <input
-                            type="checkbox"
-                            checked={line.boqItemIds.includes(it.id)}
-                            onChange={() => toggleItem(index, it.id)}
-                          />
-                          <span className="font-mono text-xs text-muted-foreground w-14 shrink-0">{it.itemCode || "—"}</span>
-                          <span className="flex-1 truncate">{it.description}</span>
-                          <span className="text-xs text-muted-foreground tabular-nums">{formatCurrency(it.amount)}</span>
-                        </label>
-                      ))}
+                    <div className="max-h-56 overflow-y-auto rounded-md border divide-y">
+                      {/* Grouped by bill so a budget line can draw items from
+                          one bill or several — the bills budgeted together. */}
+                      {(() => {
+                        const out = [];
+                        let lastBill;
+                        for (const it of boqItems) {
+                          const bid = it.billId ?? "_";
+                          if (bid !== lastBill) {
+                            lastBill = bid;
+                            out.push(
+                              <div
+                                key={`bill-${bid}`}
+                                className="sticky top-0 z-10 bg-muted/90 px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground backdrop-blur"
+                              >
+                                {it.billCode ? `${it.billCode} — ` : ""}
+                                {it.billTitle || "Items"}
+                              </div>,
+                            );
+                          }
+                          out.push(
+                            <label
+                              key={it.id}
+                              className="flex items-center gap-2 px-2 py-1.5 text-sm cursor-pointer hover:bg-muted/50"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={line.boqItemIds.includes(it.id)}
+                                onChange={() => toggleItem(index, it.id)}
+                              />
+                              <span className="font-mono text-xs text-muted-foreground w-14 shrink-0">
+                                {it.itemCode || "—"}
+                              </span>
+                              <span className="flex-1 truncate">{it.description}</span>
+                              <span className="text-xs text-muted-foreground tabular-nums">
+                                {formatCurrency(it.amount)}
+                              </span>
+                            </label>,
+                          );
+                        }
+                        return out;
+                      })()}
                     </div>
                   </div>
                   <Input

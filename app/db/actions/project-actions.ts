@@ -250,6 +250,21 @@ export async function getProjectsForWorkspace() {
       projectNumber: r.projectNumber,
       name: r.name,
       status: r.status,
+      // Section flags (type gating) and lifecycle flags (phase gating) ride
+      // along so the client sub-nav can both show the right sections and lock
+      // a phase until the previous one is done — no extra round trip.
+      showsBoq: r.showsBoq,
+      showsProgramme: r.showsProgramme,
+      showsInstructions: r.showsInstructions,
+      showsDiary: r.showsDiary,
+      showsCertificates: r.showsCertificates,
+      showsCashRequisitions: r.showsCashRequisitions,
+      progressPercent: r.progressPercent,
+      hasType: r.hasType,
+      hasClient: r.hasClient,
+      hasBoq: r.hasBoq,
+      hasApprovedBudget: r.hasApprovedBudget,
+      hasTasks: r.hasTasks,
     }));
   });
 }

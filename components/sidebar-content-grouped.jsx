@@ -581,6 +581,13 @@ export const getNavigationGroups = (user) => {
         href: "/dashboard/settings/fiscal-periods",
         hidden: !canSeeFinanceNav(user?.role),
       },
+      {
+        icon: Award,
+        label: "Commissions",
+        id: "commissions",
+        href: "/dashboard/commissions",
+        hidden: !canSeeFinanceNav(user?.role),
+      },
     ],
   },
 

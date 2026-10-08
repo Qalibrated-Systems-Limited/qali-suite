@@ -42,6 +42,7 @@ export const SECTIONS = [
   { key: "contract", href: "/dashboard/projects/contract", label: "Contract" },
   { key: "costs", href: "/dashboard/projects/costs", label: "Cost Lines" },
   { key: "cashRequisitions", href: "/dashboard/projects/cash-requisitions", label: "Cash Requisitions" },
+  { key: "documents", href: "/dashboard/projects/documents", label: "Documents" },
 ];
 
 /** Everything on — what a project with no type gets, and the safe default. */
@@ -97,6 +98,8 @@ export function sectionsFor(project) {
     contract: project.showsCertificates !== false,
     costs: project.showsBoq !== false,
     cashRequisitions: project.showsCashRequisitions !== false,
+    // Documents are not type-gated: every project carries files.
+    documents: true,
   };
 }
 
