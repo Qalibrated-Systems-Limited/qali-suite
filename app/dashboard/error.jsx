@@ -4,14 +4,19 @@ import { useEffect } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { AlertTriangle, RefreshCw, Home, ArrowLeft } from "lucide-react";
+import { AlertTriangle, RefreshCw, Home, ArrowLeft, Lock } from "lucide-react";
 import Link from "next/link";
+import { isAccessDenied } from "@/lib/access-denied";
 
 export default function Error({ error, reset }) {
   useEffect(() => {
     // Log the error to an error reporting service
+    // A refusal is the gate working, not a fault to report.
+    if (isAccessDenied(error)) return;
     console.error("Application Error:", error);
   }, [error]);
+
+  if (isAccessDenied(error)) return <AccessDenied />;
 
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-4">
@@ -92,6 +97,57 @@ export default function Error({ error, reset }) {
               If this problem persists, please contact your system administrator
               or use the feedback button to report the issue.
             </p>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+/**
+ * The page's role check refused this user. Not a crash: no "Try Again", which
+ * would refuse again, and no claim that anyone has been notified.
+ */
+function AccessDenied() {
+  return (
+    <div className="min-h-[70vh] bg-background flex items-center justify-center p-4">
+      <Card className="max-w-lg w-full bg-card border-border">
+        <CardContent className="pt-6">
+          <div className="flex justify-center mb-5">
+            <div className="w-16 h-16 bg-amber-500/10 rounded-full flex items-center justify-center">
+              <Lock className="w-8 h-8 text-amber-600 dark:text-amber-400" />
+            </div>
+          </div>
+
+          <div className="text-center space-y-3 mb-6">
+            <h2 className="text-xl font-bold text-foreground">
+              You do not have access to this module or feature
+            </h2>
+            <p className="text-sm text-muted-foreground">
+              Your role does not include permission to open this page. Nothing
+              is broken and no data was changed.
+            </p>
+            <p className="text-sm text-muted-foreground">
+              If you need it for your work, ask your system administrator to
+              grant your role access.
+            </p>
+          </div>
+
+          <div className="flex flex-col sm:flex-row gap-3 justify-center">
+            <Button asChild className="w-full sm:w-auto">
+              <Link href="/dashboard">
+                <Home className="mr-2 h-4 w-4" />
+                Go to Dashboard
+              </Link>
+            </Button>
+            <Button
+              variant="outline"
+              className="w-full sm:w-auto border-border text-foreground hover:bg-accent"
+              onClick={() => window.history.back()}
+            >
+              <ArrowLeft className="mr-2 h-4 w-4" />
+              Go Back
+            </Button>
           </div>
         </CardContent>
       </Card>

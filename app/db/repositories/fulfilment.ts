@@ -671,6 +671,17 @@ export async function getOutstandingCheckouts(
  * Joined through the items, because a request names several products and only
  * the line for this one is relevant to its page.
  */
+/**
+ * Pending requests for ONE product — the panel on the product page.
+ *
+ * THE REQUESTER COLUMN IS `requester_name_at_request`, and this asked for
+ * `requested_by_name`, which stock_requests has never had. A missing column is
+ * a PARSE error, so it threw whether or not the product had any pending
+ * request: every product detail page 500'd with
+ * `column r.requested_by_name does not exist`, for every product, since this
+ * panel was written. Everywhere else in this file already reads the right name
+ * (lines 955, 971, 1016), which is what made it look like a working query.
+ */
 export async function listPendingRequestsForProduct(
   tx: Tx,
   productId: string,
@@ -678,7 +689,7 @@ export async function listPendingRequestsForProduct(
 ) {
   return tx.execute(sql`
     SELECT r.id, r.request_number, r.status, r.priority,
-           r.required_by_date, r.requested_by_name,
+           r.required_by_date, r.requester_name_at_request,
            i.quantity_requested, i.quantity_fulfilled
       FROM stock_request_items i
       JOIN stock_requests r ON r.id = i.request_id

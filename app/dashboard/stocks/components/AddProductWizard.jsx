@@ -44,6 +44,7 @@ import {
 } from "./ProductFormField";
 
 import { addProductPg } from "@/app/db/actions/product-actions";
+import { canSetProductCost, canEditPricing as canSetSellingPrice } from "@/lib/permissions";
 
 // ============================================
 // STEP DEFINITIONS
@@ -225,7 +226,7 @@ function BasicInfoStep({ formData, setFormData, errors, categories }) {
   );
 }
 
-function PricingStep({ formData, setFormData, errors }) {
+function PricingStep({ formData, setFormData, errors, mayCost, mayPrice }) {
   const handleChange = (field, value) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
   };
@@ -239,20 +240,33 @@ function PricingStep({ formData, setFormData, errors }) {
   return (
     <div className="space-y-6">
       <div className="grid gap-6 sm:grid-cols-2">
-        <CostPriceField
-          value={formData.costPrice}
-          onChange={(v) => handleChange("costPrice", v)}
-          error={errors?.costPrice?.[0]}
-        />
-        <SellingPriceField
-          value={formData.sellingPrice}
-          onChange={(v) => handleChange("sellingPrice", v)}
-          error={errors?.sellingPrice?.[0]}
-        />
+        {mayCost && (
+          <CostPriceField
+            value={formData.costPrice}
+            onChange={(v) => handleChange("costPrice", v)}
+            error={errors?.costPrice?.[0]}
+          />
+        )}
+        {mayPrice && (
+          <SellingPriceField
+            value={formData.sellingPrice}
+            onChange={(v) => handleChange("sellingPrice", v)}
+            error={errors?.sellingPrice?.[0]}
+          />
+        )}
       </div>
 
+      {/* Segregation of duties: cost and price are set by different roles. */}
+      {mayCost !== mayPrice && (
+        <p className="text-xs text-muted-foreground">
+          {mayCost
+            ? "The selling price is set by Sales or Finance and stays at zero until they price it."
+            : "The cost price is set by Finance or Procurement and stays at zero until they cost it."}
+        </p>
+      )}
+
       {/* Auto-calculated margins */}
-      {cost > 0 && selling > 0 && (
+      {mayCost && mayPrice && cost > 0 && selling > 0 && (
         <div className="grid gap-6 sm:grid-cols-2">
           <MarkupField
             value={markup.toFixed(2)}
@@ -333,7 +347,7 @@ function InventoryStep({ formData, setFormData, errors }) {
   );
 }
 
-function ReviewStep({ formData, canEditPricing }) {
+function ReviewStep({ formData, canEditPricing, mayCost, mayPrice }) {
   const cost = parseFloat(formData.costPrice) || 0;
   const selling = parseFloat(formData.sellingPrice) || 0;
 
@@ -381,12 +395,15 @@ function ReviewStep({ formData, canEditPricing }) {
             </CardTitle>
           </CardHeader>
           <CardContent className="grid gap-2 text-sm">
+            {mayCost && (
             <div className="flex justify-between">
               <span className="text-muted-foreground">Cost Price</span>
               <span className="font-medium">
                 KES {cost.toLocaleString("en-KE", { minimumFractionDigits: 2 })}
               </span>
             </div>
+            )}
+            {mayPrice && (
             <div className="flex justify-between">
               <span className="text-muted-foreground">Selling Price</span>
               <span className="font-medium">
@@ -394,7 +411,8 @@ function ReviewStep({ formData, canEditPricing }) {
                 {selling.toLocaleString("en-KE", { minimumFractionDigits: 2 })}
               </span>
             </div>
-            {cost > 0 && selling > 0 && (
+            )}
+            {mayCost && mayPrice && cost > 0 && selling > 0 && (
               <>
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Markup</span>
@@ -469,8 +487,13 @@ export default function AddProductWizard({
   userRole = "employee",
   categories = [],
 }) {
-  // Check if user can edit pricing
-  const canEditPricing = ["admin", "manager"].includes(userRole.toLowerCase());
+  // The same rules the server applies (lib/permissions.js). This used to be
+  // ["admin", "manager"]: it hid the step from SuperAdmin, CFO, Finance
+  // Manager, Sales Manager and Procurement Officer, and showed it to Manager —
+  // whose prices addProductPg then silently saved as zero.
+  const mayCost = canSetProductCost(userRole);
+  const mayPrice = canSetSellingPrice(userRole);
+  const canEditPricing = mayCost || mayPrice;
 
   // Filter steps based on role
   const visibleSteps = STEPS.filter(
@@ -539,13 +562,11 @@ export default function AddProductWizard({
         break;
 
       case "pricing":
-        if (canEditPricing) {
-          if (!formData.costPrice || parseFloat(formData.costPrice) < 0) {
-            newErrors.costPrice = ["Valid cost price is required"];
-          }
-          if (!formData.sellingPrice || parseFloat(formData.sellingPrice) < 0) {
-            newErrors.sellingPrice = ["Valid selling price is required"];
-          }
+        if (mayCost && (!formData.costPrice || parseFloat(formData.costPrice) < 0)) {
+          newErrors.costPrice = ["Valid cost price is required"];
+        }
+        if (mayPrice && (!formData.sellingPrice || parseFloat(formData.sellingPrice) < 0)) {
+          newErrors.sellingPrice = ["Valid selling price is required"];
         }
         break;
 
@@ -617,6 +638,8 @@ export default function AddProductWizard({
             formData={formData}
             setFormData={setFormData}
             errors={errors}
+            mayCost={mayCost}
+            mayPrice={mayPrice}
           />
         );
       case "inventory":
@@ -629,7 +652,12 @@ export default function AddProductWizard({
         );
       case "review":
         return (
-          <ReviewStep formData={formData} canEditPricing={canEditPricing} />
+          <ReviewStep
+            formData={formData}
+            canEditPricing={canEditPricing}
+            mayCost={mayCost}
+            mayPrice={mayPrice}
+          />
         );
       default:
         return null;

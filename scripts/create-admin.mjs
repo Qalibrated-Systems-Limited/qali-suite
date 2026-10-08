@@ -24,6 +24,7 @@
 import postgres from "postgres";
 import { randomUUID, randomBytes } from "node:crypto";
 import bcrypt from "bcryptjs";
+import { completeTenant } from "./lib/complete-tenant.mjs";
 
 // ── Arguments ───────────────────────────────────────────────────────────────
 const argv = process.argv.slice(2);
@@ -142,6 +143,21 @@ try {
               'primary', 'create-admin script')
       ON CONFLICT DO NOTHING
     `;
+
+    /*
+     * THE COMPANY WAS A SHELL. This script inserted the `companies` row and
+     * stopped: no settings, no chart of accounts, no fiscal periods. It is
+     * DEPLOYMENT.md's Step 5, so every production database got its first
+     * company this way — and the first page to read settings threw "This
+     * company has no settings. It was created outside provisioning", which is
+     * what /dashboard/settings/approvals did on erp.qalisuite.com.
+     *
+     * completeTenant is provisioning's remaining steps, idempotent. A company
+     * made by the old version of this script is repaired with
+     * `scripts/repair-tenant.mjs --apply`.
+     */
+    const done = await sql.begin((tx) => completeTenant(tx, companyId));
+    for (const line of done) console.log(`  ${line}`);
   }
 
   console.log("\n────────────────────────────────────────────────");

@@ -3,7 +3,7 @@
 // /components/categories/CategoryForm.jsx
 // Client component for form state management with useActionState
 
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 import { Loader2, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,13 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { CategoryCombobox } from "@/app/dashboard/stocks/components/CategoryCombobox";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
 
@@ -39,9 +33,21 @@ export default function CategoryForm({ category, parentOptions = [] }) {
     null
   );
 
-  // Read errors directly from state (no useEffect needed)
-  const errors = state?.error || {};
-  const formError = errors._form?.[0];
+  // The actions return `error` as a single string. This used to read it as a
+  // field map (`errors._form[0]`, `errors.name[0]`), which a string never
+  // matches — so every failure left the button spinning back to idle with
+  // nothing on screen.
+  const formError = state?.success === false ? state.error : null;
+  const errors = {};
+
+  // Empty means a root category; the action reads "" as no parent.
+  const [parent, setParent] = useState(category?.parent?.toString() || "");
+
+  // Labelled by full path — "Electronics > Scales" — so a search matches any
+  // ancestor, and two "Accessories" under different parents are told apart.
+  const parentChoices = parentOptions
+    .filter((cat) => cat._id !== category?._id)
+    .map((cat) => ({ ...cat, name: cat.path || cat.name, level: 0 }));
 
   return (
     <form action={formAction} className="space-y-6">
@@ -89,21 +95,22 @@ export default function CategoryForm({ category, parentOptions = [] }) {
       {/* Parent Category */}
       <div className="space-y-2">
         <Label htmlFor="parent">Parent Category</Label>
-        <Select name="parent" defaultValue={category?.parent?.toString() || ""}>
-          <SelectTrigger className={cn(errors.parent && "border-red-500")}>
-            <SelectValue placeholder="None (root category)" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="None">None (root category)</SelectItem>
-            {parentOptions
-              .filter((cat) => cat._id !== category?._id)
-              .map((cat) => (
-                <SelectItem key={cat._id} value={cat._id}>
-                  {"─".repeat(cat.level || 0)} {cat.name}
-                </SelectItem>
-              ))}
-          </SelectContent>
-        </Select>
+        <CategoryCombobox
+          name="parent"
+          value={parent}
+          onChange={setParent}
+          categories={parentChoices}
+          placeholder="None (root category)"
+        />
+        {parent && (
+          <button
+            type="button"
+            onClick={() => setParent("")}
+            className="text-xs text-muted-foreground hover:underline"
+          >
+            Make it a root category
+          </button>
+        )}
         {errors.parent && (
           <p className="text-xs text-red-500">{errors.parent[0]}</p>
         )}

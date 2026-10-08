@@ -50,7 +50,9 @@ export default async function NewCategoryPage() {
   }
 
   // Fetch categories for parent dropdown
-  const { categories = [] } = await getCategories(true);
+  // getCategoriesPg returns the array itself. Destructuring `{ categories }`
+  // off an array is always undefined, so the parent list was always empty.
+  const categories = await getCategories(true);
 
   return (
     <div className="container py-6 max-w-2xl">

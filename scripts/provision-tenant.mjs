@@ -24,10 +24,7 @@
 
 import postgres from "postgres";
 import { randomUUID } from "node:crypto";
-import { getStandardChartOfAccounts } from "../lib/chart-of-accounts.js";
-
-const MONTHS = ["January","February","March","April","May","June",
-  "July","August","September","October","November","December"];
+import { completeTenant } from "./lib/complete-tenant.mjs";
 
 const name = process.argv[2];
 if (!name) {
@@ -60,59 +57,11 @@ try {
     await tx`INSERT INTO _migration_id_map (collection, old_object_id, new_uuid)
              VALUES ('companies', ${sourceId}, ${companyId})`;
 
-    // Chart of accounts, two passes: the table is self-referential, so a child
-    // can be defined before its parent.
-    const defs = getStandardChartOfAccounts();
-    const idByCode = new Map();
-    for (const a of defs) {
-      const id = randomUUID();
-      idByCode.set(a.accountCode, id);
-      await tx`
-        INSERT INTO accounts (id, company_id, account_code, account_name,
-                              account_type, sub_type, system_account, can_post)
-        VALUES (${id}, ${companyId}, ${a.accountCode}, ${a.accountName},
-                ${a.accountType}, ${a.subType ?? null},
-                ${a.systemAccount ?? null}, true)`;
-    }
-    for (const a of defs) {
-      if (!a.parentCode) continue;
-      const parentId = idByCode.get(a.parentCode);
-      if (!parentId) continue;
-      await tx`UPDATE accounts SET parent_id = ${parentId}
-                WHERE id = ${idByCode.get(a.accountCode)}`;
-      // A parent with a child is structural — posting to "Current Assets"
-      // rather than an account under it is how a chart stops meaning anything.
-      await tx`UPDATE accounts SET can_post = false WHERE id = ${parentId}`;
-    }
-
-    // Twelve monthly periods from today's year start; the first is open.
-    const start = new Date();
-    const year = start.getFullYear();
-    for (let i = 0; i < 12; i++) {
-      const ps = new Date(year, i, 1);
-      const pe = new Date(year, i + 1, 0);
-      const iso = (d) =>
-        `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-      await tx`
-        INSERT INTO fiscal_periods (company_id, period_code, period_name, year,
-                                    month, start_date, end_date, status)
-        VALUES (${companyId}, ${`${year}-${String(i + 1).padStart(2, "0")}`},
-                ${`${MONTHS[i]} ${year}`}, ${year}, ${i + 1},
-                ${iso(ps)}, ${iso(pe)}, ${i === 0 ? "open" : "future"})
-        ON CONFLICT DO NOTHING`;
-    }
-
-    // Every SuperAdmin holds every company — a dated, revocable row rather
-    // than a role check, which is what answers "who could open this in March".
-    const admins = await tx`SELECT id, name FROM users WHERE role = 'SuperAdmin'`;
-    for (const u of admins) {
-      await tx`
-        INSERT INTO user_company_access (user_id, company_id, granted_via,
-                                         granted_by_id, granted_by_name)
-        VALUES (${u.id}, ${companyId}, 'superadmin', ${u.id}, ${u.name})
-        ON CONFLICT DO NOTHING`;
-    }
-    console.log(`Granted ${admins.length} SuperAdmin(s) access.`);
+    // The rest is provisioning's, shared with create-admin and repair-tenant.
+    // This used to be an inline copy that had drifted: no settings row, and no
+    // ltree `path` / `level` on the chart.
+    const done = await completeTenant(tx, companyId);
+    for (const line of done) console.log(`  ${line}`);
   });
 
   const [{ n: accounts }] = await sql`SELECT COUNT(*)::int n FROM accounts WHERE company_id = ${companyId}`;

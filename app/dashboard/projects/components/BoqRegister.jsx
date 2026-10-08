@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -85,6 +85,14 @@ function qty(n) {
   );
 }
 
+/** Today as the site sees it. `toISOString()` is UTC, and Nairobi is UTC+3,
+ *  so between midnight and 03:00 local time it defaults to yesterday. */
+function localToday() {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
 export default function BoqRegister({
   projectId,
   boq,
@@ -101,9 +109,32 @@ export default function BoqRegister({
   const [measuringId, setMeasuringId] = useState(null);
   const [measurement, setMeasurement] = useState({
     quantity: "",
-    measuredOn: new Date().toISOString().slice(0, 10),
+    measuredOn: localToday(),
     reference: "",
   });
+
+  /*
+   * THE MEASURE BUTTON LOOKED DEAD, AND IT WAS WORKING.
+   *
+   * Pressing it set `measuringId`, and the form it opened rendered BELOW THE
+   * WHOLE BILL — after the table card. On a real bill of forty items that is
+   * a screen or two further down, and on a phone the table is 720px wide
+   * inside a sideways scroll, so the button is at the far right and the form
+   * is somewhere nobody is looking. Nothing on the row changed either. The
+   * click did its job; the person saw no result, pressed again, and closed it.
+   *
+   * So opening the form now scrolls it into view and puts the cursor in the
+   * quantity box, the row being measured is highlighted, and its button reads
+   * Close while it is open.
+   */
+  const measureFormRef = useRef(null);
+  const measureQtyRef = useRef(null);
+  useEffect(() => {
+    if (!measuringId) return;
+    measureFormRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    const t = setTimeout(() => measureQtyRef.current?.focus({ preventScroll: true }), 250);
+    return () => clearTimeout(t);
+  }, [measuringId]);
 
   const isDraft = boq?.status === "draft";
   const isAwarded = boq?.status === "awarded";
@@ -178,7 +209,7 @@ export default function BoqRegister({
         setMeasuringId(null);
         setMeasurement({
           quantity: "",
-          measuredOn: new Date().toISOString().slice(0, 10),
+          measuredOn: localToday(),
           reference: "",
         });
       } else {
@@ -448,6 +479,29 @@ export default function BoqRegister({
                             {it.taskTitle}
                           </Badge>
                         )}
+                    <tr
+                      key={it.id}
+                      className={`border-b last:border-0 ${isSection ? "bg-muted/20 font-medium" : ""} ${
+                        measuringId === it.id ? "bg-yellow-500/10" : ""
+                      }`}
+                    >
+                      <td className="px-3 py-2">
+                        <div style={{ paddingLeft: `${Math.min(it.depth, 5) * 16}px` }}>
+                          <span className="font-mono text-xs text-muted-foreground mr-2">
+                            {it.itemCode || ""}
+                          </span>
+                          {it.description}
+                          {it.costCode && (
+                            <span className="ml-2 text-[10px] text-muted-foreground">
+                              {it.costCode}
+                            </span>
+                          )}
+                          {it.taskTitle && (
+                            <Badge variant="outline" className="ml-2 text-[10px] font-normal">
+                              {it.taskTitle}
+                            </Badge>
+                          )}
+                        </div>
                       </td>
                       <td className="px-2 py-2 text-muted-foreground">{it.unit || ""}</td>
                       <td className="px-2 py-2 text-right tabular-nums">
@@ -476,11 +530,11 @@ export default function BoqRegister({
                         {isAwarded && canManage && it.quantity != null && (
                           <Button
                             size="sm"
-                            variant="ghost"
+                            variant={measuringId === it.id ? "secondary" : "outline"}
                             className="h-7 text-xs"
                             onClick={() => setMeasuringId(measuringId === it.id ? null : it.id)}
                           >
-                            Measure
+                            {measuringId === it.id ? "Close" : "Measure"}
                           </Button>
                         )}
                         {isDraft && canManage && (
@@ -514,17 +568,37 @@ export default function BoqRegister({
 
       {/* ── Recording a remeasure ──────────────────────────────────────────── */}
       {measuringId && (
-        <Card className="p-4 sm:p-5 space-y-3 bg-muted/30">
-          <h4 className="text-sm font-medium">
-            Measure — {items.find((i) => i.id === measuringId)?.description}
-          </h4>
+        <Card
+          ref={measureFormRef}
+          className="p-4 sm:p-5 space-y-3 border-yellow-500/50 bg-muted/30 scroll-mt-24"
+        >
+          {(() => {
+            const it = items.find((i) => i.id === measuringId);
+            if (!it) return null;
+            return (
+              <div className="space-y-0.5">
+                <h4 className="text-sm font-medium">
+                  Measure — {it.itemCode ? `${it.itemCode} ` : ""}
+                  {it.description}
+                </h4>
+                {/* What the person measuring needs in front of them: the
+                    billed quantity and what is already measured. */}
+                <p className="text-xs text-muted-foreground tabular-nums">
+                  Billed {qty(it.quantity)} {it.unit || ""} · measured so far{" "}
+                  {qty(it.measuredQuantity)} {it.unit || ""}
+                </p>
+              </div>
+            );
+          })()}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div className="space-y-1">
               <label className="text-xs font-medium text-muted-foreground">
                 Quantity this measure *
               </label>
               <Input
+                ref={measureQtyRef}
                 type="number"
+                inputMode="decimal"
                 step="0.0001"
                 className="h-9"
                 value={measurement.quantity}
