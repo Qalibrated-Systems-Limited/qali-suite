@@ -37,6 +37,7 @@ import ProjectTeam from "../components/ProjectTeam";
 import ProjectTimesheets from "../components/ProjectTimesheets";
 import ProjectTasks from "../components/ProjectTasks";
 import ProjectSetup from "../components/ProjectSetup";
+import ProjectLifecycle from "../components/ProjectLifecycle";
 import { workspaceProjects } from "../lib/workspace";
 import { sectionsFor } from "../lib/sections";
 import { FormBanner } from "@/components/ui/form-banner";
@@ -302,9 +303,9 @@ async function BudgetVsActualCard({ projectId }) {
           <BarChart3 className="h-5 w-5 text-purple-500" />
         </div>
         <div>
-          <h2 className="font-semibold text-lg">Budget vs Actual</h2>
+          <h2 className="font-semibold text-lg">Budget Control</h2>
           <p className="text-xs text-muted-foreground">
-            Budget v{data.version} — per expense account
+            Budget v{data.version} — by cost code · committed, spent and what&apos;s left
           </p>
         </div>
       </div>
@@ -316,10 +317,19 @@ async function BudgetVsActualCard({ projectId }) {
             <div className="flex items-center justify-between gap-2">
               <div className="min-w-0">
                 <p className="text-sm font-medium truncate">
-                  {line.accountName}
+                  {line.costCode ? (
+                    <>
+                      <span className="font-mono text-xs text-muted-foreground mr-1.5">
+                        {line.costCode}
+                      </span>
+                      {line.costCodeName || line.description || line.accountName}
+                    </>
+                  ) : (
+                    line.accountName
+                  )}
                 </p>
                 <p className="text-xs text-muted-foreground font-mono">
-                  {line.accountCode}
+                  {line.accountCode} {line.accountName}
                 </p>
               </div>
               <span
@@ -360,7 +370,7 @@ async function BudgetVsActualCard({ projectId }) {
                 <span>{formatCurrency(line.committed)}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-muted-foreground">Available</span>
+                <span className="text-muted-foreground">Left</span>
                 <span className={line.available < 0 ? "text-red-600 font-medium" : ""}>
                   {formatCurrency(line.available)}
                 </span>
@@ -385,7 +395,7 @@ async function BudgetVsActualCard({ projectId }) {
               <span className="font-medium">{formatCurrency(data.lines.reduce((s, l) => s + l.committed, 0))}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-muted-foreground">Available</span>
+              <span className="text-muted-foreground">Left</span>
               <span className="font-medium">{formatCurrency(data.lines.reduce((s, l) => s + l.available, 0))}</span>
             </div>
           </div>
@@ -397,11 +407,11 @@ async function BudgetVsActualCard({ projectId }) {
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b text-left">
-              <th className="pb-2 font-medium text-muted-foreground">Account</th>
+              <th className="pb-2 font-medium text-muted-foreground">Budget line</th>
               <th className="pb-2 font-medium text-muted-foreground text-right">Budget</th>
-              <th className="pb-2 font-medium text-muted-foreground text-right">Actual</th>
               <th className="pb-2 font-medium text-muted-foreground text-right">Committed</th>
-              <th className="pb-2 font-medium text-muted-foreground text-right">Available</th>
+              <th className="pb-2 font-medium text-muted-foreground text-right">Spent</th>
+              <th className="pb-2 font-medium text-muted-foreground text-right">Left</th>
               <th className="pb-2 font-medium text-muted-foreground text-right">Used</th>
             </tr>
           </thead>
@@ -409,22 +419,38 @@ async function BudgetVsActualCard({ projectId }) {
             {data.lines.map((line) => (
               <tr key={line.accountId} className="border-b last:border-0">
                 <td className="py-2">
-                  <span className="font-mono text-xs text-muted-foreground mr-2">
-                    {line.accountCode}
-                  </span>
-                  {line.accountName}
-                  {line.description && (
-                    <p className="text-xs text-muted-foreground">
-                      {line.description}
-                    </p>
+                  {line.costCode ? (
+                    <>
+                      <span className="font-mono text-xs text-muted-foreground mr-2">
+                        {line.costCode}
+                      </span>
+                      {line.costCodeName || line.description || line.accountName}
+                      <p className="text-xs text-muted-foreground">
+                        {line.accountCode} {line.accountName}
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <span className="font-mono text-xs text-muted-foreground mr-2">
+                        {line.accountCode}
+                      </span>
+                      {line.accountName}
+                      {line.description && (
+                        <p className="text-xs text-muted-foreground">
+                          {line.description}
+                        </p>
+                      )}
+                    </>
                   )}
                 </td>
                 <td className="py-2 text-right">
                   {formatCurrency(line.budgeted)}
                 </td>
-                <td className="py-2 text-right">{formatCurrency(line.actual)}</td>
                 <td className="py-2 text-right">
-                  {formatCurrency(line.committed)}
+                  {line.committed ? formatCurrency(line.committed) : "—"}
+                </td>
+                <td className="py-2 text-right">
+                  {line.actual ? formatCurrency(line.actual) : "—"}
                 </td>
                 <td
                   className={`py-2 text-right ${line.available < 0 ? "text-red-600 font-medium" : ""}`}
@@ -432,17 +458,31 @@ async function BudgetVsActualCard({ projectId }) {
                   {formatCurrency(line.available)}
                 </td>
                 <td className="py-2 text-right">
-                  <span
-                    className={`${
-                      line.percentUsed >= 90
-                        ? "text-red-600 font-medium"
-                        : line.percentUsed >= 70
-                          ? "text-amber-600"
-                          : ""
-                    }`}
-                  >
-                    {line.percentUsed}%
-                  </span>
+                  <div className="flex items-center justify-end gap-2">
+                    <span
+                      className={`w-8 text-right ${
+                        line.percentUsed >= 90
+                          ? "text-red-600 font-medium"
+                          : line.percentUsed >= 70
+                            ? "text-amber-600"
+                            : ""
+                      }`}
+                    >
+                      {line.percentUsed}%
+                    </span>
+                    <span className="hidden h-1.5 w-14 overflow-hidden rounded-full bg-muted md:inline-block">
+                      <span
+                        className={`block h-full rounded-full ${
+                          line.percentUsed >= 90
+                            ? "bg-red-500"
+                            : line.percentUsed >= 70
+                              ? "bg-amber-500"
+                              : "bg-emerald-500"
+                        }`}
+                        style={{ width: `${Math.min(line.percentUsed, 100)}%` }}
+                      />
+                    </span>
+                  </div>
                 </td>
               </tr>
             ))}
@@ -455,12 +495,12 @@ async function BudgetVsActualCard({ projectId }) {
               </td>
               <td className="pt-2 text-right">
                 {formatCurrency(
-                  data.lines.reduce((s, l) => s + l.actual, 0),
+                  data.lines.reduce((s, l) => s + l.committed, 0),
                 )}
               </td>
               <td className="pt-2 text-right">
                 {formatCurrency(
-                  data.lines.reduce((s, l) => s + l.committed, 0),
+                  data.lines.reduce((s, l) => s + l.actual, 0),
                 )}
               </td>
               <td className="pt-2 text-right">
@@ -482,6 +522,14 @@ async function BudgetVsActualCard({ projectId }) {
           </tfoot>
         </table>
       </div>
+
+      <p className="mt-3 text-xs text-muted-foreground">
+        <span className="font-medium">Committed</span> is what approved
+        requisitions and bills have tied up but not yet paid;{" "}
+        <span className="font-medium">Spent</span> is what has actually been
+        paid. <span className="font-medium">Left</span> is the budget minus both,
+        so a line can&apos;t look free when the money is already promised.
+      </p>
     </Card>
   );
 }
@@ -977,6 +1025,12 @@ export default async function ProjectDetailPage({ params, searchParams }) {
         somebody lands. It renders nothing once the steps are done, so it does
         not become furniture on a running project.
       */}
+      {/* The gated lifecycle stepper — the five phases in order, each locked
+          until the one before it is done. Always shown; the detailed "still to
+          set up" checklist below it disappears once setup is complete. */}
+      <Suspense fallback={null}>
+        <ProjectLifecycle projectId={id} project={project} sections={sections} />
+      </Suspense>
       <Suspense fallback={null}>
         <ProjectSetup projectId={id} sections={sections} />
       </Suspense>

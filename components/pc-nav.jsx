@@ -6,7 +6,7 @@ export function PcNav({ user, collapsed, onToggle }) {
   return (
     <aside
       className={cn(
-        "hidden lg:flex bg-card border-r border-border flex-col h-full shrink-0 transition-all duration-300",
+        "relative hidden lg:flex bg-card border-r border-border flex-col h-full shrink-0 transition-all duration-300",
         collapsed ? "w-17" : "w-64"
       )}
     >

@@ -12,6 +12,7 @@ import {
   createProjectBudget,
   updateProjectBudget,
   approveProjectBudget,
+  setProjectDefaultCostAccount,
 } from "@/app/db/actions/project-actions";
 import { toast } from "sonner";
 import CostCodeCombobox from "./CostCodeCombobox";
@@ -37,21 +38,54 @@ function formatCurrency(amount) {
  * one of them finance owns the mapping to the ledger. Here the mapping lives
  * on the cost code, and the database derives the account from it.
  */
-const blankLine = () => ({
+const blankLine = (mode = "boq", defaultAccountId = "") => ({
   _id: Date.now() + Math.floor(Math.random() * 1000),
+  mode, // "boq" — build from BOQ items; "manual" — pick/create a cost code
   costCodeId: "",
+  boqItemIds: [],
+  // A new BOQ line starts on the project's default account, so most lines need
+  // no account chosen at all — 0119.
+  accountId: mode === "boq" ? defaultAccountId || "" : "",
   description: "",
+  category: "Materials",
   amount: "",
 });
+
+/** The cost categories a budget line is grouped under — 0122 (template). */
+const BUDGET_CATEGORIES = [
+  "Materials",
+  "Labour",
+  "Plant hire",
+  "Plant purchase",
+  "Transport",
+  "Subcontract",
+  "Bonds and insurance",
+  "Bank and finance",
+  "Statutory and permits",
+  "Preliminaries",
+  "Overhead",
+];
 
 export default function BudgetForm({
   projectId,
   costCodes = [],
+  boqItems = [],
   budget,
   onCancel,
   canManageCostCodes = false,
   expenseAccounts = [],
+  defaultAccountId = "",
+  contractValue = 0,
+  vatRate = 16,
 }) {
+  const hasBoq = boqItems.length > 0;
+  /**
+   * The account new BOQ lines start on — 0119. Set once, remembered on the
+   * project, so a manager who charges everything to the same account never
+   * picks it again. Editing an existing budget version does not touch it.
+   */
+  const [defaultAccount, setDefaultAccount] = useState(defaultAccountId || "");
+  const [savingDefault, startSavingDefault] = useTransition();
   /**
    * A code added from inside the picker has to reach every OTHER line's picker
    * too, so the list is state here rather than the prop. revalidatePath
@@ -64,14 +98,18 @@ export default function BudgetForm({
 
   const [lines, setLines] = useState(() => {
     if (budget?.lines?.length) {
+      // Existing lines already carry a cost code — edit them as manual codes.
       return budget.lines.map((l, i) => ({
         _id: Date.now() + i,
+        mode: "manual",
         costCodeId: l.costCodeId || "",
+        boqItemIds: [],
+        accountId: "",
         description: l.description || "",
         amount: l.amount ?? "",
       }));
     }
-    return [blankLine()];
+    return [blankLine(hasBoq ? "boq" : "manual", defaultAccount)];
   });
   const [revisionNotes, setRevisionNotes] = useState(budget?.revisionNotes || "");
 
@@ -84,8 +122,8 @@ export default function BudgetForm({
       if (isEdit) {
         onCancel?.();
       } else {
-        // Reset form
-        setLines([blankLine()]);
+        // Reset form — default to the mode the project can actually use.
+        setLines([blankLine(hasBoq ? "boq" : "manual", defaultAccount)]);
         setRevisionNotes("");
       }
     }
@@ -94,11 +132,60 @@ export default function BudgetForm({
     }
   }, [state]);
 
-  const addLine = () => setLines([...lines, blankLine()]);
+  const addLine = () =>
+    setLines([...lines, blankLine(hasBoq ? "boq" : "manual", defaultAccount)]);
+
+  /**
+   * Change the project's default account. It seeds new lines, and it also
+   * fills in any existing BOQ line that either has no account yet or still
+   * carries the old default — a line the user set to something else on purpose
+   * is left alone. Persisted to the project so it survives reload.
+   */
+  const changeDefaultAccount = (value) => {
+    const prevDefault = defaultAccount;
+    setDefaultAccount(value);
+    setLines((prev) =>
+      prev.map((l) =>
+        l.mode === "boq" && (!l.accountId || l.accountId === prevDefault)
+          ? { ...l, accountId: value }
+          : l,
+      ),
+    );
+    startSavingDefault(async () => {
+      const res = await setProjectDefaultCostAccount(projectId, value);
+      if (res?.error) toast.error(res.error);
+    });
+  };
+
+  // Toggle a BOQ item on a line, and keep the line's description in step.
+  const toggleItem = (index, itemId) => {
+    setLines((prev) => {
+      const updated = [...prev];
+      const line = { ...updated[index] };
+      const set = new Set(line.boqItemIds);
+      if (set.has(itemId)) set.delete(itemId);
+      else set.add(itemId);
+      line.boqItemIds = [...set];
+      const picked = boqItems.filter((it) => line.boqItemIds.includes(it.id));
+      // Only auto-fill description while it tracks the selection.
+      const auto = picked.map((it) => (it.itemCode ? `${it.itemCode} ` : "") + it.description).join("; ");
+      if (!line._descTouched) line.description = auto;
+      updated[index] = line;
+      return updated;
+    });
+  };
 
   const removeLine = (id) => {
     if (lines.length <= 1) return;
     setLines(lines.filter((l) => l._id !== id));
+  };
+
+  const editDescription = (index, value) => {
+    setLines((prev) => {
+      const u = [...prev];
+      u[index] = { ...u[index], description: value, _descTouched: true };
+      return u;
+    });
   };
 
   const updateLine = (index, field, value) => {
@@ -129,12 +216,25 @@ export default function BudgetForm({
       "lines",
       JSON.stringify(
         lines
-          .filter((l) => l.costCodeId && l.amount)
-          .map((l) => ({
-            costCodeId: l.costCodeId,
-            description: l.description,
-            amount: parseFloat(l.amount) || 0,
-          })),
+          .filter((l) =>
+            l.amount && (l.mode === "manual" ? l.costCodeId : l.boqItemIds.length && l.accountId),
+          )
+          .map((l) =>
+            l.mode === "manual"
+              ? {
+                  costCodeId: l.costCodeId,
+                  description: l.description,
+                  category: l.category || null,
+                  amount: parseFloat(l.amount) || 0,
+                }
+              : {
+                  boqItemIds: l.boqItemIds,
+                  accountId: l.accountId,
+                  description: l.description,
+                  category: l.category || null,
+                  amount: parseFloat(l.amount) || 0,
+                },
+          ),
       ),
     );
     formAction(formData);
@@ -154,65 +254,79 @@ export default function BudgetForm({
       </div>
 
       <form action={handleSubmit}>
+        {/* Default account — 0119. Only meaningful when building from a BOQ;
+            an edit works on existing coded lines, so it is hidden there. */}
+        {hasBoq && !isEdit && (
+          <div className="mb-4 rounded-lg border bg-muted/30 p-3">
+            <Label className="text-xs font-medium">
+              Default account for budget lines
+            </Label>
+            <p className="mb-2 text-xs text-muted-foreground">
+              New lines from the BOQ start on this account, so you only pick one
+              here instead of on every line. Any line can still be changed.
+            </p>
+            <select
+              value={defaultAccount}
+              onChange={(e) => changeDefaultAccount(e.target.value)}
+              disabled={savingDefault}
+              className="h-9 w-full rounded-md border bg-background px-2 text-sm sm:max-w-md"
+            >
+              <option value="">No default — pick an account on each line</option>
+              {expenseAccounts.map((a) => (
+                <option key={a._id || a.id} value={a._id || a.id}>
+                  {(a.accountCode || a.code) ? `${a.accountCode || a.code} — ` : ""}
+                  {a.accountName || a.name || "Unnamed account"}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
         {/* Budget Lines */}
         <div className="space-y-3 mb-4">
           <Label>Budget Lines</Label>
           {lines.map((line, index) => (
-            <div
-              key={line._id}
-              className="rounded-lg border p-3 sm:p-0 sm:border-0 sm:rounded-none space-y-2 sm:space-y-0 sm:grid sm:grid-cols-12 sm:gap-2 sm:items-start"
-            >
-              <div className="sm:col-span-4">
-                <Label className="text-xs text-muted-foreground sm:hidden mb-1 block">Cost code</Label>
-                <CostCodeCombobox
-                  value={line.costCodeId}
-                  onValueChange={(id) => updateLine(index, "costCodeId", id)}
-                  costCodes={codes}
-                  canCreate={canManageCostCodes}
-                  accounts={expenseAccounts}
-                  projectId={projectId}
-                  onCreated={(code) =>
-                    setCodes((prev) =>
-                      prev.some((c) => c._id === code._id) ? prev : [...prev, code],
-                    )
-                  }
-                  taken={lines
-                    .filter((l) => l._id !== line._id)
-                    .map((l) => l.costCodeId)}
-                />
-              </div>
-              <div className="sm:col-span-4">
-                <Label className="text-xs text-muted-foreground sm:hidden mb-1 block">Description</Label>
-                <Input
-                  placeholder="Description..."
-                  value={line.description}
-                  onChange={(e) =>
-                    updateLine(index, "description", e.target.value)
-                  }
-                  className="h-9 text-sm"
-                />
-              </div>
-              <div className="flex items-end gap-2 sm:contents">
-                <div className="flex-1 sm:col-span-3">
-                  <Label className="text-xs text-muted-foreground sm:hidden mb-1 block">Amount</Label>
-                  <Input
-                    type="number"
-                    placeholder="Amount"
-                    min="0"
-                    step="1"
-                    value={line.amount}
-                    onChange={(e) =>
-                      updateLine(index, "amount", e.target.value)
-                    }
-                    className="h-9 text-sm text-right"
-                  />
+            <div key={line._id} className="rounded-lg border p-3 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-medium text-muted-foreground">Line {index + 1}</span>
+                  <select
+                    aria-label="Cost category"
+                    value={line.category || ""}
+                    onChange={(e) => updateLine(index, "category", e.target.value)}
+                    className="h-7 rounded-md border bg-background px-1.5 text-xs"
+                  >
+                    {BUDGET_CATEGORIES.map((c) => (
+                      <option key={c} value={c}>
+                        {c}
+                      </option>
+                    ))}
+                  </select>
                 </div>
-                <div className="sm:col-span-1">
+                <div className="flex items-center gap-2">
+                  {hasBoq && (
+                    <div className="inline-flex rounded-md border overflow-hidden text-xs">
+                      <button
+                        type="button"
+                        onClick={() => updateLine(index, "mode", "boq")}
+                        className={`px-2 py-1 ${line.mode === "boq" ? "bg-primary text-primary-foreground" : "bg-background"}`}
+                      >
+                        From BOQ
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => updateLine(index, "mode", "manual")}
+                        className={`px-2 py-1 ${line.mode === "manual" ? "bg-primary text-primary-foreground" : "bg-background"}`}
+                      >
+                        Manual code
+                      </button>
+                    </div>
+                  )}
                   <Button
                     type="button"
                     variant="ghost"
                     size="icon"
-                    className="h-9 w-9"
+                    className="h-8 w-8"
                     onClick={() => removeLine(line._id)}
                     disabled={lines.length <= 1}
                   >
@@ -220,6 +334,133 @@ export default function BudgetForm({
                   </Button>
                 </div>
               </div>
+
+              {line.mode === "manual" ? (
+                <div className="grid sm:grid-cols-12 gap-2 items-start">
+                  <div className="sm:col-span-5">
+                    <CostCodeCombobox
+                      value={line.costCodeId}
+                      onValueChange={(id) => updateLine(index, "costCodeId", id)}
+                      costCodes={codes}
+                      canCreate={canManageCostCodes}
+                      accounts={expenseAccounts}
+                      projectId={projectId}
+                      onCreated={(code) =>
+                        setCodes((prev) =>
+                          prev.some((c) => c._id === code._id) ? prev : [...prev, code],
+                        )
+                      }
+                      taken={lines.filter((l) => l._id !== line._id).map((l) => l.costCodeId)}
+                    />
+                  </div>
+                  <div className="sm:col-span-4">
+                    <Input
+                      placeholder="Description..."
+                      value={line.description}
+                      onChange={(e) => editDescription(index, e.target.value)}
+                      className="h-9 text-sm"
+                    />
+                  </div>
+                  <div className="sm:col-span-3">
+                    <Input
+                      type="number"
+                      placeholder="Amount"
+                      min="0"
+                      step="1"
+                      value={line.amount}
+                      onChange={(e) => updateLine(index, "amount", e.target.value)}
+                      className="h-9 text-sm text-right"
+                    />
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <div className="grid sm:grid-cols-2 gap-2">
+                    <div>
+                      <Label className="text-xs text-muted-foreground mb-1 block">Account these items charge</Label>
+                      <select
+                        value={line.accountId}
+                        onChange={(e) => updateLine(index, "accountId", e.target.value)}
+                        className="h-9 w-full rounded-md border bg-background px-2 text-sm"
+                      >
+                        <option value="">Select account…</option>
+                        {expenseAccounts.map((a) => (
+                          <option key={a._id || a.id} value={a._id || a.id}>
+                            {(a.accountCode || a.code) ? `${a.accountCode || a.code} — ` : ""}
+                            {a.accountName || a.name || "Unnamed account"}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <Label className="text-xs text-muted-foreground mb-1 block">Budgeted amount (KES)</Label>
+                      <Input
+                        type="number"
+                        placeholder="Amount"
+                        min="0"
+                        step="1"
+                        value={line.amount}
+                        onChange={(e) => updateLine(index, "amount", e.target.value)}
+                        className="h-9 text-sm text-right"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <Label className="text-xs text-muted-foreground mb-1 block">
+                      BOQ items — {line.boqItemIds.length} selected (pick one or more to budget together)
+                    </Label>
+                    <div className="max-h-56 overflow-y-auto rounded-md border divide-y">
+                      {/* Grouped by bill so a budget line can draw items from
+                          one bill or several — the bills budgeted together. */}
+                      {(() => {
+                        const out = [];
+                        let lastBill;
+                        for (const it of boqItems) {
+                          const bid = it.billId ?? "_";
+                          if (bid !== lastBill) {
+                            lastBill = bid;
+                            out.push(
+                              <div
+                                key={`bill-${bid}`}
+                                className="sticky top-0 z-10 bg-muted/90 px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground backdrop-blur"
+                              >
+                                {it.billCode ? `${it.billCode} — ` : ""}
+                                {it.billTitle || "Items"}
+                              </div>,
+                            );
+                          }
+                          out.push(
+                            <label
+                              key={it.id}
+                              className="flex items-center gap-2 px-2 py-1.5 text-sm cursor-pointer hover:bg-muted/50"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={line.boqItemIds.includes(it.id)}
+                                onChange={() => toggleItem(index, it.id)}
+                              />
+                              <span className="font-mono text-xs text-muted-foreground w-14 shrink-0">
+                                {it.itemCode || "—"}
+                              </span>
+                              <span className="flex-1 truncate">{it.description}</span>
+                              <span className="text-xs text-muted-foreground tabular-nums">
+                                {formatCurrency(it.amount)}
+                              </span>
+                            </label>,
+                          );
+                        }
+                        return out;
+                      })()}
+                    </div>
+                  </div>
+                  <Input
+                    placeholder="Description (auto-filled from items — editable)"
+                    value={line.description}
+                    onChange={(e) => editDescription(index, e.target.value)}
+                    className="h-9 text-sm"
+                  />
+                </div>
+              )}
             </div>
           ))}
 
@@ -234,11 +475,41 @@ export default function BudgetForm({
           </Button>
         </div>
 
-        {/* Total */}
-        <div className="flex justify-end mb-4 text-sm">
-          <span className="text-muted-foreground mr-2">Total:</span>
-          <span className="font-bold">KES {formatCurrency(total)}</span>
-        </div>
+        {/* Commercial check — Contract less tax vs Budget vs Margin (0122) */}
+        {(() => {
+          const contract = Number(contractValue) || 0;
+          const vat = Number(vatRate) || 0;
+          const net = contract > 0 ? contract / (1 + vat / 100) : 0;
+          const marginPct = net > 0 ? Math.round(((net - total) / net) * 100) : null;
+          const loss = net > 0 && total > net;
+          return (
+            <div className="mb-4 space-y-2">
+              <div className="grid grid-cols-3 gap-2 text-center">
+                <div className="rounded-lg border p-2">
+                  <p className="text-xs text-muted-foreground">Contract less tax</p>
+                  <p className="text-sm font-semibold">KES {formatCurrency(net)}</p>
+                </div>
+                <div className="rounded-lg border p-2">
+                  <p className="text-xs text-muted-foreground">Budget</p>
+                  <p className="text-sm font-semibold">KES {formatCurrency(total)}</p>
+                </div>
+                <div className={`rounded-lg border p-2 ${loss ? "border-red-300 bg-red-50 dark:bg-red-900/20" : ""}`}>
+                  <p className="text-xs text-muted-foreground">Margin</p>
+                  <p className={`text-sm font-semibold ${loss ? "text-red-600" : "text-emerald-600"}`}>
+                    {marginPct === null ? "—" : `${marginPct}%`}
+                  </p>
+                </div>
+              </div>
+              {loss && (
+                <p className="rounded-md border border-red-300 bg-red-50 p-2 text-xs text-red-700 dark:bg-red-900/20 dark:text-red-400">
+                  This budget is above the contract value — the job is planned to
+                  lose KES {formatCurrency(total - net)}. Check the figures before
+                  posting for approval.
+                </p>
+              )}
+            </div>
+          );
+        })()}
 
         {/* Revision Notes */}
         <div className="space-y-2 mb-4">
@@ -256,7 +527,12 @@ export default function BudgetForm({
         <div className="flex justify-end">
           <Button
             type="submit"
-            disabled={isPending || lines.every((l) => !l.costCodeId)}
+            disabled={
+              isPending ||
+              !lines.some((l) =>
+                l.amount && (l.mode === "manual" ? l.costCodeId : l.boqItemIds.length && l.accountId),
+              )
+            }
             className="bg-yellow-500 hover:bg-yellow-600 text-black font-semibold"
           >
             {isPending ? (
@@ -301,6 +577,7 @@ export function BudgetCard({
   budget,
   projectId,
   costCodes,
+  boqItems = [],
   canCreate,
   canApprove,
   canManageCostCodes = false,
@@ -313,6 +590,7 @@ export function BudgetCard({
       <BudgetForm
         projectId={projectId}
         costCodes={costCodes}
+        boqItems={boqItems}
         canManageCostCodes={canManageCostCodes}
         expenseAccounts={expenseAccounts}
         budget={budget}

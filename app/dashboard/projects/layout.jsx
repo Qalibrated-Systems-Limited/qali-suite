@@ -33,32 +33,13 @@ export default async function ProjectsLayout({ children }) {
   if (!session?.user) redirect("/login");
 
   /**
-   * The nav needs every project's section flags, because a layout does not
-   * receive `searchParams` and so cannot know which project is selected — the
-   * client component applies `selectProject` instead, the same rule the pages
-   * use. `workspaceProjects` is React-cached, so the page below this does not
-   * repeat the query.
-   *
-   * Skipped entirely for a role that cannot see projects: the pages render
-   * their own Access Denied, and fetching a list for somebody who may not read
-   * it is work done to be thrown away.
+   * The module's sticky tab strip, in the ERP's own style — the same pattern
+   * HR uses. Reads every project's section flags; the client nav resolves the
+   * selected project from `?project=`.
    */
   const projects = canSeeProjectsNav(session.user.role)
     ? await workspaceProjects()
     : [];
-
-  /**
-   * What the switcher last remembered, read here rather than in the nav.
-   *
-   * The nav is a client component, and reading `document.cookie` during its
-   * render would disagree with what the server rendered — a hydration
-   * mismatch. A server component may READ a cookie freely; it is only WRITING
-   * one that it cannot do, which is why the switcher writes it.
-   *
-   * Without this the sections vanished from the nav on the dashboard, because
-   * that URL carries no `?project=` and is not a project path — even though
-   * every section page still knew perfectly well which project was chosen.
-   */
 
   return (
     <PlanGate module="projects" feature="Project Management">

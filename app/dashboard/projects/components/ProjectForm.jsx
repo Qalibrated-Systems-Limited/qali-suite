@@ -51,7 +51,7 @@ import {
 } from "@/components/ui/dialog";
 import { createParty } from "@/app/db/actions/party-actions";
 
-function PartyCombobox({ value, onValueChange, parties, placeholder, label }) {
+export function PartyCombobox({ value, onValueChange, parties, placeholder, label }) {
   const [open, setOpen] = useState(false);
   const selected = value ? parties.find((p) => p._id === value) : null;
 
@@ -116,7 +116,7 @@ function PartyCombobox({ value, onValueChange, parties, placeholder, label }) {
   );
 }
 
-function FieldError({ errors, field }) {
+export function FieldError({ errors, field }) {
   if (!errors?.[field]) return null;
   return <p className="text-sm text-red-500">{errors[field][0]}</p>;
 }
@@ -326,24 +326,13 @@ export default function ProjectForm({
             </div>
           </div>
 
-          {/* Budget and Priority */}
+          {/*
+            Priority only. The BUDGET is NOT set at project creation — Finance
+            creates the project, and the responsible department manager adds the
+            budget afterwards through the Budget page, where it goes through
+            approval before it becomes the project's approved budget.
+          */}
           <div className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-2">
-              <Label htmlFor="budgetAmount">Budget Amount (KES)</Label>
-              <Input
-                id="budgetAmount"
-                name="budgetAmount"
-                type="number"
-                min="0"
-                step="1"
-                placeholder="500000"
-                defaultValue={
-                  project?.budget?.amount || state?.values?.budgetAmount || ""
-                }
-              />
-              <FieldError errors={errors} field="budgetAmount" />
-            </div>
-
             <div className="space-y-2">
               <Label htmlFor="priority">Priority</Label>
               <Select
@@ -503,8 +492,6 @@ export default function ProjectForm({
             </p>
             <FieldError errors={errors} field="tags" />
           </div>
-
-          <input type="hidden" name="budgetCurrency" value="KES" />
         </Card>
 
         {/* Submit */}

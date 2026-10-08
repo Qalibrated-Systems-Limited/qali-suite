@@ -2,6 +2,7 @@
 
 import {
   Activity,
+  Archive,
   ArrowLeftRight,
   Award,
   KeyRound,
@@ -38,6 +39,7 @@ import {
   Search,
   Settings,
   ShieldAlert,
+  ShieldCheck,
   ShoppingBag,
   ShoppingCart,
   Store,
@@ -94,9 +96,29 @@ import {
 } from "@/lib/permissions";
 
 // ============================================
+// DEPARTMENTS
+// ============================================
+// The ERP is divided into departments — the same modules, presented and
+// reached by the part of the business that owns them. This is organisation
+// and navigation only: nothing here grants or removes access, which is still
+// decided entirely by role + plan on each entry below (`hidden` / `hasMod`).
+//
+// `DEPARTMENTS` is the display order and the heading each one shows (and links
+// to — /dashboard/departments/<slug>). `DEPARTMENT_OF` maps a top-level nav
+// entry's `id` to the department it sits under; an entry with no mapping (the
+// Dashboard, Approvals, Executive and KPIs singles) is company-wide and stays
+// pinned above the departments. One source of truth: the sidebar headers and
+// each department's landing dashboard both read these.
+// Department config lives in a plain (non-client) module so a Server Component
+// can import the real DEPARTMENTS array. Imported here for the render below and
+// re-exported so existing imports from this module keep working.
+import { DEPARTMENTS, departmentOf } from "./departments-config";
+export { DEPARTMENTS, departmentOf };
+
+// ============================================
 // NAV GROUP CONFIGURATION - ERP FOCUSED
 // ============================================
-const getNavigationGroups = (user) => {
+export const getNavigationGroups = (user) => {
   const plan = user?.companyPlan || "free";
   const allowed = new Set(getAllowedModules(plan));
   const hasMod = (id) => user?.role === "SuperAdmin" || allowed.has(id);
@@ -111,14 +133,34 @@ const getNavigationGroups = (user) => {
     href: "/dashboard",
   },
 
-  // Approvals (ungrouped — visible only to approver roles)
+  // ============================================
+  // SHARED SERVICES (every role, every department)
+  // ============================================
+  // The things anyone does regardless of which department they sit in —
+  // raise a requisition, claim an expense, book leave, log a ticket, see
+  // their tasks and approvals. Ungated so they are reachable by everyone;
+  // the pages themselves still scope what each person sees. Kept out of the
+  // departments on purpose: a shared service belongs to no single one.
   {
-    type: "single",
-    icon: CheckSquare,
-    label: "Approvals",
-    id: "approvals",
-    href: "/dashboard/approvals",
-    hidden: !canSeeApprovalsNav(user?.role),
+    type: "group",
+    label: "Shared Services",
+    icon: ClipboardCheck,
+    id: "shared",
+    defaultOpen: true,
+    items: [
+      { icon: ListChecks, label: "My Tasks", id: "shared-tasks", href: "/dashboard/tasks" },
+      { icon: FileText, label: "Requisitions", id: "shared-requisitions", href: "/dashboard/requests" },
+      { icon: Receipt, label: "My Expenses", id: "shared-expenses", href: "/dashboard/my-claims" },
+      { icon: Calendar, label: "My Leave", id: "shared-leave", href: "/dashboard/hr/my-leave" },
+      { icon: LifeBuoy, label: "Help Desk", id: "shared-helpdesk", href: "/dashboard/helpdesk" },
+      {
+        icon: CheckSquare,
+        label: "Approvals",
+        id: "shared-approvals",
+        href: "/dashboard/approvals",
+        hidden: !canSeeApprovalsNav(user?.role),
+      },
+    ],
   },
 
   // Executive overview (ungrouped — the business at a glance)
@@ -454,6 +496,28 @@ const getNavigationGroups = (user) => {
         id: "projects-cash-requisitions",
         href: "/dashboard/projects/cash-requisitions",
       },
+      // The portfolio registers — the screens that are about every project at
+      // once (the template's Projects and Reporting groups). They are also
+      // header buttons on the list page; here so they are one click away from
+      // anywhere, the same as the sections above.
+      {
+        icon: ShieldCheck,
+        label: "Sealed Budgets",
+        id: "projects-sealed-budgets",
+        href: "/dashboard/projects/sealed-budgets",
+      },
+      {
+        icon: Archive,
+        label: "Completed Work",
+        id: "projects-archive",
+        href: "/dashboard/projects/archive",
+      },
+      {
+        icon: ShieldAlert,
+        label: "Findings",
+        id: "projects-findings",
+        href: "/dashboard/projects/findings",
+      },
     ],
   },
 
@@ -515,6 +579,13 @@ const getNavigationGroups = (user) => {
         label: "Fiscal Periods",
         id: "fiscal-periods",
         href: "/dashboard/settings/fiscal-periods",
+        hidden: !canSeeFinanceNav(user?.role),
+      },
+      {
+        icon: Award,
+        label: "Commissions",
+        id: "commissions",
+        href: "/dashboard/commissions",
         hidden: !canSeeFinanceNav(user?.role),
       },
     ],
@@ -687,14 +758,11 @@ const getNavigationGroups = (user) => {
     defaultOpen: false,
     items: [
       { icon: Truck, label: "Fleet", id: "fleet", href: "/dashboard/fleet" },
-      { icon: ListChecks, label: "Tasks", id: "tasks", href: "/dashboard/tasks" },
-      { icon: LifeBuoy, label: "Help Desk", id: "helpdesk", href: "/dashboard/helpdesk" },
-      { icon: HardHat, label: "HSE", id: "hse", href: "/dashboard/hse" },
     ],
   },
   {
     type: "group",
-    label: "Quality",
+    label: "Quality & Compliance",
     icon: Award,
     id: "quality",
     defaultOpen: false,
@@ -702,6 +770,25 @@ const getNavigationGroups = (user) => {
       { icon: Target, label: "Quality (QMS)", id: "qms", href: "/dashboard/qms" },
       { icon: ClipboardCheck, label: "Compliance", id: "compliance", href: "/dashboard/compliance" },
       { icon: BookOpen, label: "SOP Library", id: "sops", href: "/dashboard/sops" },
+      { icon: HardHat, label: "HSE", id: "hse", href: "/dashboard/hse" },
+    ],
+  },
+  {
+    // ICT: service desk and the integration plumbing live together — the
+    // department's "keep the lights on" bucket.
+    type: "group",
+    label: "IT & Integrations",
+    icon: Plug,
+    id: "it-service",
+    defaultOpen: false,
+    items: [
+      {
+        icon: Plug,
+        label: "Integrations",
+        id: "integration-item",
+        href: "/dashboard/integrations",
+        hidden: user?.role !== "Admin" || !hasMod("integration"),
+      },
     ],
   },
   {
@@ -835,18 +922,6 @@ const getNavigationGroups = (user) => {
   },
 
   // ============================================
-  // INTEGRATIONS (ungrouped, Enterprise + Admin only)
-  // ============================================
-  {
-    type: "single",
-    icon: Plug,
-    label: "Integrations",
-    id: "integration",
-    href: "/dashboard/integrations",
-    hidden: user?.role !== "Admin" || !hasMod("integration"),
-  },
-
-  // ============================================
   // LICENSING (ungrouped, platform/Admin only)
   // ============================================
   {
@@ -956,19 +1031,19 @@ const NavGroup = ({ group, user, onItemClick, collapsed }) => {
           }
         )}
       >
-        <div className="flex items-center gap-3">
-          <group.icon className="w-5 h-5" />
-          <span>{group.label}</span>
+        <div className="flex items-center gap-3 min-w-0 flex-1">
+          <group.icon className="w-5 h-5 shrink-0" />
+          <span className="min-w-0 text-left leading-tight">{group.label}</span>
           {group.badge && (
-            <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-yellow-500 text-black font-bold">
+            <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-md bg-yellow-500 text-black font-bold">
               {group.badge}
             </span>
           )}
         </div>
         {isOpen ? (
-          <ChevronDown className="w-4 h-4 transition-transform" />
+          <ChevronDown className="w-4 h-4 shrink-0 transition-transform" />
         ) : (
-          <ChevronRight className="w-4 h-4 transition-transform" />
+          <ChevronRight className="w-4 h-4 shrink-0 transition-transform" />
         )}
       </button>
 
@@ -1123,34 +1198,119 @@ export const SidebarContentGrouped = ({ onItemClick, user, collapsed }) => {
             </button>
           )}
 
-          {navigationGroups.map((navItem) => {
-            if (navItem.hidden) return null;
+          {(() => {
+            const renderEntry = (navItem) => {
+              if (navItem.hidden) return null;
+              if (navItem.type === "single") {
+                return (
+                  <NavItem
+                    key={navItem.id}
+                    item={navItem}
+                    onItemClick={onItemClick}
+                    collapsed={collapsed}
+                  />
+                );
+              }
+              if (navItem.type === "group") {
+                return (
+                  <NavGroup
+                    key={navItem.id}
+                    group={navItem}
+                    user={user}
+                    onItemClick={onItemClick}
+                    collapsed={collapsed}
+                  />
+                );
+              }
+              return null;
+            };
 
-            if (navItem.type === "single") {
-              return (
-                <NavItem
-                  key={navItem.id}
-                  item={navItem}
-                  onItemClick={onItemClick}
-                  collapsed={collapsed}
-                />
+            // THE SIDEBAR IS THE DEPARTMENTS. Each department is one collapsible
+            // group that opens to its real modules. A module keeps the exact
+            // gate it had as a free-standing group: when a functional group is
+            // dissolved into its department, that group's own `hidden` is OR-ed
+            // into each of its items, so nothing a role could not see before
+            // becomes visible now. A department with no visible module for this
+            // role is dropped whole — so a Storekeeper sees only the departments
+            // they actually work in.
+            const asItem = (g) => ({
+              icon: g.icon,
+              label: g.label,
+              id: g.id,
+              href: g.href,
+              badge: g.badge,
+              hidden: g.hidden,
+            });
+
+            const deptGroups = DEPARTMENTS.map((dept) => {
+              const members = navigationGroups.filter(
+                (g) => departmentOf(g.id) === dept.slug,
               );
-            }
-
-            if (navItem.type === "group") {
-              return (
-                <NavGroup
-                  key={navItem.id}
-                  group={navItem}
-                  user={user}
-                  onItemClick={onItemClick}
-                  collapsed={collapsed}
-                />
+              const modules = members.flatMap((g) =>
+                g.type === "single"
+                  ? [asItem(g)]
+                  : (g.items || []).map((it) => ({
+                      ...it,
+                      hidden: Boolean(g.hidden) || Boolean(it.hidden),
+                    })),
               );
-            }
+              // First entry is the department's own dashboard (the rich landing).
+              const home = {
+                icon: LayoutDashboard,
+                label: "Dashboard",
+                id: `dept-${dept.slug}-home`,
+                href: `/dashboard/departments/${dept.slug}`,
+              };
+              return {
+                type: "group",
+                id: `dept-${dept.slug}`,
+                label: dept.label,
+                icon: dept.icon,
+                defaultOpen: false,
+                items: [home, ...modules],
+              };
+            }).filter((dg) =>
+              // Show the department only if at least one real module (not just
+              // the always-present Dashboard link) is visible to this role.
+              dg.items.slice(1).some((it) => !it.hidden),
+            );
 
-            return null;
-          })}
+            // Everything with no department: the Dashboard home and the Shared
+            // Services group render as-is; any exec-only singles (Executive,
+            // KPIs) sit after the departments.
+            const dashboardEntry = navigationGroups.find(
+              (g) => g.id === "dashboard",
+            );
+            const sharedEntry = navigationGroups.find((g) => g.id === "shared");
+            const extraTop = navigationGroups.filter(
+              (g) =>
+                !departmentOf(g.id) &&
+                !["dashboard", "shared"].includes(g.id),
+            );
+
+            return (
+              <>
+                {dashboardEntry && renderEntry(dashboardEntry)}
+                {deptGroups.map((dg) => (
+                  <NavGroup
+                    key={dg.id}
+                    group={dg}
+                    user={user}
+                    onItemClick={onItemClick}
+                    collapsed={collapsed}
+                  />
+                ))}
+                {/* Shared services and the exec extras sit a little apart from
+                    the departments — a hairline, no heavier. */}
+                {(sharedEntry || extraTop.length > 0) && (
+                  <div className="mt-2 space-y-1 border-t border-border/60 pt-2">
+                    {sharedEntry && renderEntry(sharedEntry)}
+                    {extraTop.map(renderEntry)}
+                  </div>
+                )}
+              </>
+            );
+          })()}
         </nav>
 
         {/* Clock In/Out */}

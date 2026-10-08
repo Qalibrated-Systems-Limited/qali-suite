@@ -1,5 +1,6 @@
 "use client";
 
+import { Fragment } from "react";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import {
@@ -12,6 +13,15 @@ import {
   Ruler,
   Clock,
   Flag,
+  ClipboardList,
+  Coins,
+  ArrowLeft,
+  ScrollText,
+  Shuffle,
+  ListChecks,
+  Lock,
+  Check,
+  FolderOpen,
 } from "lucide-react";
 import {
   SECTIONS,
@@ -19,6 +29,7 @@ import {
   sectionsFor,
   projectIdFromPath,
 } from "../lib/sections";
+import { computeLifecycle, PHASES, PHASE_OF_SECTION } from "../lib/phases";
 
 /**
  * Module-level sub-navigation for the Projects module — same pattern as HRNav
@@ -69,30 +80,29 @@ import {
  */
 const ICONS = {
   boq: Ruler,
+  methodology: ClipboardList,
   milestones: Flag,
   programme: CalendarDays,
   instructions: FileEdit,
   diary: BookOpen,
   timesheets: Clock,
   certificates: Receipt,
+  variations: Shuffle,
+  contract: ScrollText,
+  costs: ListChecks,
   cashRequisitions: Wallet,
+  documents: FolderOpen,
 };
 
 /**
  * "Overview", not "Dashboard".
  *
  * Every module in this app hangs off /dashboard, so a tab called Dashboard
- * inside one of them names the thing it is already inside. What the page
- * actually is is the project REGISTER plus its totals — the overview of the
- * portfolio, not a dashboard of anything.
+ * inside one of them names the thing it is already inside. With no project
+ * chosen it is the project REGISTER plus its totals — the portfolio overview;
+ * once a project is open it is THAT project's page, and "‹ All projects" is
+ * the way back to the register.
  */
-const DASHBOARD = {
-  label: "Overview",
-  href: "/dashboard/projects",
-  icon: LayoutDashboard,
-  exact: true,
-};
-
 export default function ProjectsNav({ projects = [] }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -160,41 +170,154 @@ export default function ProjectsNav({ projects = [] }) {
    * This is the same rule as the type gate one level up: a section shows when
    * it has something to show.
    */
-  const items = [
-    DASHBOARD,
-    ...(project ? SECTIONS.filter((s) => sections[s.key]) : []).map((s) => ({
-      label: s.label,
-      href: project ? `${s.href}?project=${project.id}` : s.href,
-      // The active check compares paths, so it must not see the query string.
-      match: s.href,
-      icon: ICONS[s.key],
-    })),
-  ];
+  /**
+   * ONE WORKSPACE PER PROJECT.
+   *
+   * With nothing chosen, the only tab is the portfolio Overview — the register.
+   * Open a project and the tabs become THAT project's: its own Overview page
+   * (`/dashboard/projects/<id>`, the rich page with financials, team and the
+   * setup checklist), its Budget, and the type's sections. Budget was reachable
+   * only as a button on the overview before, which is why people lost it; it is
+   * a step in the process, so it earns a tab.
+   */
+  const inProject = Boolean(project);
+  const projectHome = inProject
+    ? `/dashboard/projects/${project.id}`
+    : "/dashboard/projects";
+
+  /**
+   * THE LIFECYCLE GATE. A section's tab is locked until its phase unlocks, and a
+   * phase unlocks only when the one before it is done (lib/phases.js). The flags
+   * it reads ride on the project row from the workspace query, so this is a pure
+   * client computation — no round trip.
+   */
+  const lifecycle = inProject ? computeLifecycle(project) : null;
+
+  const rawItems = [
+    {
+      label: "Overview",
+      sectionKey: "overview",
+      href: projectHome,
+      match: projectHome,
+      icon: LayoutDashboard,
+      exact: true,
+    },
+    ...(inProject
+      ? [
+          {
+            label: "Budget",
+            sectionKey: "budget",
+            href: `${projectHome}/budget`,
+            match: `${projectHome}/budget`,
+            icon: Coins,
+          },
+        ]
+      : []),
+    ...(inProject
+      ? SECTIONS.filter((s) => sections[s.key]).map((s) => ({
+          label: s.label,
+          sectionKey: s.key,
+          href: `${s.href}?project=${project.id}`,
+          // The active check compares paths, so it must not see the query string.
+          match: s.href,
+          icon: ICONS[s.key],
+        }))
+      : []),
+  ].map((it) => ({
+    ...it,
+    phase: PHASE_OF_SECTION[it.sectionKey] ?? "setup",
+    locked: lifecycle ? lifecycle.isSectionLocked(it.sectionKey) : false,
+  }));
+
+  const renderTab = (item) => {
+    const path = item.match ?? item.href;
+    const active = item.exact
+      ? pathname === path
+      : pathname === path || pathname.startsWith(path + "/");
+    const Icon = item.icon;
+
+    if (item.locked) {
+      const needs = lifecycle?.labelOfPhase(item.phase);
+      return (
+        <span
+          key={item.match ?? item.href}
+          title={`Locked — finish ${needs ? `the ${needs} step` : "the previous step"} first`}
+          className="flex cursor-not-allowed items-center gap-2 whitespace-nowrap border-b-2 border-transparent px-3 py-3 text-sm text-muted-foreground/40"
+        >
+          <Lock className="h-3.5 w-3.5" />
+          {item.label}
+        </span>
+      );
+    }
+
+    return (
+      <Link
+        key={item.match ?? item.href}
+        href={item.href}
+        className={`flex items-center gap-2 whitespace-nowrap border-b-2 px-3 py-3 text-sm transition-colors ${
+          active
+            ? "border-primary font-medium text-primary"
+            : "border-transparent text-muted-foreground hover:text-foreground"
+        }`}
+      >
+        <Icon className="h-4 w-4" />
+        {item.label}
+      </Link>
+    );
+  };
 
   return (
     <nav className="sticky top-14 z-10 border-b border-border bg-card">
       <div className="flex items-center gap-1 overflow-x-auto px-4 sm:px-6 py-0">
-        {items.map((item) => {
-          const path = item.match ?? item.href;
-          const active = item.exact
-            ? pathname === path
-            : pathname === path || pathname.startsWith(path + "/");
-          const Icon = item.icon;
-          return (
+        {inProject && (
+          <>
             <Link
-              key={item.match ?? item.href}
-              href={item.href}
-              className={`flex items-center gap-2 whitespace-nowrap border-b-2 px-3 py-3 text-sm transition-colors ${
-                active
-                  ? "border-primary font-medium text-primary"
-                  : "border-transparent text-muted-foreground hover:text-foreground"
-              }`}
+              href="/dashboard/projects"
+              className="flex items-center gap-1.5 whitespace-nowrap px-2 py-3 text-sm text-muted-foreground transition-colors hover:text-foreground"
             >
-              <Icon className="h-4 w-4" />
-              {item.label}
+              <ArrowLeft className="h-4 w-4" />
+              All projects
             </Link>
-          );
-        })}
+            <span className="mx-1 h-5 w-px shrink-0 bg-border" aria-hidden />
+          </>
+        )}
+
+        {/* No project chosen — just the portfolio Overview tab. */}
+        {!inProject && rawItems.map(renderTab)}
+
+        {/* In a project — tabs grouped by lifecycle phase, each with a small
+            numbered label, and locked until its phase unlocks. */}
+        {inProject &&
+          PHASES.filter((p) => p.key !== "close").map((phase) => {
+            const phaseItems = rawItems.filter((it) => it.phase === phase.key);
+            if (phaseItems.length === 0) return null;
+            const step = lifecycle?.steps.find((s) => s.key === phase.key);
+            return (
+              <Fragment key={phase.key}>
+                <span
+                  className={`ml-1 flex shrink-0 items-center gap-1 whitespace-nowrap pl-2 text-[10px] font-semibold uppercase tracking-wider ${
+                    step?.current
+                      ? "text-primary"
+                      : step?.done
+                        ? "text-emerald-600 dark:text-emerald-400"
+                        : step?.unlocked
+                          ? "text-muted-foreground/70"
+                          : "text-muted-foreground/40"
+                  }`}
+                >
+                  {step?.done ? (
+                    <Check className="h-3 w-3" />
+                  ) : !step?.unlocked ? (
+                    <Lock className="h-3 w-3" />
+                  ) : (
+                    <span>{phase.num}</span>
+                  )}
+                  {phase.label}
+                </span>
+                {phaseItems.map(renderTab)}
+              </Fragment>
+            );
+          })}
       </div>
     </nav>
   );

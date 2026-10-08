@@ -12,6 +12,9 @@ import {
   CalendarDays,
   Clock,
   ShieldCheck,
+  KeyRound,
+  UserCog,
+  KeySquare,
 } from "lucide-react";
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
@@ -155,6 +158,41 @@ export default async function SettingsPage() {
                 title="Approval Thresholds"
                 description="When stock adjustments, prices, and payments require approval"
               />
+            </div>
+          </div>
+
+          {/* Security & Access */}
+          <div className="space-y-3">
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Security &amp; Access</h2>
+            <div className="grid gap-3 md:grid-cols-2">
+              <SettingsCard
+                href="/dashboard/settings/roles"
+                icon={KeyRound}
+                iconColor="text-violet-500"
+                iconBg="bg-violet-500/10"
+                title="Roles & Permissions"
+                description="Every role and the permissions it holds, read from the code that enforces them"
+              />
+              {isAdmin && (
+                <SettingsCard
+                  href="/dashboard/users"
+                  icon={UserCog}
+                  iconColor="text-sky-500"
+                  iconBg="bg-sky-500/10"
+                  title="Users & Team"
+                  description="Invite people, assign roles, deactivate accounts"
+                />
+              )}
+              {isAdmin && (
+                <SettingsCard
+                  href="/dashboard/licensing"
+                  icon={KeySquare}
+                  iconColor="text-teal-500"
+                  iconBg="bg-teal-500/10"
+                  title="Licensing"
+                  description="Issue, renew and revoke product license keys"
+                />
+              )}
             </div>
           </div>
 

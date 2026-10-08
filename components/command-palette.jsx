@@ -41,6 +41,10 @@ import {
   ScrollText,
   Scale,
   CheckSquare,
+  ShieldCheck,
+  ShieldAlert,
+  Archive,
+  Tags,
 } from "lucide-react";
 import { useDebouncedCallback } from "use-debounce";
 import { globalSearch } from "@/app/db/actions/search-actions";
@@ -55,6 +59,15 @@ const PAGES = [
   { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { label: "Executive Overview", href: "/dashboard/executive", icon: TrendingUp, aliases: ["ceo", "exec", "overview", "snapshot"] },
   { label: "Approvals", href: "/dashboard/approvals", icon: CheckSquare },
+
+  // ── Departments (landing dashboards) ───────────────
+  { label: "Projects Dept", href: "/dashboard/departments/projects", icon: FolderKanban, category: "Departments", aliases: ["department", "project control", "commercial", "qs"] },
+  { label: "Finance Dept", href: "/dashboard/departments/finance", icon: Landmark, category: "Departments", aliases: ["department", "accounts", "accounting", "books"] },
+  { label: "Technical Dept", href: "/dashboard/departments/technical", icon: Scale, category: "Departments", aliases: ["department", "calibration", "inspection", "17025", "17020"] },
+  { label: "Business Dev & Sales Dept", href: "/dashboard/departments/business-dev", icon: Briefcase, category: "Departments", aliases: ["department", "sales", "crm", "pipeline", "bids", "tenders"] },
+  { label: "ICT, Quality & Compliance Dept", href: "/dashboard/departments/ict-quality", icon: ShieldCheck, category: "Departments", aliases: ["department", "ict", "it", "quality", "qms", "compliance", "hse", "service desk"] },
+  { label: "General Operations Dept", href: "/dashboard/departments/general-ops", icon: Package, category: "Departments", aliases: ["department", "operations", "stores", "inventory", "procurement", "fleet"] },
+  { label: "HR & Admin Dept", href: "/dashboard/departments/hr-admin", icon: Users, category: "Departments", aliases: ["department", "hr", "human resources", "payroll", "admin", "users"] },
 
   // ── Inventory ──────────────────────────────────────
   { label: "Products", href: "/dashboard/stocks", icon: Boxes, category: "Inventory" },
@@ -89,6 +102,11 @@ const PAGES = [
 
   // ── Projects ───────────────────────────────────────
   { label: "Projects", href: "/dashboard/projects", icon: FolderKanban, module: "projects" },
+  { label: "New Project", href: "/dashboard/projects/create", icon: Plus, module: "projects", aliases: ["start a project", "create project", "add project", "project gate"] },
+  { label: "Sealed Budgets", href: "/dashboard/projects/sealed-budgets", icon: ShieldCheck, module: "projects", aliases: ["budgets", "approved budgets", "commercial", "contract value", "margin"] },
+  { label: "Completed Work", href: "/dashboard/projects/archive", icon: Archive, module: "projects", aliases: ["archive", "closed projects", "completed projects", "finished"] },
+  { label: "Findings", href: "/dashboard/projects/findings", icon: ShieldAlert, module: "projects", aliases: ["problems", "exceptions", "no budget", "overspent", "no margin", "issues"] },
+  { label: "Cost Codes", href: "/dashboard/projects/cost-codes", icon: Tags, module: "projects", aliases: ["cost code", "codes", "boq codes"] },
   { label: "Technical", href: "/dashboard/technical", icon: ClipboardList, module: "projects", aliases: ["workflow reports", "report registry", "site report", "service report", "calibration record", "technical report"] },
 
   // ── Admin ──────────────────────────────────────────
@@ -116,6 +134,7 @@ const PAGES = [
   { label: "Parties", href: "/dashboard/parties", icon: Briefcase, category: "Finance", aliases: ["contacts", "people", "customer supplier"] },
   { label: "Chart of Accounts", href: "/dashboard/accounts", icon: BookOpen, category: "Finance", aliases: ["coa"] },
   { label: "Journal Entries", href: "/dashboard/journal", icon: FileSpreadsheet, category: "Finance", aliases: ["je", "manual entry"] },
+  { label: "Commissions", href: "/dashboard/commissions", icon: TrendingUp, category: "Finance", aliases: ["commission", "sales commission", "tiers", "leaderboard", "top earners", "payroll commission"] },
   { label: "Banking", href: "/dashboard/banking", icon: Landmark, category: "Finance", aliases: ["bank feed", "reconcile"] },
   { label: "Bank Statement Upload", href: "/dashboard/banking/upload", icon: Landmark, category: "Finance", aliases: ["import statement"] },
   { label: "Unallocated Transactions", href: "/dashboard/banking/unallocated", icon: Landmark, category: "Finance" },

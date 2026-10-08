@@ -8,7 +8,7 @@ import {
   getProjectById,
   getProjectBudgets,
 } from "@/app/db/actions/project-actions";
-import { getCostCodes } from "@/app/db/actions/project-actions";
+import { getCostCodes, getBudgetableBoqItems } from "@/app/db/actions/project-actions";
 import {
   PROJECT_MANAGE_ROLES,
   FINANCE_WRITE_ROLES,
@@ -33,13 +33,15 @@ export default async function BudgetPage({ params }) {
 
   // Cost codes, not the chart of accounts — 0073. Company-wide codes plus any
   // scoped to this project.
-  const [project, budgets, costCodes, expenseAccounts] = await Promise.all([
+  const [project, budgets, costCodes, expenseAccounts, boqItems] = await Promise.all([
     getProjectById(id),
     getProjectBudgets(id),
     getCostCodes(id),
     // Only ever used by the finance-gated "New cost code" dialog. Loaded here
     // rather than fetched on open so the dialog has no loading state.
     getExpenseAccountsForCategories(),
+    // The priced BOQ items the budget is built against — cost codes come from these.
+    getBudgetableBoqItems(id),
   ]);
 
   if (!project) notFound();
@@ -77,8 +79,12 @@ export default async function BudgetPage({ params }) {
         <BudgetForm
           projectId={id}
           costCodes={costCodes}
+          boqItems={boqItems}
           canManageCostCodes={canManageCostCodes}
           expenseAccounts={expenseAccounts}
+          defaultAccountId={project.defaultCostAccountId || ""}
+          contractValue={project.contractValue || 0}
+          vatRate={project.vatRate || 16}
         />
       )}
 
@@ -92,6 +98,7 @@ export default async function BudgetPage({ params }) {
               budget={budget}
               projectId={id}
               costCodes={costCodes}
+              boqItems={boqItems}
               canManageCostCodes={canManageCostCodes}
               expenseAccounts={expenseAccounts}
               canCreate={canCreate}

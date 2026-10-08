@@ -128,6 +128,40 @@ function toScreenProject(
       totalCosts: actuals.costs,
       totalCommitted: actuals.committed,
     },
+    defaultCostAccountId: row.defaultCostAccountId ?? null,
+    // Project data sheet — 0122
+    awardedToCompany: row.awardedToCompany ?? "",
+    // Contract administration — 0124
+    formOfContract: row.formOfContract ?? "",
+    engineerName: row.engineerName ?? "",
+    noticeDays: row.noticeDays ?? "",
+    detailClaimDays: row.detailClaimDays ?? "",
+    employerPaysDays: row.employerPaysDays ?? "",
+    latePaymentInterestPct: row.latePaymentInterestPct ?? "",
+    retentionLimit: row.retentionLimit ?? "",
+    ldPerDay: row.ldPerDay ?? "",
+    damagesCapPct: row.damagesCapPct ?? "",
+    variationCapPct: row.variationCapPct ?? "",
+    perfSecurityExpires: row.perfSecurityExpires ?? "",
+    advanceGuaranteeExpires: row.advanceGuaranteeExpires ?? "",
+    contractNumber: row.contractNumber ?? "",
+    county: row.county ?? "",
+    scope: row.scope ?? "",
+    contractSumSource: row.contractSumSource ?? "",
+    vatRate: row.vatRate ?? "",
+    retentionPercent: row.retentionPercent ?? "",
+    defectsMonths: row.defectsMonths ?? "",
+    advanceAmount: row.advanceAmount ?? "",
+    bondCost: row.bondCost ?? "",
+    insuranceCost: row.insuranceCost ?? "",
+    financeCost: row.financeCost ?? "",
+    statutoryCost: row.statutoryCost ?? "",
+    contractMonths: row.contractMonths ?? "",
+    bankAccount: row.bankAccount ?? "",
+    siteAgentName: row.siteAgentName ?? "",
+    qsName: row.qsName ?? "",
+    fundsRingfenced: Boolean(row.fundsRingfenced),
+    boqOnFile: Boolean(row.boqOnFile),
     createdBy: { id: row.createdById ?? null, name: row.createdByName ?? "" },
     lastModifiedBy: {
       id: row.lastModifiedById ?? null,
@@ -216,6 +250,21 @@ export async function getProjectsForWorkspace() {
       projectNumber: r.projectNumber,
       name: r.name,
       status: r.status,
+      // Section flags (type gating) and lifecycle flags (phase gating) ride
+      // along so the client sub-nav can both show the right sections and lock
+      // a phase until the previous one is done — no extra round trip.
+      showsBoq: r.showsBoq,
+      showsProgramme: r.showsProgramme,
+      showsInstructions: r.showsInstructions,
+      showsDiary: r.showsDiary,
+      showsCertificates: r.showsCertificates,
+      showsCashRequisitions: r.showsCashRequisitions,
+      progressPercent: r.progressPercent,
+      hasType: r.hasType,
+      hasClient: r.hasClient,
+      hasBoq: r.hasBoq,
+      hasApprovedBudget: r.hasApprovedBudget,
+      hasTasks: r.hasTasks,
     }));
   });
 }
@@ -246,6 +295,156 @@ export async function getProjectBudgetVsActual(projectId: string) {
   return withAuthorizedTenant([], (tx) =>
     repo.getProjectBudgetVsActual(tx, projectId),
   );
+}
+
+/** A short, stable checksum of the approved figures — the budget's "seal". */
+function sealHash(lines: Array<{ costCode?: string | null; budgeted: number }>) {
+  const s = lines
+    .map((l) => `${l.costCode ?? ""}:${Math.round(l.budgeted)}`)
+    .join("|");
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return h.toString(16).toUpperCase().padStart(8, "0").slice(-8);
+}
+
+/**
+ * The "sealed budgets" list — every project with an approved budget, each with
+ * its contract-less-tax, sealed total, margin, the budget lines (budget /
+ * committed / spent / left) and a seal checksum (0124, QSL template).
+ */
+export async function getSealedBudgets() {
+  return withAuthorizedTenant([], async (tx) => {
+    const heads = await repo.listApprovedBudgetProjects(tx);
+    const out = [];
+    for (const h of heads) {
+      const bva = await repo.getProjectBudgetVsActual(tx, h.id);
+      const lines = bva?.lines ?? [];
+      const total = bva?.totalBudgeted ?? 0;
+      const vat = h.vatRate == null ? 16 : h.vatRate;
+      const net = h.contractValue > 0 ? h.contractValue / (1 + vat / 100) : 0;
+      const margin = net > 0 ? Math.round(((net - total) / net) * 1000) / 10 : null;
+      out.push({
+        ...h,
+        lines,
+        total,
+        committed: lines.reduce((s, l) => s + (l.committed || 0), 0),
+        spent: lines.reduce((s, l) => s + (l.actual || 0), 0),
+        left: lines.reduce((s, l) => s + (l.available || 0), 0),
+        contractLessTax: net,
+        margin,
+        seal: sealHash(lines),
+      });
+    }
+    return out;
+  });
+}
+
+/**
+ * The findings register — what reading the books turns up.
+ *
+ * The QSL template promised this screen and it is the point of the module: a
+ * budget exists to be beaten, a job exists to earn, and a figure that proves
+ * neither is a problem the system should name rather than hide. Nothing here is
+ * entered by hand — every row is computed from the sealed budgets and the live
+ * project list, so it cannot drift from the numbers it reports on.
+ *
+ * Four checks, in order of how much they cost the business:
+ *   1. ON SITE WITH NO APPROVED BUDGET — an active job cleared to spend against
+ *      a figure nobody signed. The budget gate exists to stop exactly this.
+ *   2. NO MARGIN — a budget whose cost equals or exceeds the recoverable
+ *      contract value: the job is priced to lose money before it starts.
+ *   3. A LINE OVERSPENT — committed-plus-spent past the budgeted figure, so the
+ *      recovery the certificate assumes is already gone.
+ *   4. THIN MARGIN — under ten per cent, which a single variation erodes.
+ */
+export async function getProjectFindings() {
+  const [sealed, all] = await Promise.all([
+    getSealedBudgets(),
+    getProjectsForWorkspace(),
+  ]);
+  const sealedIds = new Set(sealed.map((s) => s.id));
+
+  const noApprovedBudget = all.filter(
+    (p) => p.status === "active" && !sealedIds.has(p.id),
+  );
+  const noMargin = sealed.filter((s) => s.margin != null && s.margin <= 0);
+  const thinMargin = sealed.filter(
+    (s) => s.margin != null && s.margin > 0 && s.margin < 10,
+  );
+  const overspent = sealed
+    .map((s) => ({
+      id: s.id,
+      name: s.name,
+      projectNumber: s.projectNumber,
+      overLines: (s.lines ?? []).filter((l) => (l.available ?? 0) < 0),
+    }))
+    .filter((s) => s.overLines.length > 0);
+
+  return {
+    noApprovedBudget,
+    noMargin,
+    thinMargin,
+    overspent,
+    total:
+      noApprovedBudget.length +
+      noMargin.length +
+      thinMargin.length +
+      overspent.length,
+  };
+}
+
+/**
+ * Save the contract-administration fields for a project — 0124. A focused
+ * update (not the full data-sheet form), so it can be its own screen.
+ */
+export async function saveContractAdminData(projectId: string, formData: FormData) {
+  if (!projectId) return { error: "No project." };
+  const txt = (k: string) => {
+    const v = formData.get(k);
+    return v == null || String(v).trim() === "" ? null : String(v).trim();
+  };
+  const int = (k: string) => {
+    const v = txt(k);
+    if (v == null) return null;
+    const n = parseInt(v, 10);
+    return Number.isNaN(n) ? null : n;
+  };
+  const numv = (k: string) => {
+    const v = txt(k);
+    if (v == null) return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? String(n) : null;
+  };
+  try {
+    await withAuthorizedTenant(
+      PROJECT_MANAGE_ROLES as unknown as string[],
+      async (tx, { user }) => {
+        const actor = actorFrom(user);
+        await repo.updateProject(tx, projectId, {
+          formOfContract: txt("formOfContract"),
+          engineerName: txt("engineerName"),
+          noticeDays: int("noticeDays"),
+          detailClaimDays: int("detailClaimDays"),
+          employerPaysDays: int("employerPaysDays"),
+          latePaymentInterestPct: numv("latePaymentInterestPct"),
+          retentionPercent: numv("retentionPercent"),
+          retentionLimit: numv("retentionLimit"),
+          defectsMonths: int("defectsMonths"),
+          ldPerDay: numv("ldPerDay"),
+          damagesCapPct: numv("damagesCapPct"),
+          variationCapPct: numv("variationCapPct"),
+          perfSecurityExpires: txt("perfSecurityExpires"),
+          advanceGuaranteeExpires: txt("advanceGuaranteeExpires"),
+          lastModifiedById: actor.id,
+          lastModifiedByName: actor.name,
+        });
+      },
+    );
+    revalidatePath("/dashboard/projects/contract");
+    return { success: true, message: "Contract data saved." };
+  } catch (error) {
+    return { error: userMessage(error) };
+  }
 }
 
 export async function getProjectTransactions(
@@ -450,17 +649,46 @@ const projectSchema = z.object({
   ),
   contractValue: optionalText,
   progressPercent: optionalText,
+  // ── Project data sheet — 0122 ─────────────────────────────────────────────
+  awardedToCompany: optionalText,
+  contractNumber: optionalText,
+  county: optionalText,
+  scope: optionalTextMax(500, "Scope too long"),
+  contractSumSource: optionalTextMax(300, "Too long"),
+  vatRate: optionalText,
+  retentionPercent: optionalText,
+  defectsMonths: optionalText,
+  advanceAmount: optionalText,
+  bondCost: optionalText,
+  insuranceCost: optionalText,
+  financeCost: optionalText,
+  statutoryCost: optionalText,
+  contractMonths: optionalText,
+  bankAccount: optionalText,
+  siteAgentName: optionalText,
+  qsName: optionalText,
+  fundsRingfenced: optionalText,
+  boqOnFile: optionalText,
 });
 
-const budgetLineSchema = z.object({
-  /**
-   * A cost code, not an account — 0073. The budget-holder works in their own
-   * vocabulary and the account is finance's mapping, resolved by the database.
-   */
-  costCodeId: z.string().min(1, "Cost code is required"),
-  description: optionalTextMax(500, "Description too long"),
-  amount: z.coerce.number().min(0, "Amount must be positive"),
-});
+const budgetLineSchema = z
+  .object({
+    /**
+     * A cost code, not an account — 0073. EITHER an existing cost code (the
+     * manual fallback), OR a set of BOQ item ids plus the account they charge —
+     * from which a cost code is created at save time (0118). One of the two.
+     */
+    costCodeId: optionalText,
+    boqItemIds: z.array(z.string()).optional().default([]),
+    accountId: optionalText,
+    description: optionalTextMax(500, "Description too long"),
+    category: optionalText,
+    amount: z.coerce.number().min(0, "Amount must be positive"),
+  })
+  .refine(
+    (l) => Boolean(l.costCodeId) || ((l.boqItemIds?.length ?? 0) > 0 && Boolean(l.accountId)),
+    { message: "Pick a cost code, or select BOQ items and the account they charge." },
+  );
 
 const budgetSchema = z.object({
   projectId: z.string().min(1, "Project is required"),
@@ -502,6 +730,26 @@ function projectFields(formData: FormData) {
     billingModel: formData.get("billingModel"),
     contractValue: formData.get("contractValue"),
     progressPercent: formData.get("progressPercent"),
+    // Project data sheet — 0122
+    awardedToCompany: formData.get("awardedToCompany"),
+    contractNumber: formData.get("contractNumber"),
+    county: formData.get("county"),
+    scope: formData.get("scope"),
+    contractSumSource: formData.get("contractSumSource"),
+    vatRate: formData.get("vatRate"),
+    retentionPercent: formData.get("retentionPercent"),
+    defectsMonths: formData.get("defectsMonths"),
+    advanceAmount: formData.get("advanceAmount"),
+    bondCost: formData.get("bondCost"),
+    insuranceCost: formData.get("insuranceCost"),
+    financeCost: formData.get("financeCost"),
+    statutoryCost: formData.get("statutoryCost"),
+    contractMonths: formData.get("contractMonths"),
+    bankAccount: formData.get("bankAccount"),
+    siteAgentName: formData.get("siteAgentName"),
+    qsName: formData.get("qsName"),
+    fundsRingfenced: formData.get("fundsRingfenced"),
+    boqOnFile: formData.get("boqOnFile"),
   };
 }
 
@@ -565,8 +813,41 @@ function toRepoInput(data: z.infer<typeof projectSchema>) {
       .split(",")
       .map((t) => t.trim())
       .filter(Boolean),
+    // Project data sheet — 0122
+    awardedToCompany: data.awardedToCompany || null,
+    contractNumber: data.contractNumber || null,
+    county: data.county || null,
+    scope: data.scope || null,
+    contractSumSource: data.contractSumSource || null,
+    vatRate: numOrNull(data.vatRate),
+    retentionPercent: numOrNull(data.retentionPercent),
+    defectsMonths: intOrNull(data.defectsMonths),
+    advanceAmount: money(data.advanceAmount),
+    bondCost: money(data.bondCost),
+    insuranceCost: money(data.insuranceCost),
+    financeCost: money(data.financeCost),
+    statutoryCost: money(data.statutoryCost),
+    contractMonths: intOrNull(data.contractMonths),
+    bankAccount: data.bankAccount || null,
+    siteAgentName: data.siteAgentName || null,
+    qsName: data.qsName || null,
+    fundsRingfenced: boolFrom(data.fundsRingfenced),
+    boqOnFile: boolFrom(data.boqOnFile),
   };
 }
+
+const numOrNull = (s: string | null | undefined) => {
+  if (s == null || s === "") return null;
+  const n = Number(s);
+  return Number.isFinite(n) ? String(n) : null;
+};
+const intOrNull = (s: string | null | undefined) => {
+  if (s == null || s === "") return null;
+  const n = parseInt(s, 10);
+  return Number.isNaN(n) ? null : n;
+};
+const boolFrom = (s: string | null | undefined) =>
+  s === "true" || s === "on" || s === "1" || s === "yes";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Writes
@@ -802,6 +1083,71 @@ function parseBudgetForm(formData: FormData) {
   return { ok: true as const, data: parsed.data };
 }
 
+/**
+ * Turn parsed budget lines into `{ costCodeId, description, amount }` the repo
+ * takes. A line that names a cost code passes through; a line that names BOQ
+ * items has its cost code ensured (created if new) against the account it
+ * charges — "cost codes come with the budget".
+ */
+async function resolveBudgetLines(
+  tx: Parameters<typeof repo.createBudget>[0],
+  companyId: string,
+  projectId: string,
+  lines: Array<{ costCodeId?: string; boqItemIds?: string[]; accountId?: string; description?: string; category?: string; amount: number }>,
+  actor: { id: string | null; name: string },
+) {
+  const out: Array<{ costCodeId: string; description: string; category: string | null; amount: string }> = [];
+  for (const l of lines) {
+    let costCodeId = l.costCodeId || "";
+    if (!costCodeId) {
+      costCodeId = await repo.ensureCostCodeForBoqItems(tx, {
+        companyId,
+        projectId,
+        boqItemIds: l.boqItemIds ?? [],
+        accountId: l.accountId ?? "",
+        actor,
+      });
+    }
+    out.push({ costCodeId, description: l.description || "", category: l.category || null, amount: l.amount.toFixed(4) });
+  }
+  return out;
+}
+
+/** The priced BOQ items the budget can be built against, cost-code aware. */
+export async function getBudgetableBoqItems(projectId: string) {
+  if (!projectId) return [];
+  return withAuthorizedTenant([], (tx) => repo.listBudgetableBoqItems(tx, projectId));
+}
+
+/**
+ * Set (or clear) the account a project's budget lines default to — 0119.
+ *
+ * A budget is built from BOQ items and most projects charge one account for
+ * every item, so this remembers it once instead of asking on every line. Gated
+ * to the roles that build the budget; passing an empty id clears it.
+ */
+export async function setProjectDefaultCostAccount(
+  projectId: string,
+  accountId: string,
+) {
+  if (!projectId) return { error: "No project." };
+  try {
+    await withAuthorizedTenant(
+      PROJECT_MANAGE_ROLES as unknown as string[],
+      (tx) =>
+        repo.setProjectDefaultCostAccount(
+          tx,
+          projectId,
+          accountId ? accountId : null,
+        ),
+    );
+    revalidatePath(`/dashboard/projects/${projectId}/budget`);
+    return { success: true };
+  } catch (error) {
+    return { error: userMessage(error) };
+  }
+}
+
 export async function createProjectBudget(prevState: unknown, formData: FormData) {
   const parsed = parseBudgetForm(formData);
   if (!parsed.ok) return { errors: parsed.errors };
@@ -813,15 +1159,12 @@ export async function createProjectBudget(prevState: unknown, formData: FormData
         const project = await repo.getProjectById(tx, parsed.data.projectId);
         if (!project) throw new Error("Project not found");
         const actor = actorFrom(user);
+        const lines = await resolveBudgetLines(tx, companyId, parsed.data.projectId, parsed.data.lines, actor);
         return repo.createBudget(tx, {
           companyId,
           projectId: parsed.data.projectId,
           revisionNotes: parsed.data.revisionNotes,
-          lines: parsed.data.lines.map((l) => ({
-            costCodeId: l.costCodeId,
-            description: l.description || "",
-            amount: l.amount.toFixed(4),
-          })),
+          lines,
           createdById: actor.id,
           createdByName: actor.name,
         });
@@ -849,22 +1192,20 @@ export async function updateProjectBudget(prevState: unknown, formData: FormData
   try {
     await withAuthorizedTenant(
       PROJECT_MANAGE_ROLES as unknown as string[],
-      async (tx, { companyId }) => {
+      async (tx, { user, companyId }) => {
         const budget = await repo.getBudgetWithLines(tx, budgetId);
         if (!budget) throw new Error("Budget not found");
         if (budget.status !== "draft") {
           throw new Error("Only a draft budget can be edited. Create a new version.");
         }
-        return repo.replaceBudgetLines(
+        const lines = await resolveBudgetLines(
           tx,
-          budgetId,
           companyId,
-          parsed.data.lines.map((l) => ({
-            costCodeId: l.costCodeId,
-            description: l.description || "",
-            amount: l.amount.toFixed(4),
-          })),
+          parsed.data.projectId,
+          parsed.data.lines,
+          actorFrom(user),
         );
+        return repo.replaceBudgetLines(tx, budgetId, companyId, lines);
       },
     );
     revalidatePath(`/dashboard/projects/${parsed.data.projectId}`);

@@ -4,6 +4,7 @@ import {
   getProjectAssignments,
 } from "@/app/db/actions/project-actions";
 import ProjectTasks from "../components/ProjectTasks";
+import ProgressReport from "../components/ProgressReport";
 import { hasRole, PROJECT_MANAGE_ROLES } from "@/lib/utils/role-gates";
 import { getWorkspaceContext } from "../lib/workspace";
 import WorkspaceHeader from "../components/WorkspaceHeader";
@@ -369,6 +370,10 @@ export default async function ProgrammePage({ searchParams }) {
           />
         </div>
       </Card>
+
+      {/* Programme & progress report — baseline vs current, float/slip and a
+          three-week look-ahead, on both views (0122, QSL template). */}
+      <ProgressReport tasks={tasks} />
 
       {view === "list" ? (
         <>

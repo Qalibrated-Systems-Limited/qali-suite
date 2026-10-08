@@ -6,6 +6,7 @@ import {
   projectBudgets,
   projectBudgetLines,
   projectCostCodes,
+  projectCostCodeBoqItems,
   projectAssignments,
   projectTasks,
   projectBoqs,
@@ -251,6 +252,18 @@ export async function getProjectById(tx: Tx, projectId: string) {
   return row ?? null;
 }
 
+/** Remember (or clear) the account this project's budget lines default to — 0119. */
+export async function setProjectDefaultCostAccount(
+  tx: Tx,
+  projectId: string,
+  accountId: string | null,
+) {
+  await tx
+    .update(projects)
+    .set({ defaultCostAccountId: accountId })
+    .where(eq(projects.id, projectId));
+}
+
 /** The picker every other module renders: planning and active only. */
 /**
  * Every project, for the workspace switcher — not just the live ones.
@@ -296,6 +309,15 @@ export async function listProjectsForWorkspace(tx: Tx) {
       showsDiary: sql<boolean>`COALESCE(${projectTypes.showsDiary}, true)`,
       showsCertificates: sql<boolean>`COALESCE(${projectTypes.showsCertificates}, true)`,
       showsCashRequisitions: sql<boolean>`COALESCE(${projectTypes.showsCashRequisitions}, true)`,
+      // Lifecycle gating flags — cheap EXISTS, so the sub-nav can lock a phase
+      // until the previous one is done without a second round trip. Same checks
+      // getProjectSetupState makes, per project.
+      progressPercent: projects.progressPercent,
+      hasType: sql<boolean>`(${projects.typeId} IS NOT NULL)`,
+      hasClient: sql<boolean>`(${projects.clientPartyId} IS NOT NULL)`,
+      hasBoq: sql<boolean>`EXISTS (SELECT 1 FROM project_boqs q WHERE q.project_id = ${projects.id})`,
+      hasApprovedBudget: sql<boolean>`EXISTS (SELECT 1 FROM project_budgets b WHERE b.project_id = ${projects.id} AND b.status = 'approved')`,
+      hasTasks: sql<boolean>`EXISTS (SELECT 1 FROM project_tasks t WHERE t.project_id = ${projects.id})`,
     })
     .from(projects)
     .leftJoin(projectTypes, eq(projectTypes.id, projects.typeId))
@@ -815,6 +837,47 @@ export async function getProjectFinancialSummary(tx: Tx, projectId: string) {
  * said out loud here because a reader comparing the two figures deserves to
  * know why they differ.
  */
+/**
+ * Projects with an APPROVED budget — the "sealed budgets" list (0124).
+ * Carries the contract fields the card shows and the budget's approval stamp.
+ */
+export async function listApprovedBudgetProjects(tx: Tx) {
+  const rows = (await tx.execute(sql`
+    SELECT p.id::text                         AS id,
+           p.project_number                   AS "projectNumber",
+           p.name                             AS name,
+           p.status                           AS status,
+           p.client_name                      AS "clientName",
+           p.contract_number                  AS "contractNumber",
+           p.contract_value::float8           AS "contractValue",
+           p.vat_rate::float8                 AS "vatRate",
+           p.bank_account                     AS "bankAccount",
+           b.id::text                         AS "budgetId",
+           b.version                          AS version,
+           b.approved_by_name                 AS "approvedByName",
+           b.approved_at                      AS "approvedAt"
+      FROM projects p
+      JOIN project_budgets b
+        ON b.project_id = p.id AND b.status = 'approved'
+     ORDER BY p.project_number
+  `)) as unknown as Array<Record<string, unknown>>;
+  return rows.map((r) => ({
+    id: String(r.id),
+    projectNumber: String(r.projectNumber ?? ""),
+    name: String(r.name ?? ""),
+    status: String(r.status ?? ""),
+    clientName: r.clientName ? String(r.clientName) : "",
+    contractNumber: r.contractNumber ? String(r.contractNumber) : "",
+    contractValue: num(r.contractValue),
+    vatRate: r.vatRate == null ? null : num(r.vatRate),
+    bankAccount: r.bankAccount ? String(r.bankAccount) : "",
+    budgetId: String(r.budgetId),
+    version: Number(r.version ?? 1),
+    approvedByName: r.approvedByName ? String(r.approvedByName) : "",
+    approvedAt: r.approvedAt ? String(r.approvedAt) : null,
+  }));
+}
+
 export async function getProjectBudgetVsActual(tx: Tx, projectId: string) {
   const [budget] = await tx
     .select()
@@ -882,6 +945,7 @@ export async function getProjectBudgetVsActual(tx: Tx, projectId: string) {
       costCode: line.costCode,
       costCodeName: line.costCodeName,
       description: line.description,
+      category: line.category ?? null,
       budgeted,
       actual: spent,
       committed: pledged,
@@ -1028,6 +1092,7 @@ async function budgetLinesFor(tx: Tx, budgetIds: readonly string[]) {
       accountCodeAtBudget: projectBudgetLines.accountCodeAtBudget,
       accountNameAtBudget: projectBudgetLines.accountNameAtBudget,
       description: projectBudgetLines.description,
+      category: projectBudgetLines.category,
       amount: projectBudgetLines.amount,
     })
     .from(projectBudgetLines)
@@ -1097,6 +1162,8 @@ export interface BudgetLineInput {
   /** A cost code, not an account — 0073. The account is derived from it. */
   costCodeId: string;
   description?: string | null;
+  /** Cost category for the line — Materials, Labour, … (0122). */
+  category?: string | null;
   amount: string;
 }
 
@@ -1181,9 +1248,9 @@ export async function replaceBudgetLines(
   for (const [i, line] of lines.entries()) {
     const [row] = (await tx.execute(sql`
       INSERT INTO project_budget_lines
-        (company_id, budget_id, line_number, cost_code_id, description, amount)
+        (company_id, budget_id, line_number, cost_code_id, description, category, amount)
       VALUES (${companyId}, ${budgetId}, ${i + 1}, ${line.costCodeId},
-              ${line.description ?? ""}, ${line.amount})
+              ${line.description ?? ""}, ${line.category ?? null}, ${line.amount})
       RETURNING id::text AS id, account_id::text AS "accountId",
                 account_code_at_budget AS "accountCodeAtBudget",
                 account_name_at_budget AS "accountNameAtBudget"
@@ -1356,9 +1423,77 @@ export interface CreateProjectInput {
   budgetAmount?: string;
   budgetCurrency?: string;
   tags?: string[];
+  // Project data sheet — 0122
+  awardedToCompany?: string | null;
+  contractNumber?: string | null;
+  county?: string | null;
+  scope?: string | null;
+  contractSumSource?: string | null;
+  vatRate?: string | null;
+  retentionPercent?: string | null;
+  defectsMonths?: number | null;
+  advanceAmount?: string | null;
+  bondCost?: string | null;
+  insuranceCost?: string | null;
+  financeCost?: string | null;
+  statutoryCost?: string | null;
+  contractMonths?: number | null;
+  bankAccount?: string | null;
+  siteAgentName?: string | null;
+  qsName?: string | null;
+  fundsRingfenced?: boolean;
+  boqOnFile?: boolean;
+  // Contract administration — 0124
+  formOfContract?: string | null;
+  engineerName?: string | null;
+  noticeDays?: number | null;
+  detailClaimDays?: number | null;
+  employerPaysDays?: number | null;
+  latePaymentInterestPct?: string | null;
+  retentionLimit?: string | null;
+  ldPerDay?: string | null;
+  damagesCapPct?: string | null;
+  variationCapPct?: string | null;
+  perfSecurityExpires?: string | null;
+  advanceGuaranteeExpires?: string | null;
   createdById?: string | null;
   createdByName: string;
 }
+
+/** The data-sheet columns, shared by the insert and the update helpers — 0122. */
+const DATA_SHEET_COLUMNS = [
+  "awardedToCompany",
+  "contractNumber",
+  "county",
+  "scope",
+  "contractSumSource",
+  "vatRate",
+  "retentionPercent",
+  "defectsMonths",
+  "advanceAmount",
+  "bondCost",
+  "insuranceCost",
+  "financeCost",
+  "statutoryCost",
+  "contractMonths",
+  "bankAccount",
+  "siteAgentName",
+  "qsName",
+  "fundsRingfenced",
+  "boqOnFile",
+  "formOfContract",
+  "engineerName",
+  "noticeDays",
+  "detailClaimDays",
+  "employerPaysDays",
+  "latePaymentInterestPct",
+  "retentionLimit",
+  "ldPerDay",
+  "damagesCapPct",
+  "variationCapPct",
+  "perfSecurityExpires",
+  "advanceGuaranteeExpires",
+] as const;
 
 export async function createProject(tx: Tx, input: CreateProjectInput) {
   const projectNumber = await nextProjectNumber(tx, input.companyId);
@@ -1386,6 +1521,38 @@ export async function createProject(tx: Tx, input: CreateProjectInput) {
       budgetAmount: input.budgetAmount ?? "0",
       budgetCurrency: input.budgetCurrency || "KES",
       tags: input.tags ?? [],
+      // Project data sheet — 0122
+      awardedToCompany: input.awardedToCompany ?? null,
+      contractNumber: input.contractNumber ?? null,
+      county: input.county ?? null,
+      scope: input.scope ?? null,
+      contractSumSource: input.contractSumSource ?? null,
+      vatRate: input.vatRate ?? null,
+      retentionPercent: input.retentionPercent ?? null,
+      defectsMonths: input.defectsMonths ?? null,
+      advanceAmount: input.advanceAmount ?? null,
+      bondCost: input.bondCost ?? null,
+      insuranceCost: input.insuranceCost ?? null,
+      financeCost: input.financeCost ?? null,
+      statutoryCost: input.statutoryCost ?? null,
+      contractMonths: input.contractMonths ?? null,
+      bankAccount: input.bankAccount ?? null,
+      siteAgentName: input.siteAgentName ?? null,
+      qsName: input.qsName ?? null,
+      fundsRingfenced: input.fundsRingfenced ?? false,
+      boqOnFile: input.boqOnFile ?? false,
+      formOfContract: input.formOfContract ?? null,
+      engineerName: input.engineerName ?? null,
+      noticeDays: input.noticeDays ?? null,
+      detailClaimDays: input.detailClaimDays ?? null,
+      employerPaysDays: input.employerPaysDays ?? null,
+      latePaymentInterestPct: input.latePaymentInterestPct ?? null,
+      retentionLimit: input.retentionLimit ?? null,
+      ldPerDay: input.ldPerDay ?? null,
+      damagesCapPct: input.damagesCapPct ?? null,
+      variationCapPct: input.variationCapPct ?? null,
+      perfSecurityExpires: input.perfSecurityExpires ?? null,
+      advanceGuaranteeExpires: input.advanceGuaranteeExpires ?? null,
       createdById: input.createdById ?? null,
       createdByName: input.createdByName,
     })
@@ -1437,6 +1604,8 @@ export async function updateProject(
   set("budgetAmount", "budgetAmount");
   set("budgetCurrency", "budgetCurrency");
   set("tags", "tags");
+  // Project data sheet — 0122: each column has the same name here as on the row.
+  for (const col of DATA_SHEET_COLUMNS) set(col, col);
   set("lastModifiedById", "lastModifiedById");
   set("lastModifiedByName", "lastModifiedByName");
 
@@ -1541,6 +1710,148 @@ export async function createCostCode(
     })
     .returning();
   return row;
+}
+
+/**
+ * The priced BOQ items of a project's effective bill, each with the cost code
+ * that already covers it (if any). This is the list the budget builds against —
+ * cost codes come from the bill.
+ */
+export async function listBudgetableBoqItems(tx: Tx, projectId: string) {
+  const boq = await getEffectiveBoq(tx, projectId);
+  if (!boq) return [];
+  const rows = (await tx.execute(sql`
+    SELECT i.id, i.item_code, i.description, i.unit,
+           i.quantity, i.rate, (i.quantity * i.rate)::numeric(19,4) AS amount,
+           (SELECT l.cost_code_id FROM project_cost_code_boq_items l
+             WHERE l.boq_item_id = i.id LIMIT 1) AS cost_code_id,
+           -- The bill each item sits under: the root of its ltree path, whose
+           -- label is the root item's id with dashes turned to underscores.
+           root.id        AS bill_id,
+           root.item_code AS bill_code,
+           root.description AS bill_title
+      FROM project_boq_items i
+      LEFT JOIN project_boq_items root
+        ON root.boq_id = i.boq_id
+       AND root.id = replace(subpath(i.path, 0, 1)::text, '_', '-')::uuid
+     WHERE i.boq_id = ${boq.id}
+       AND i.quantity IS NOT NULL AND i.rate IS NOT NULL
+     ORDER BY i.sort_order
+  `)) as unknown as Array<Record<string, unknown>>;
+  return rows.map((r) => ({
+    id: String(r.id),
+    itemCode: r.item_code == null ? null : String(r.item_code),
+    description: String(r.description),
+    unit: r.unit == null ? null : String(r.unit),
+    quantity: r.quantity == null ? null : String(r.quantity),
+    rate: r.rate == null ? null : String(r.rate),
+    amount: num(r.amount),
+    costCodeId: r.cost_code_id == null ? null : String(r.cost_code_id),
+    billId: r.bill_id == null ? null : String(r.bill_id),
+    billCode: r.bill_code == null ? null : String(r.bill_code),
+    billTitle: r.bill_title == null ? null : String(r.bill_title),
+  }));
+}
+
+/** A project cost code whose covered-item set is EXACTLY these ids, or null. */
+async function findCostCodeCoveringExactly(tx: Tx, projectId: string, itemIds: string[]) {
+  const [row] = (await tx.execute(sql`
+    SELECT cc.id, cc.account_id
+      FROM project_cost_codes cc
+      JOIN project_cost_code_boq_items l ON l.cost_code_id = cc.id
+     WHERE cc.project_id = ${projectId}::uuid
+     GROUP BY cc.id, cc.account_id
+    HAVING array_agg(l.boq_item_id ORDER BY l.boq_item_id)
+         = ${sql`ARRAY[${sql.join(itemIds.map((id) => sql`${id}::uuid`), sql`, `)}]::uuid[]`}
+     LIMIT 1
+  `)) as unknown as Array<{ id: string; account_id: string }>;
+  return row ? { id: String(row.id), accountId: String(row.account_id) } : null;
+}
+
+/**
+ * Ensure a cost code exists covering exactly these BOQ items, charging the given
+ * account, and return its id. Reuses one if the same item set is already coded;
+ * otherwise creates a code named after the item(s). This is how "cost codes come
+ * with the budget" — they are born when the manager budgets the items.
+ */
+export async function ensureCostCodeForBoqItems(
+  tx: Tx,
+  input: {
+    companyId: string;
+    projectId: string;
+    boqItemIds: string[];
+    accountId: string;
+    actor: { id?: string | null; name?: string | null };
+  },
+) {
+  const ids = [...new Set(input.boqItemIds.filter(Boolean))].sort();
+  if (!ids.length) throw new Error("Select at least one BOQ item to budget.");
+  if (!input.accountId) throw new Error("Say which account these items charge.");
+
+  const existing = await findCostCodeCoveringExactly(tx, input.projectId, ids);
+  if (existing) {
+    if (existing.accountId !== input.accountId) {
+      await tx
+        .update(projectCostCodes)
+        .set({ accountId: input.accountId, updatedAt: new Date() })
+        .where(eq(projectCostCodes.id, existing.id));
+    }
+    return existing.id;
+  }
+
+  const items = await tx
+    .select({ id: projectBoqItems.id, itemCode: projectBoqItems.itemCode, description: projectBoqItems.description })
+    .from(projectBoqItems)
+    .where(inArray(projectBoqItems.id, ids));
+  const byId = Object.fromEntries(items.map((i) => [i.id, i]));
+  const ordered = ids.map((id) => byId[id]).filter(Boolean);
+  const codes = ordered.map((i) => (i.itemCode || "").trim()).filter(Boolean);
+
+  // A readable base code from the item numbers, unique per project, ≤ 20 chars.
+  let base =
+    ordered.length === 1
+      ? (codes[0] || `ITM-${ids[0].slice(0, 4)}`)
+      : (codes.length ? `${codes[0]}+${codes.length - 1}` : `GRP-${ids[0].slice(0, 4)}`);
+  base = base.toUpperCase().slice(0, 20);
+
+  const taken = new Set(
+    (
+      (await tx.execute(sql`
+        SELECT upper(code) AS code FROM project_cost_codes WHERE project_id = ${input.projectId}::uuid
+      `)) as unknown as Array<{ code: string }>
+    ).map((r) => r.code),
+  );
+  let code = base;
+  let n = 2;
+  while (taken.has(code)) {
+    const suffix = `-${n++}`;
+    code = `${base.slice(0, 20 - suffix.length)}${suffix}`;
+  }
+
+  const name =
+    ordered.length === 1
+      ? ordered[0].description
+      : `BOQ items ${codes.length ? codes.join(", ") : ids.length} (grouped)`;
+
+  const cc = await createCostCode(tx, {
+    companyId: input.companyId,
+    code,
+    name: (name || code).slice(0, 100),
+    accountId: input.accountId,
+    projectId: input.projectId,
+    description: "",
+    createdById: input.actor?.id ?? null,
+    createdByName: input.actor?.name || "System",
+  });
+
+  for (const boqItemId of ids) {
+    await tx.insert(projectCostCodeBoqItems).values({
+      companyId: input.companyId,
+      costCodeId: cc.id,
+      boqItemId,
+    });
+  }
+  return cc.id;
 }
 
 export async function updateCostCode(
@@ -3624,6 +3935,8 @@ export async function getProjectSetupState(tx: Tx, projectId: string) {
                                                                     AS has_boq,
       EXISTS (SELECT 1 FROM project_boqs q
                WHERE q.project_id = p.id AND q.status = 'awarded')   AS has_awarded_boq,
+      EXISTS (SELECT 1 FROM project_methodologies m WHERE m.project_id = p.id)
+                                                                    AS has_methodology,
       EXISTS (SELECT 1 FROM project_tasks t WHERE t.project_id = p.id)
                                                                     AS has_tasks
       FROM projects p
@@ -3641,6 +3954,7 @@ export async function getProjectSetupState(tx: Tx, projectId: string) {
     hasApprovedBudget: b("has_approved_budget"),
     hasBoq: b("has_boq"),
     hasAwardedBoq: b("has_awarded_boq"),
+    hasMethodology: b("has_methodology"),
     hasTasks: b("has_tasks"),
   };
 }
