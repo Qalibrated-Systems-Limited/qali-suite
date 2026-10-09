@@ -20,7 +20,12 @@ import {
  * The client sidebar and the dashboard both import from here.
  */
 export const DEPARTMENTS = [
-  { slug: "projects", label: "Projects", icon: FolderKanban, blurb: "Project control — bills, budgets, certificates and cost." },
+  // `homeHref` overrides where this department's "Dashboard" link and landing
+  // go. Projects has its own rich module home at /dashboard/projects (the
+  // portfolio dashboard + register), so Dashboard and Overview are one page
+  // there rather than two. A department without an override uses the generic
+  // /dashboard/departments/<slug> landing.
+  { slug: "projects", label: "Projects", icon: FolderKanban, blurb: "Project control — bills, budgets, certificates and cost.", homeHref: "/dashboard/projects" },
   { slug: "finance", label: "Finance", icon: DollarSign, blurb: "The books — ledger, banking, tax, expenses and the financial reports." },
   { slug: "technical", label: "Technical", icon: FlaskConical, blurb: "Calibration and inspection to ISO/IEC 17025 and 17020." },
   { slug: "business-dev", label: "Business Dev & Sales", icon: Briefcase, blurb: "The pipeline — leads, quotes, orders, bids and the shop." },

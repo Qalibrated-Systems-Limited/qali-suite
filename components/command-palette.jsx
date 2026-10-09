@@ -61,7 +61,7 @@ const PAGES = [
   { label: "Approvals", href: "/dashboard/approvals", icon: CheckSquare },
 
   // ── Departments (landing dashboards) ───────────────
-  { label: "Projects Dept", href: "/dashboard/departments/projects", icon: FolderKanban, category: "Departments", aliases: ["department", "project control", "commercial", "qs"] },
+  { label: "Projects Dept", href: "/dashboard/projects", icon: FolderKanban, category: "Departments", aliases: ["department", "project control", "commercial", "qs"] },
   { label: "Finance Dept", href: "/dashboard/departments/finance", icon: Landmark, category: "Departments", aliases: ["department", "accounts", "accounting", "books"] },
   { label: "Technical Dept", href: "/dashboard/departments/technical", icon: Scale, category: "Departments", aliases: ["department", "calibration", "inspection", "17025", "17020"] },
   { label: "Business Dev & Sales Dept", href: "/dashboard/departments/business-dev", icon: Briefcase, category: "Departments", aliases: ["department", "sales", "crm", "pipeline", "bids", "tenders"] },

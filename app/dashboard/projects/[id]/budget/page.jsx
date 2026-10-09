@@ -14,6 +14,7 @@ import {
   FINANCE_WRITE_ROLES,
 } from "@/lib/utils/role-gates";
 import BudgetForm, { BudgetCard } from "../../components/BudgetForm";
+import ImportBudget from "../../components/ImportBudget";
 import { getExpenseAccountsForCategories } from "@/app/db/actions/claim-actions";
 
 export async function generateMetadata({ params }) {
@@ -72,6 +73,13 @@ export default async function BudgetPage({ params }) {
             {project.projectNumber} — {project.name}
           </p>
         </div>
+        {/* Upload a whole budget rather than typing it line by line. Same gate
+            as the create form below. */}
+        {canCreate && project.status !== "closed" && (
+          <div className="ml-auto">
+            <ImportBudget projectId={id} />
+          </div>
+        )}
       </div>
 
       {/* Create New Budget */}

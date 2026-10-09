@@ -447,13 +447,10 @@ export const getNavigationGroups = (user) => {
     id: "projects",
     defaultOpen: false,
     hidden: !canSeeProjectsNav(user?.role) || !hasMod("projects"),
+    // No "Overview" item: the department's "Dashboard" link (prepended by the
+    // renderer) already points at /dashboard/projects via DEPARTMENTS.homeHref,
+    // so the portfolio home is one entry, not a Dashboard/Overview pair.
     items: [
-      {
-        icon: LayoutDashboard,
-        label: "Overview",
-        id: "projects-dashboard",
-        href: "/dashboard/projects",
-      },
       {
         icon: Ruler,
         label: "Bill of Quantities",
@@ -1254,12 +1251,15 @@ export const SidebarContentGrouped = ({ onItemClick, user, collapsed }) => {
                       hidden: Boolean(g.hidden) || Boolean(it.hidden),
                     })),
               );
-              // First entry is the department's own dashboard (the rich landing).
+              // First entry is the department's own dashboard (the rich
+              // landing). A department may override where that goes — Projects
+              // points it at its own module home (/dashboard/projects), so its
+              // Dashboard and Overview are one page, not two.
               const home = {
                 icon: LayoutDashboard,
                 label: "Dashboard",
                 id: `dept-${dept.slug}-home`,
-                href: `/dashboard/departments/${dept.slug}`,
+                href: dept.homeHref ?? `/dashboard/departments/${dept.slug}`,
               };
               return {
                 type: "group",

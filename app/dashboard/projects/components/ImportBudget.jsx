@@ -4,40 +4,26 @@ import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Upload, Loader2, FileSpreadsheet, Download, X } from "lucide-react";
-import { importBoqFile } from "@/app/db/actions/boq-import-actions";
+import { importBudgetFile } from "@/app/db/actions/budget-import-actions";
 import { toast } from "sonner";
 
-import {
-  BOQ_TEMPLATE,
-  BOQ_TEMPLATE_NAME,
-  BOQ_RULES,
-  templateHref,
-} from "../lib/import-templates";
+const RULES = [
+  "One row per budget line. Required columns: Cost Code and Amount.",
+  "A cost code you already use is reused; a new one is created against the account beside it.",
+  "Account is a GL expense account code or name; leave it blank to use the project's default cost account.",
+  "Two rows with the same cost code are added together.",
+  "The budget is created as a draft for finance to approve.",
+];
 
 /**
- * THIS FILE USED TO CARRY THE PROGRAMME TEMPLATE. The dialog described the
- * bill's columns correctly and the download handed over
- * `Section,Activity,Start,End,%` under the name `programme-template.csv` —
- * so anybody who took the template at its word imported a file with no
- * quantities, no units and no rates, and got a bill of narrative headings.
- * Both templates now come from one module beside the parsers that read them.
- */
-const href = templateHref(BOQ_TEMPLATE);
-
-/**
- * Upload a priced bill of quantities.
+ * Upload a project budget from a spreadsheet.
  *
- * A bill arrives as a spreadsheet — from the client, the QS, or Candy — and a
- * three-hundred-line one is not going to be typed into a web form. That matters
- * more than convenience: the bill is what measured progress, earned value and
- * every certificate are computed from, so if entering one is a day's typing
- * then nobody has one and the measured half of the module sits unused.
- *
- * Deliberately the same control as `ImportProgramme`, down to the wording, so
- * the two read as one feature rather than two people's ideas. The file is
- * parsed server-side — see `importBoqFile`.
+ * The same control as `ImportBoq`, down to the wording — a budget of thirty
+ * cost codes is not typed into a web form line by line, and the budget is what
+ * every commitment and variance is measured against. Parsed server-side; see
+ * `importBudgetFile`, which mints the cost codes the budget references.
  */
-export default function ImportBoq({ projectId }) {
+export default function ImportBudget({ projectId }) {
   const router = useRouter();
   const inputRef = useRef(null);
   const [open, setOpen] = useState(false);
@@ -47,22 +33,17 @@ export default function ImportBoq({ projectId }) {
   function submit() {
     const file = inputRef.current?.files?.[0];
     if (!file) {
-      toast.error("Choose a .csv, .xlsx or .pdf file first");
+      toast.error("Choose a .csv or .xlsx file first");
       return;
     }
     const fd = new FormData();
     fd.set("file", file);
     startTransition(async () => {
-      const res = await importBoqFile(projectId, fd);
+      const res = await importBudgetFile(projectId, fd);
       if (res?.success) {
         toast.success(res.message);
-        // A PDF import reconciles each bill against the Grand Summary; any bill
-        // that fell back to a lump line is reported here so it is never silent.
         if (res.warnings?.length) {
-          toast.warning(
-            `${res.warnings.length} bill(s) imported as a lump sum — ${res.warnings[0]}`,
-            { duration: 12000 },
-          );
+          toast.warning(`${res.warnings.length} row(s) skipped — ${res.warnings[0]}`);
         }
         setOpen(false);
         setFileName("");
@@ -77,7 +58,7 @@ export default function ImportBoq({ projectId }) {
     <>
       <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
         <Upload className="h-4 w-4 mr-1.5" />
-        Import bill
+        Upload budget
       </Button>
 
       {open && (
@@ -91,14 +72,20 @@ export default function ImportBoq({ projectId }) {
           >
             <div className="flex items-start justify-between">
               <div>
-                <h3 className="text-lg font-semibold">Import bill</h3>
+                <h3 className="text-lg font-semibold">Upload budget</h3>
                 <p className="text-sm text-muted-foreground">
                   Upload a .csv or .xlsx with columns:{" "}
-                  <span className="font-medium">Item No., Description, Unit, Quantity, Rate</span>. Amount is calculated automatically.
-                  A <span className="font-medium">.pdf</span> bill is read too — each bill is checked against the Grand Summary, and any that doesn&apos;t add up is imported as a lump sum you can replace from a spreadsheet.
+                  <span className="font-medium">
+                    Cost Code, Name, Description, Category, Account, Amount
+                  </span>
+                  .
                 </p>
               </div>
-              <button className="text-muted-foreground hover:text-foreground" onClick={() => setOpen(false)} aria-label="Close">
+              <button
+                className="text-muted-foreground hover:text-foreground"
+                onClick={() => setOpen(false)}
+                aria-label="Close"
+              >
                 <X className="h-5 w-5" />
               </button>
             </div>
@@ -108,11 +95,11 @@ export default function ImportBoq({ projectId }) {
               <span className="text-sm font-medium">
                 {fileName || "Click to choose a spreadsheet"}
               </span>
-              <span className="text-xs text-muted-foreground">.csv, .xlsx or .pdf</span>
+              <span className="text-xs text-muted-foreground">.csv or .xlsx</span>
               <input
                 ref={inputRef}
                 type="file"
-                accept=".csv,.xlsx,.pdf,.txt"
+                accept=".csv,.xlsx,.txt"
                 className="hidden"
                 onChange={(e) => setFileName(e.target.files?.[0]?.name || "")}
               />
@@ -120,20 +107,19 @@ export default function ImportBoq({ projectId }) {
 
             <div className="mt-3 flex items-center justify-between">
               <a
-                href={href}
-                download={BOQ_TEMPLATE_NAME}
+                href="/api/projects/budget/template"
                 className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
               >
                 <Download className="h-3.5 w-3.5" />
                 Download template
               </a>
               <span className="text-xs text-muted-foreground">
-                Rows become sections &amp; priced items.
+                Rows become a draft budget.
               </span>
             </div>
 
             <ul className="mt-3 space-y-1 rounded-lg border bg-muted/30 p-3">
-              {BOQ_RULES.map((rule) => (
+              {RULES.map((rule) => (
                 <li key={rule} className="text-xs text-muted-foreground leading-snug">
                   • {rule}
                 </li>
@@ -150,8 +136,12 @@ export default function ImportBoq({ projectId }) {
                 disabled={isPending}
                 className="bg-yellow-500 hover:bg-yellow-600 text-black font-semibold"
               >
-                {isPending ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : <Upload className="h-4 w-4 mr-1.5" />}
-                Import
+                {isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin mr-1.5" />
+                ) : (
+                  <Upload className="h-4 w-4 mr-1.5" />
+                )}
+                Upload
               </Button>
             </div>
           </div>

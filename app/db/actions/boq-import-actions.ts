@@ -5,6 +5,7 @@ import { sql } from "drizzle-orm";
 import { withAuthorizedTenant } from "../tenant";
 import { userMessage } from "../errors";
 import { parseBoqWorkbook, parseBoqCsv } from "@/lib/boq/parse-boq-excel";
+import { parseBoqPdf, reconcileBills } from "@/lib/boq/parse-boq-pdf";
 import { PROJECT_MANAGE_ROLES } from "@/lib/utils/role-gates";
 
 const MANAGE = PROJECT_MANAGE_ROLES as unknown as string[];
@@ -35,13 +36,21 @@ export async function importBoqFile(projectId: string, formData: FormData) {
   if (!projectId) return { error: "No project." };
   const file = formData.get("file");
   if (!file || typeof file === "string") return { error: "No file uploaded." };
-  if (file.size > 15 * 1024 * 1024) return { error: "File too large (max 15MB)." };
+  if (file.size > 20 * 1024 * 1024) return { error: "File too large (max 20MB)." };
 
-  let parsed;
+  const name = (file.name || "").toLowerCase();
+  const isCsv = name.endsWith(".csv") || file.type === "text/csv";
+  const isPdf = name.endsWith(".pdf") || file.type === "application/pdf";
+
+  let parsed: { bills: any[]; contingencyPercent: string | number | null; warnings?: string[] };
   try {
-    const name = (file.name || "").toLowerCase();
-    const isCsv = name.endsWith(".csv") || file.type === "text/csv";
-    if (isCsv) {
+    if (isPdf) {
+      // A PDF has no cells: line items are read best-effort and each bill is
+      // reconciled against the Grand Summary, falling back to a lump line at the
+      // summary total where the detail does not add up. See parse-boq-pdf.
+      const buf = Buffer.from(await file.arrayBuffer());
+      parsed = reconcileBills(await parseBoqPdf(buf));
+    } else if (isCsv) {
       const text = Buffer.from(await file.arrayBuffer()).toString("utf8");
       parsed = parseBoqCsv(text);
     } else {
@@ -53,8 +62,9 @@ export async function importBoqFile(projectId: string, formData: FormData) {
   }
   if (!parsed.bills.length) {
     return {
-      error:
-        "No bills found. Each bill must be on its own sheet named 'Bill 1 - …' with an 'Item No. / Description / Unit / Quantity / Rate' header.",
+      error: isPdf
+        ? "No bills could be read from this PDF. It needs a Grand Summary page listing 'Bill No. 1 …' with totals — and it must be a text PDF, not a scan. A scanned/photographed bill has no text to read; export it from Excel, or upload the .xlsx/.csv instead."
+        : "No bills found. Each bill must be on its own sheet named 'Bill 1 - …' with an 'Item No. / Description / Unit / Quantity / Rate' header.",
     };
   }
 
@@ -198,6 +208,7 @@ export async function importBoqFile(projectId: string, formData: FormData) {
     return {
       success: true,
       message: `Imported ${result.bills} bill${result.bills === 1 ? "" : "s"} and ${result.pricedItems} priced items.`,
+      warnings: parsed.warnings ?? [],
       ...result,
     };
   } catch (error) {

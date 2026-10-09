@@ -826,25 +826,37 @@ suite("tenant provisioning", () => {
       }
     });
 
-    it("refuses a role that is not a role", async () => {
+    it("saves any non-blank role now (0120 custom roles), and refuses a blank one", async () => {
       const source = sourceId();
       await provisionCompany({ sourceCompanyId: source, name: "Pilot" });
 
-      // roleAllowed answers false for anything off the list, so a role saved
-      // as "Acountant" is refused by every gate in the product: the person can
-      // sign in and can do nothing, with no error anywhere that says why.
-      const err = await userAdmin
-        .syncUser({
+      // 0120 replaced the users_role_valid allow-list with users_role_not_blank:
+      // a role is now free-form text (custom roles need arbitrary names) and the
+      // canonical list is enforced in the app (roleAllowed / resolveRoleFor
+      // company), not the DB. So an unknown spelling like "Acountant" is SAVED —
+      // and powerless, because no permission gate lists it.
+      await expect(
+        userAdmin.syncUser({
           id: "typo-user",
           name: "Typo",
           email: "typo@p.co",
           role: "Acountant",
           companyId: source,
+        }),
+      ).resolves.toBeDefined();
+
+      // The one thing the column still refuses is a blank role. Drizzle wraps
+      // the driver error, so the constraint name is on the cause.
+      const err = await userAdmin
+        .syncUser({
+          id: "blank-user",
+          name: "Blank",
+          email: "blank@p.co",
+          role: "   ",
+          companyId: source,
         })
         .catch((e) => e);
-      // Drizzle wraps the driver error, so the constraint name is on the
-      // cause rather than in the message.
-      expect(err?.cause?.constraint_name).toBe("users_role_valid");
+      expect(err?.cause?.constraint_name).toBe("users_role_not_blank");
 
       await expect(
         userAdmin.syncUser({
@@ -857,32 +869,28 @@ suite("tenant provisioning", () => {
       ).resolves.toBeDefined();
     });
 
-    it("refuses the roles that were retired", async () => {
+    it("stores retired role names too — the DB no longer polices the list (0120)", async () => {
       const source = sourceId();
       await provisionCompany({ sourceCompanyId: source, name: "Pilot" });
 
-      // A role says what you may do, not what you do all day (0039).
-      for (const dead of ["Technician", "CEO", "User", "HR"]) {
-        const err = await userAdmin
-          .syncUser({
-            id: `dead-${dead}`,
-            name: dead,
-            email: `${dead}@p.co`,
-            role: dead,
-            companyId: source,
-          })
-          .catch((e) => e);
-        expect(err?.cause?.constraint_name).toBe("users_role_valid");
-      }
-
-      // And what they became is accepted.
-      for (const live of ["Employee", "Viewer", "HR Manager"]) {
+      // A role says what you may do, not what you do all day (0039) — but since
+      // 0120 the DB no longer rejects a name off the canonical list. Every one
+      // of these is saved; whether it grants anything is decided in the app.
+      for (const name of [
+        "Technician",
+        "CEO",
+        "User",
+        "HR",
+        "Employee",
+        "Viewer",
+        "HR Manager",
+      ]) {
         await expect(
           userAdmin.syncUser({
-            id: `live-${live}`,
-            name: live,
-            email: `${live.replace(" ", "")}@p.co`,
-            role: live,
+            id: `role-${name}`,
+            name,
+            email: `${name.replace(/\s/g, "")}@p.co`,
+            role: name,
             companyId: source,
           }),
         ).resolves.toBeDefined();
@@ -917,15 +925,16 @@ suite("tenant provisioning", () => {
         }),
       ).resolves.toMatchObject({ granted: true });
 
+      // Since 0120 a grant's role is free-form (custom roles); the DB only
+      // refuses a blank string, via user_company_access_role_not_blank.
       const err = await accessAdmin
         .grantCompanyAccess({
           sourceCompanyId: source,
           userId: "u-null",
-          // A retired role is refused like any other non-role (0039).
-          role: "Technician",
+          role: "   ",
         })
         .catch((e) => e);
-      expect(err?.cause?.constraint_name).toBe("user_company_access_role_valid");
+      expect(err?.cause?.constraint_name).toBe("user_company_access_role_not_blank");
     });
 
     it("links a login to its party, per company", async () => {

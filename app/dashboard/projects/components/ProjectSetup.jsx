@@ -64,6 +64,19 @@ export default async function ProjectSetup({ projectId, sections }) {
           },
         ]
       : []),
+    // Contract terms come before the budget — retention and the advance are
+    // part of setting the job up, and a certificate is computed from them.
+    ...(sections?.certificates
+      ? [
+          {
+            done: state.hasContract,
+            label: "Enter the contract terms",
+            why: "Retention, the advance and its recovery — a certificate is computed from these.",
+            href: `/dashboard/projects/ipc?project=${projectId}`,
+            cta: "Enter the terms",
+          },
+        ]
+      : []),
     {
       done: state.hasBudget,
       label: "Build the budget from the bill",
@@ -93,17 +106,6 @@ export default async function ProjectSetup({ projectId, sections }) {
       : []),
     // The rest depend on the project's type, so they are only asked for where
     // the type says the section exists at all.
-    ...(sections?.certificates
-      ? [
-          {
-            done: state.hasContract,
-            label: "Enter the contract terms",
-            why: "Retention, the advance and its recovery — a certificate is computed from these.",
-            href: `/dashboard/projects/ipc?project=${projectId}`,
-            cta: "Enter the terms",
-          },
-        ]
-      : []),
     ...(sections?.programme
       ? [
           {

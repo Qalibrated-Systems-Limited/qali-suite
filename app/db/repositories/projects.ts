@@ -1753,6 +1753,44 @@ export async function listBudgetableBoqItems(tx: Tx, projectId: string) {
   }));
 }
 
+/**
+ * The Grand Summary breakdown — one row per top-level bill, each with its
+ * billed total (the roll-up of every priced leaf beneath it) and its measured
+ * total to date (the same leaves weighted by quantity measured). A bill is a
+ * depth-0 heading; the ltree containment `<@` gathers everything under it.
+ */
+export async function getBoqBills(tx: Tx, boqId: string) {
+  const rows = (await tx.execute(sql`
+    SELECT b.id, b.item_code, b.description, b.sort_order,
+           COALESCE((
+             SELECT SUM(c.quantity * c.rate)
+               FROM project_boq_items c
+              WHERE c.boq_id = b.boq_id AND c.path <@ b.path
+                AND c.quantity IS NOT NULL AND c.rate IS NOT NULL
+           ), 0)::float8 AS billed,
+           COALESCE((
+             SELECT SUM(m.qty * c.rate)
+               FROM project_boq_items c
+               JOIN (
+                 SELECT boq_item_id, SUM(quantity) AS qty
+                   FROM project_boq_measurements GROUP BY boq_item_id
+               ) m ON m.boq_item_id = c.id
+              WHERE c.boq_id = b.boq_id AND c.path <@ b.path
+                AND c.quantity IS NOT NULL AND c.rate IS NOT NULL
+           ), 0)::float8 AS measured
+      FROM project_boq_items b
+     WHERE b.boq_id = ${boqId} AND b.depth = 0 AND b.is_heading = true
+     ORDER BY b.sort_order
+  `)) as unknown as Array<Record<string, unknown>>;
+  return rows.map((r) => ({
+    id: String(r.id),
+    itemCode: r.item_code == null ? null : String(r.item_code),
+    description: String(r.description),
+    billed: num(r.billed),
+    measured: num(r.measured),
+  }));
+}
+
 /** A project cost code whose covered-item set is EXACTLY these ids, or null. */
 async function findCostCodeCoveringExactly(tx: Tx, projectId: string, itemIds: string[]) {
   const [row] = (await tx.execute(sql`

@@ -289,7 +289,15 @@ export default function ProjectsNav({ projects = [] }) {
             numbered label, and locked until its phase unlocks. */}
         {inProject &&
           PHASES.filter((p) => p.key !== "close").map((phase) => {
-            const phaseItems = rawItems.filter((it) => it.phase === phase.key);
+            // Tabs follow the phase's own section order (phases.js) — the order
+            // of the setup checklist — not the raw SECTIONS order.
+            const phaseItems = rawItems
+              .filter((it) => it.phase === phase.key)
+              .sort(
+                (a, b) =>
+                  phase.sections.indexOf(a.sectionKey) -
+                  phase.sections.indexOf(b.sectionKey),
+              );
             if (phaseItems.length === 0) return null;
             const step = lifecycle?.steps.find((s) => s.key === phase.key);
             return (

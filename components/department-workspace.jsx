@@ -1,10 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
-  ArrowRight,
   Plus,
   ShieldCheck,
   FileText,
@@ -22,16 +20,16 @@ import SharedServicesBand from "./shared-services-band";
 
 /**
  * A department's landing dashboard — the modern, consistent home for everyone
- * who works in it. Four bands, top to bottom:
+ * who works in it. Three bands, top to bottom:
  *   1. a hero naming the department and what it is for;
  *   2. quick actions — the two or three things people start here to do;
- *   3. shared services — reachable from every department (SharedServicesBand);
- *   4. the department's modules, as cards of links.
+ *   3. shared services — reachable from every department (SharedServicesBand).
  *
- * The module list reads the SAME navigation config the sidebar does
- * (getNavigationGroups), filtered to this department, so a module gated off by
- * plan or role is absent here exactly as it is in the sidebar. Organisation
- * only — nothing here grants access.
+ * It deliberately does NOT list the department's modules as link cards: that
+ * only repeated the left sidebar's own submenu in the page body — a second
+ * navbar. Navigation stays the sidebar's job. The navigation config is still
+ * read (getNavigationGroups) to learn which modules this role/plan can reach,
+ * so a quick action is never offered for a module that is hidden.
  */
 
 // The two or three primary actions each department starts with. Every href is
@@ -205,52 +203,13 @@ export default function DepartmentWorkspace({ user, slug, kpis = [] }) {
       {/* Shared services — reachable from every department */}
       <SharedServicesBand />
 
-      {/* The department's own modules */}
-      {cards.length === 0 ? (
-        <Card className="p-8 text-center text-sm text-muted-foreground">
-          Nothing in this department is available on your current plan or role.
-        </Card>
-      ) : (
-        <div>
-          <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-            {dept.label} modules
-          </h2>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {cards.map((card) => {
-              const CardIcon = card.icon;
-              return (
-                <Card key={card.id} className="flex flex-col p-4">
-                  <div className="mb-3 flex items-center gap-2">
-                    {CardIcon && (
-                      <CardIcon className="h-4 w-4 text-muted-foreground" />
-                    )}
-                    <h3 className="text-sm font-semibold">{card.label}</h3>
-                  </div>
-                  <ul className="space-y-0.5">
-                    {card.links.map((l) => {
-                      const LinkIcon = l.icon;
-                      return (
-                        <li key={l.href}>
-                          <Link
-                            href={l.href}
-                            className="group flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                          >
-                            {LinkIcon && (
-                              <LinkIcon className="h-4 w-4 shrink-0" />
-                            )}
-                            <span className="min-w-0 truncate">{l.label}</span>
-                            <ArrowRight className="ml-auto h-3.5 w-3.5 shrink-0 opacity-0 transition-opacity group-hover:opacity-100" />
-                          </Link>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                </Card>
-              );
-            })}
-          </div>
-        </div>
-      )}
+      {/* The per-module link cards used to live here, but they simply repeated
+          this department's entries from the left sidebar — a second navbar in
+          the page body. Navigation is the sidebar's job; this dashboard is for
+          the hero, the actions people start with, the live KPIs and shared
+          services. (QUICK_ACTIONS is still gated against the department's
+          visible modules below, so an action is never offered for a module the
+          role or plan hides.) */}
     </div>
   );
 }

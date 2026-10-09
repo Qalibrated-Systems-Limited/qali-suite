@@ -21,8 +21,12 @@ export const PHASES = [
     key: "setup",
     num: 1,
     label: "Set up",
-    blurb: "Type, client, contract terms and a priced bill of quantities.",
-    sections: ["overview", "contract", "boq", "methodology", "documents"],
+    blurb: "Type, client, a priced bill of quantities, the contract terms and the project's documents.",
+    // In the order of the setup checklist: the overview (type & client), the
+    // priced bill, the contract terms, then the documents. Contract sits before
+    // the budget and, like documents, is never gated — both can be done from
+    // the start.
+    sections: ["overview", "boq", "contract", "documents"],
   },
   {
     key: "budget",
@@ -34,9 +38,20 @@ export const PHASES = [
   {
     key: "deliver",
     num: 3,
-    label: "Deliver",
-    blurb: "Programme, milestones, the site diary and labour.",
-    sections: ["programme", "milestones", "diary", "timesheets", "instructions"],
+    label: "Plan & deliver",
+    blurb:
+      "Opens once the budget is approved: the method statement, then the programme, milestones, site diary and labour.",
+    // Methodology comes here — after the budget, as the checklist lists it
+    // (opens once the budget is approved) — then the programme and the rest of
+    // delivery. (Contract moved up to Set up, before the budget.)
+    sections: [
+      "methodology",
+      "programme",
+      "milestones",
+      "diary",
+      "timesheets",
+      "instructions",
+    ],
   },
   {
     key: "certify",

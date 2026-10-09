@@ -24,6 +24,11 @@ export default async function DepartmentPage({ params }) {
   const dept = DEPARTMENTS.find((d) => d.slug === slug);
   if (!dept) notFound();
 
+  // A department with its own module home (Projects → /dashboard/projects) has
+  // one landing, not two: send its department URL there so Dashboard and
+  // Overview can never drift apart again.
+  if (dept.homeHref) redirect(dept.homeHref);
+
   // Live figures, fetched server-side and passed in. getDepartmentKpis never
   // throws — a department with no live figures just gets an empty row.
   const kpis = await getDepartmentKpis(slug);
