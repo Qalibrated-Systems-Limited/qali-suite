@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { withAuthorizedTenant } from "../tenant";
 import { userMessage } from "../errors";
 import { CATEGORY_MANAGE_ROLES } from "@/lib/utils/role-gates";
@@ -62,7 +63,7 @@ function parseAttributes(formData: FormData) {
 /** `""` and `"none"` are what an untouched parent <select> posts. */
 const parentOf = (formData: FormData) => {
   const v = String(formData.get("parent") ?? formData.get("parentId") ?? "").trim();
-  return v && v !== "none" ? v : null;
+  return v && v.toLowerCase() !== "none" ? v : null;
 };
 
 export async function createCategoryPg(
@@ -75,8 +76,9 @@ export async function createCategoryPg(
     return { success: false, error: "A category needs a name.", values };
   }
 
+  let category;
   try {
-    const category = await withAuthorizedTenant(
+    category = await withAuthorizedTenant(
       [...CATEGORY_MANAGE_ROLES],
       (tx, { user, companyId }) =>
         categoriesRepo.createCategory(tx, {
@@ -89,16 +91,18 @@ export async function createCategoryPg(
           createdById: user.id,
         }),
     );
-
-    revalidatePath("/dashboard/categories");
-    return {
-      success: true,
-      categoryId: category.id,
-      message: `${category.name} created`,
-    };
   } catch (err) {
     return fail(err, values);
   }
+
+  // Back to the list, outside the try: redirect() works by throwing, and the
+  // catch above would turn it into a failure. Paired with revalidatePath, the
+  // refreshed list comes back in this same response rather than a second trip.
+  // `success` is what the list's FormBanner reads.
+  revalidatePath("/dashboard/categories");
+  redirect(
+    `/dashboard/categories?success=${encodeURIComponent(`${category.name} created`)}`,
+  );
 }
 
 export async function updateCategoryPg(

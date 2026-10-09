@@ -321,6 +321,39 @@ suite("postgres fulfilment", () => {
     });
   });
 
+  /*
+   * THE PANEL ON THE PRODUCT PAGE, and the column it asked for.
+   *
+   * `listPendingRequestsForProduct` selected `r.requested_by_name`, which
+   * stock_requests has never had — the column is `requester_name_at_request`.
+   * A missing column is a PARSE error, so it threw whether or not the product
+   * had a pending request: EVERY product detail page 500'd, for every product,
+   * since the panel was written. Nothing here called it, which is why 400 tests
+   * passed over it.
+   */
+  describe("the product page's pending-request panel", () => {
+    it("returns the requester by the name the column actually has", async () => {
+      await makeRequest();
+
+      const rows = await asTenant(companyA, (tx) =>
+        fulfilRepo.listPendingRequestsForProduct(tx, widget, 10),
+      );
+
+      expect(rows.length).toBeGreaterThan(0);
+      expect(rows[0].requester_name_at_request).toBe("Tech Guy");
+      expect(Number(rows[0].quantity_requested)).toBe(10);
+    });
+
+    it("runs for a product with no pending requests at all", async () => {
+      // The case that hid the bug in review and did not hide it in production:
+      // a parse error does not care whether any row matches.
+      const rows = await asTenant(companyA, (tx) =>
+        fulfilRepo.listPendingRequestsForProduct(tx, randomUUID(), 10),
+      );
+      expect(rows).toHaveLength(0);
+    });
+  });
+
   describe("checkouts", () => {
     async function makeCheckout(quantity = "5") {
       return asTenant(companyA, (tx) =>

@@ -55,8 +55,21 @@ export default async function PayrollRunDetailPage({ params }) {
   const data = await getPayrollRunForPage(id);
   if (!data) notFound();
 
-  const { run, entries, can } = data;
-  const canEditEntries = can.prepare && !["approved", "paid", "voided"].includes(run.status);
+  /*
+   * `permissions`, NOT `can`.
+   *
+   * This was `const { run, entries, can } = data`, which shadows the IMPORTED
+   * `can` across the whole function — including the gate five lines above it,
+   * which runs before the declaration and so hit the temporal dead zone:
+   *
+   *     ReferenceError: Cannot access 'u' before initialization
+   *
+   * Every payroll run's page threw it, for every role, every time. The import
+   * and the payload had simply been given the same name.
+   */
+  const { run, entries, can: permissions } = data;
+  const canEditEntries =
+    permissions.prepare && !["approved", "paid", "voided"].includes(run.status);
 
   const currency = run.currency || "KES";
   const totals = run.totals || {};
@@ -82,12 +95,12 @@ export default async function PayrollRunDetailPage({ params }) {
           <p className="mt-1 font-mono text-sm text-muted-foreground">{run.payrollNumber}</p>
           {run.notes && <p className="mt-0.5 truncate text-sm text-muted-foreground">{run.notes}</p>}
         </div>
-        <PayrollActions payrollRun={run} can={can} />
+        <PayrollActions payrollRun={run} can={permissions} />
       </div>
 
       {/* Export buttons */}
       {["approved", "paid"].includes(run.status) && entries.length > 0 && (
-        <PayrollExportButtons payrollRunId={run.id} canExport={can.prepare} />
+        <PayrollExportButtons payrollRunId={run.id} canExport={permissions.prepare} />
       )}
 
       {/* Totals grid */}

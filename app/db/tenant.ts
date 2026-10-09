@@ -10,6 +10,7 @@ import {
 import { grantAllTenants } from "./companyAccessAdmin";
 import { getTenantContext } from "@/lib/utils/tenant-utils";
 import { roleAllowed } from "@/lib/permissions";
+import { accessDeniedError } from "@/lib/access-denied";
 import {
   provisionCompany,
   forgetCompanyMapping,
@@ -502,7 +503,7 @@ export async function withAuthorizedTenant<T>(
   // rows only. The gate runs again below against the role for the ACTIVE
   // company, which is the one that decides what this request may do.
   if (allowedRoles.length && !roleAllowed(user.role, allowedRoles)) {
-    throw new Error("You don't have permission to perform this action.");
+    throw accessDeniedError();
   }
 
   // The session carries a company CODE, not a name. It is the best label
@@ -518,7 +519,7 @@ export async function withAuthorizedTenant<T>(
   // which is what every grant carried over from the single-company model says.
   const actingUser = { ...(user as ActionUser), role: acting.role };
   if (allowedRoles.length && !roleAllowed(actingUser.role, allowedRoles)) {
-    throw new Error("You don't have permission to perform this action.");
+    throw accessDeniedError();
   }
 
   return withTenant(
