@@ -690,7 +690,8 @@ export async function listPendingRequestsForProduct(
   return tx.execute(sql`
     SELECT r.id, r.request_number, r.status, r.priority,
            r.required_by_date, r.requester_name_at_request,
-           i.quantity_requested, i.quantity_fulfilled
+           i.requested_quantity AS quantity_requested,
+           i.total_fulfilled   AS quantity_fulfilled
       FROM stock_request_items i
       JOIN stock_requests r ON r.id = i.request_id
      WHERE i.product_id = ${productId}::uuid
