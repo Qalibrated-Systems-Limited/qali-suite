@@ -48,6 +48,7 @@ import {
   Users,
   Wallet,
   Ruler,
+  Scale,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -92,6 +93,9 @@ import {
   canReviewClaims,
   canSeeApprovalsNav,
 } from "@/lib/permissions";
+// `can` rather than another canSeeXNav helper: GR/IR is read by procurement
+// AND finance, which is a capability and not a menu group.
+import { can } from "@/lib/capabilities";
 
 // ============================================
 // NAV GROUP CONFIGURATION - ERP FOCUSED
@@ -329,6 +333,21 @@ const getNavigationGroups = (user) => {
         id: "bills",
         href: "/dashboard/bills",
         hidden: !canSeeFinanceNav(user?.role) && user?.role !== "Procurement Officer",
+      },
+      {
+        /*
+          ONE SCREEN, TWO MENUS. GR/IR is a single question asked by two
+          departments: procurement needs to know which deliveries have not been
+          invoiced, finance needs to know what the clearing account is holding.
+          The same route appears under Accounting as well — a reconciliation
+          where the two sides read different reports is how the arguments
+          start.
+        */
+        icon: Scale,
+        label: "GR/IR Reconciliation",
+        id: "gr-ir",
+        href: "/dashboard/gr-ir",
+        hidden: !can(user?.role, "grir.view"),
       },
       {
         icon: Users,
@@ -622,6 +641,14 @@ const getNavigationGroups = (user) => {
         id: "ap-aging",
         href: "/dashboard/reports/ap-aging",
         hidden: !canSeeFinanceNav(user?.role) || !hasMod("ap-aging"),
+      },
+      {
+        // The same route as under Purchases, deliberately. See the note there.
+        icon: Scale,
+        label: "GR/IR Reconciliation",
+        id: "gr-ir-finance",
+        href: "/dashboard/gr-ir",
+        hidden: !canSeeFinanceNav(user?.role),
       },
       {
         icon: Package,
