@@ -23,6 +23,25 @@ import { linkUserToPartyDirect } from "./app/db/userAdmin";
 const ROLE_REFRESH_MS = 60_000;
 
 /**
+ * The company count, cached per process for the same reason the role refresh
+ * is (see below): a token mutated during an RSC render is never written back,
+ * so `typeof token.companyCount !== "number"` stays true on every `auth()`
+ * call a render makes. Without this the top-up below ran `countUsableCompanies`
+ * four to six times per page rather than once per session — a query per
+ * `auth()`, on the hottest path there is.
+ *
+ * Refreshed by the periodic block, which writes through to here, so a grant
+ * added or revoked still lands within a minute.
+ */
+const companyCountCache = new Map<string, number>();
+
+function rememberCompanyCount(userId: string, count: number) {
+  companyCountCache.set(userId, count);
+  // Same bound, and the same reaison, as roleRefreshCache.
+  if (companyCountCache.size > 10_000) companyCountCache.clear();
+}
+
+/**
  * The refresh has to be throttled HERE, not on the token.
  *
  * `roleRefreshedAt` on the JWT would be the obvious place, and it is what the
@@ -461,6 +480,50 @@ export const { auth, signIn, signOut, handlers, unstable_update } = NextAuth({
       }
 
       /**
+       * HOW MANY COMPANIES THIS PERSON MAY ENTER — WRITTEN AT BIRTH.
+       *
+       * proxy.ts is the only gate that can stop a page rendering before the
+       * dashboard layout's redirect races it, and it decides on this claim
+       * alone:
+       *
+       *     !activeCompanyId && typeof companyCount === "number" && !== 1
+       *
+       * An absent claim therefore fails OPEN, and the claim was only ever
+       * written by the periodic refresh below and by a company switch. So a
+       * token was born without it: the gate stayed off until the first refresh
+       * came due, which is precisely the window a multi-company user spends
+       * with nothing chosen. They met
+       *
+       *     Error: No company selected. You have access to 3.
+       *
+       * thrown out of `resolveActingCompany`, where the chooser should have
+       * stood. `dueForRefresh` made it worse than a one-request window: it
+       * stamps its cache before the read, so a sign-in within a minute of the
+       * last one, or a refresh that threw, left the gate off for the full
+       * sixty seconds.
+       *
+       * Runs on every request only while the claim is missing — a sign-in, or
+       * a token issued before the claim existed — and is one indexed count.
+       */
+      if (token?.id && typeof token.companyCount !== "number") {
+        const remembered = companyCountCache.get(String(token.id));
+        if (typeof remembered === "number") {
+          token.companyCount = remembered;
+        } else {
+          try {
+            const { countUsableCompanies } = await import("@/app/db/userAdmin");
+            const count = await countUsableCompanies(String(token.id));
+            rememberCompanyCount(String(token.id), count);
+            token.companyCount = count;
+          } catch {
+            // Leave it unset and try again next request. Failing open here is
+            // the same trade the refresh below makes: a database that cannot
+            // be reached must not sign everybody out.
+          }
+        }
+      }
+
+      /**
        * PERIODIC RE-READ — role, status and token version.
        *
        * REPORTED: "changed user roles but they are still able to fetch pages."
@@ -531,6 +594,9 @@ export const { auth, signIn, signOut, handlers, unstable_update } = NextAuth({
              * hop through /dashboard/select-company, never a lock-out.
              */
             token.companyCount = await countUsableCompanies(String(token.id));
+            // Write through, or the cache above would serve the count this
+            // just refreshed for the life of the process.
+            rememberCompanyCount(String(token.id), token.companyCount);
             token.roleRefreshedAt = Date.now();
           } catch {
             // Leave the token as it is and try again on the next request.

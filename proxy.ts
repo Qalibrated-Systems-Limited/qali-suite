@@ -85,7 +85,10 @@ export default auth((req) => {
    * early enough to end it before the render.
    *
    * DECIDED FROM THE TOKEN, because this runs on the edge and cannot ask
-   * Postgres. `companyCount` is refreshed beside the role in auth.ts. A stale
+   * Postgres. `companyCount` is written when the token is issued and
+   * refreshed beside the role in auth.ts — written at issue because an ABSENT
+   * count fails open here, and a gate that is off for the first minute of a
+   * session is off exactly when nothing has been chosen yet. A stale
    * count costs one hop: /dashboard/select-company re-reads the grants and
    * bounces straight back when there is nothing to choose. It cannot lock
    * anybody out, which is why a claim is safe to trust for this and not for
