@@ -11,6 +11,7 @@ import {
   Check,
   ChevronDown,
   Package,
+  Building2,
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -28,6 +29,7 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import { cn } from "@/lib/utils";
+import QuickCreatePartyDialog from "@/app/dashboard/invoices/components/QuickCreateCustomerDialog";
 import { createGoodsReceiptPg } from "@/app/db/actions/grn-actions";
 
 const PACKAGING = ["good", "damaged", "moisture", "tampered"];
@@ -177,6 +179,7 @@ export default function GRNForm({
   availablePOs = [],
   availableBills = [],
   products = [],
+  suppliers = [],
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -556,13 +559,27 @@ export default function GRNForm({
             )}
           </Field>
         )}
-        <Field label="Supplier name">
-          <input
-            type="text"
-            value={form.supplierName}
-            onChange={(e) => setField("supplierName", e.target.value)}
-            placeholder="Supplier"
-            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+        <Field label="Supplier">
+          <SupplierPicker
+            suppliers={suppliers}
+            partyId={form.supplierPartyId}
+            name={form.supplierName}
+            lockedBy={
+              form.sourceType === "purchase_order"
+                ? "purchase order"
+                : form.sourceType === "bill"
+                  ? "bill"
+                  : null
+            }
+            onPick={(id, pickedName) =>
+              setForm((prev) => ({
+                ...prev,
+                supplierPartyId: id,
+                // Both together: the id is the link and the name is the
+                // snapshot, and 0122 requires the name on every receipt.
+                supplierName: pickedName,
+              }))
+            }
           />
         </Field>
         <Field label="Proforma Invoice #">
@@ -794,6 +811,121 @@ export default function GRNForm({
       </div>
 
     </form>
+  );
+}
+
+/**
+ * The supplier, as a party rather than a sentence.
+ *
+ * This was a bare text input, and `supplierPartyId` reached the payload only
+ * as a side effect of choosing a purchase order or a bill — the picker copies
+ * it off the chosen document. So an UNSCHEDULED receipt, the walk-in delivery
+ * with no PO behind it, got a typed string and `supplier_id = NULL`: an
+ * acceptance entry posted with no party, a receipt invisible to a search for
+ * the supplier whose name it carries, and a dead link on its own detail page.
+ *
+ * LOCKED WHEN THE SOURCE DECIDES IT. A receipt against a purchase order or a
+ * bill takes the supplier from that document — it cannot be a different one,
+ * and offering the choice would only invite a mismatch that 0122 then refuses.
+ * The control shows what was derived and says where from.
+ *
+ * NOT ON FILE IS NOT A DEAD END. Goods do arrive from somebody nobody has set
+ * up yet, and the storekeeper is holding them while they find out. The empty
+ * state creates the party rather than sending them to another screen.
+ */
+function SupplierPicker({ suppliers, partyId, name, onPick, lockedBy }) {
+  const [open, setOpen] = useState(false);
+  const [list, setList] = useState(suppliers || []);
+  const selected = list.find((s) => s._id === partyId);
+
+  const created = (party) => {
+    setList((prev) => [party, ...prev]);
+    onPick(party._id, party.name);
+    setOpen(false);
+  };
+
+  if (lockedBy) {
+    return (
+      <>
+        <div className="flex h-10 w-full items-center gap-2 rounded-md border border-input bg-muted/40 px-3 text-sm">
+          <Building2 className="h-4 w-4 shrink-0 text-muted-foreground" />
+          <span className="truncate">{name || "—"}</span>
+        </div>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Taken from the {lockedBy}. Change the {lockedBy} to change the
+          supplier.
+        </p>
+      </>
+    );
+  }
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          type="button"
+          variant="outline"
+          role="combobox"
+          aria-expanded={open}
+          className={cn(
+            "h-10 w-full justify-between font-normal",
+            !partyId && "text-muted-foreground",
+          )}
+        >
+          <span className="flex min-w-0 items-center gap-2">
+            <Building2 className="h-4 w-4 shrink-0" />
+            <span className="truncate">
+              {selected?.name || name || "Select supplier..."}
+            </span>
+          </span>
+          <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent
+        className="w-[var(--radix-popover-trigger-width)] p-0"
+        align="start"
+      >
+        <Command>
+          <CommandInput placeholder="Search suppliers..." />
+          <CommandList>
+            <CommandEmpty className="py-4 text-center">
+              <p className="mb-2 text-sm text-muted-foreground">
+                No supplier on file by that name.
+              </p>
+              <QuickCreatePartyDialog partyType="supplier" onPartyCreated={created}>
+                <button
+                  type="button"
+                  className="inline-flex items-center text-sm font-medium text-yellow-500 hover:text-yellow-600"
+                >
+                  <Plus className="mr-1 h-3.5 w-3.5" />
+                  Create new supplier
+                </button>
+              </QuickCreatePartyDialog>
+            </CommandEmpty>
+            <CommandGroup>
+              {list.map((sup) => (
+                <CommandItem
+                  key={sup._id}
+                  value={`${sup.name} ${sup.taxPin || ""}`}
+                  onSelect={() => {
+                    onPick(sup._id, sup.name);
+                    setOpen(false);
+                  }}
+                >
+                  <Check
+                    className={cn(
+                      "mr-2 h-4 w-4",
+                      partyId === sup._id ? "opacity-100" : "opacity-0",
+                    )}
+                  />
+                  <span className="truncate">{sup.name}</span>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
   );
 }
 

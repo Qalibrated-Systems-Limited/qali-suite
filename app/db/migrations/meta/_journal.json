@@ -855,6 +855,13 @@
       "when": 1787050090566,
       "tag": "0121_require_grn_by_default",
       "breakpoints": true
+    },
+    {
+      "idx": 122,
+      "version": "7",
+      "when": 1787050150566,
+      "tag": "0122_goods_receipt_supplier",
+      "breakpoints": true
     }
   ]
 }

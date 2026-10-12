@@ -197,6 +197,19 @@ export const goodsReceiptSchema = z
   .refine((d) => d.sourceType !== "bill" || !!d.billId, {
     message: "Choose the bill this receives against",
     path: ["billId"],
+  })
+  // 0122 says both of these too. Saying them here as well means the person
+  // gets a sentence about the field they are looking at rather than a
+  // constraint name out of Postgres.
+  .refine((d) => !!d.supplierName && d.supplierName.trim() !== "", {
+    message: "Name the supplier these goods came from",
+    path: ["supplierName"],
+  })
+  .refine((d) => d.sourceType === "unscheduled" || !!d.supplierPartyId, {
+    message:
+      "This receipt is against a purchase order or a bill, so its supplier " +
+      "has to be the one on that document — pick it again.",
+    path: ["supplierPartyId"],
   });
 
 export type GoodsReceiptPayload = z.infer<typeof goodsReceiptSchema>;

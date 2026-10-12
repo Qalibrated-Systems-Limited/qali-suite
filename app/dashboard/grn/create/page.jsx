@@ -175,6 +175,9 @@ export default async function GRNCreatePage(props) {
             availablePOs={openPOs}
             availableBills={awaitingBills}
             products={products}
+            // Already fetched above for the line picker; the same call returns
+            // the supplier list, so the picker costs no extra query (0122).
+            suppliers={formData.suppliers}
           />
         </CardContent>
       </Card>

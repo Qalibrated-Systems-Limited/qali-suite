@@ -57,7 +57,23 @@ export const goodsReceipts = pgTable(
     proformaInvoiceNumber: text("proforma_invoice_number"),
     packingListNumber: text("packing_list_number"),
 
+    /**
+     * REQUIRED unless the receipt is unscheduled (0122).
+     *
+     * Not nullable in practice on the PO and bill paths — both source
+     * documents carry a supplier already, so a receipt derived from either has
+     * no excuse for losing the link. Typed nullable because the CHECK, not the
+     * column, carries the rule: a walk-in delivery from somebody not yet on
+     * file may stand on the name alone rather than being refused at the gate.
+     *
+     * The foreign key is composite — (supplier_id, company_id) → parties —
+     * so one tenant's supplier cannot be attached to another tenant's receipt.
+     */
     supplierId: uuid("supplier_id"),
+    /**
+     * The name AS FILED, required always. It is the snapshot that survives a
+     * later rename, the same role `supplier_name_at_bill` plays on a bill.
+     */
     supplierName: text("supplier_name"),
 
     /** draft | pending_acceptance | finalised | voided. */
@@ -120,6 +136,9 @@ export const goodsReceipts = pgTable(
   },
   (t) => [
     uniqueIndex("goods_receipts_company_number_uq").on(t.companyId, t.grnNumber),
+    // `listGoodsReceipts` filters on supplier and the reconciliation screen
+    // groups by it; neither had an index to use (0122).
+    index("goods_receipts_company_supplier_idx").on(t.companyId, t.supplierId),
     index("goods_receipts_company_status_idx").on(
       t.companyId,
       t.status,

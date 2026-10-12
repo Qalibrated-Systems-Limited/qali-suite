@@ -350,6 +350,83 @@ suite("GR/IR reconciliation", () => {
   });
 
   // ───────────────────────────────────────────────────────────────────────────
+  describe("the supplier on a receipt (0122)", () => {
+    /**
+     * `supplier_id` always had a real composite foreign key. What it did not
+     * have was anything requiring it to be filled: the form only ever set the
+     * NAME, and `supplierPartyId` reached the payload as a side effect of
+     * choosing a PO or a bill. So an unscheduled receipt posted its acceptance
+     * entry with no party at all.
+     */
+    const insertGrn = (over = {}) => {
+      const cols = {
+        id: randomUUID(),
+        company_id: companyUuid,
+        grn_number: "GRN-" + randomUUID().slice(0, 6),
+        source_type: "purchase_order",
+        purchase_order_id: poId,
+        supplier_id: supplierId,
+        supplier_name: "Acme Supplies",
+        ...over,
+      };
+      return admin`
+        INSERT INTO goods_receipts
+          (id, company_id, grn_number, source_type, purchase_order_id,
+           supplier_id, supplier_name, received_date, status)
+        VALUES (${cols.id}, ${cols.company_id}, ${cols.grn_number},
+                ${cols.source_type}, ${cols.purchase_order_id},
+                ${cols.supplier_id}, ${cols.supplier_name},
+                CURRENT_DATE, 'draft')`;
+    };
+
+    it("refuses a receipt that names nobody", async () => {
+      await expect(insertGrn({ supplier_name: null })).rejects.toThrow(
+        /supplier_name_present/,
+      );
+    });
+
+    it("treats a blank name as naming nobody", async () => {
+      await expect(insertGrn({ supplier_name: "   " })).rejects.toThrow(
+        /supplier_name_present/,
+      );
+    });
+
+    it("refuses a PO-backed receipt that lost the supplier link", async () => {
+      // A purchase order carries a supplier already — purchase_orders.supplier_id
+      // is NOT NULL — so a receipt derived from one has no excuse to drop it.
+      await expect(insertGrn({ supplier_id: null })).rejects.toThrow(
+        /supplier_linked_unless_unscheduled/,
+      );
+    });
+
+    it("lets an unscheduled receipt stand on the name alone", async () => {
+      // Goods do arrive from somebody not yet on file, and refusing the
+      // receipt would leave the storekeeper holding stock they cannot book in.
+      await insertGrn({
+        source_type: "unscheduled",
+        purchase_order_id: null,
+        supplier_id: null,
+        supplier_name: "Walk-in Supplier",
+      });
+      const [row] = await admin`
+        SELECT supplier_name FROM goods_receipts
+         WHERE source_type = 'unscheduled' AND company_id = ${companyUuid}`;
+      expect(row.supplier_name).toBe("Walk-in Supplier");
+    });
+
+    it("still will not let an unscheduled receipt be anonymous", async () => {
+      await expect(
+        insertGrn({
+          source_type: "unscheduled",
+          purchase_order_id: null,
+          supplier_id: null,
+          supplier_name: null,
+        }),
+      ).rejects.toThrow(/supplier_name_present/);
+    });
+  });
+
+  // ───────────────────────────────────────────────────────────────────────────
   describe("what the screen cannot attribute", () => {
     it("reports a posting with no order line rather than hiding it", async () => {
       // An unscheduled receipt — a walk-in delivery with no PO. It credits
@@ -359,9 +436,13 @@ suite("GR/IR reconciliation", () => {
       const grnId = randomUUID();
       await admin`
         INSERT INTO goods_receipts
-          (id, company_id, grn_number, source_type, received_date, status)
+          (id, company_id, grn_number, source_type, supplier_name,
+           received_date, status)
         VALUES (${grnId}, ${companyUuid}, 'GRN-WALKIN', 'unscheduled',
-                CURRENT_DATE, 'draft')`;
+                -- 0122: every receipt names who the goods came from. An
+                -- unscheduled one may stand on the name alone — the supplier
+                -- is not on file yet — but it may not be anonymous.
+                'Walk-in Supplier', CURRENT_DATE, 'draft')`;
       await admin`
         INSERT INTO goods_receipt_lines
           (company_id, goods_receipt_id, line_number, product_id, product_name,
