@@ -355,10 +355,15 @@ suite("stock adjustments", () => {
       expect((await levels(widget)).on_hand).toBe(100);
     });
 
-    it("never auto-approves stock admitted with no cost basis", async () => {
+    it("holds stock admitted with no cost basis for valuation", async () => {
       // The zero-cost guard. An increase at a unit cost of zero posts nothing
       // to Inventory AND defeats the value threshold, since the total is
       // always zero and so never exceeds it.
+      //
+      // It lands in `pending_valuation`, not `draft` (0117): a draft is a
+      // document waiting for a signature, and this one is waiting for a
+      // number. The distinction is what stops it being approved by somebody
+      // who reads "draft" as finished.
       await admin`UPDATE products SET cost_price = 0 WHERE id = ${widget}`;
       asRole("Admin");
 
@@ -366,8 +371,156 @@ suite("stock adjustments", () => {
 
       const [row] = await admin`
         SELECT status FROM stock_adjustments WHERE id = ${r.adjustmentId}`;
-      expect(row?.status ?? "draft").toBe("draft");
+      expect(row.status).toBe("pending_valuation");
       expect((await levels(widget)).on_hand).toBe(100);
+    });
+
+    it("routes it at finance, not at the stock approvers who cannot cost it", async () => {
+      // It was raised as `stock_adjustment`, whose matrix is
+      // [SuperAdmin, Admin, Manager, Store Manager] — so the guard said it was
+      // sending the case to finance and finance could not see it.
+      await admin`UPDATE products SET cost_price = 0 WHERE id = ${widget}`;
+      asRole("Storekeeper");
+
+      await submit([item(widget, "increase", 100, "Found")]);
+
+      const [approval] = await admin`
+        SELECT type FROM approval_requests ORDER BY created_at DESC LIMIT 1`;
+      expect(approval.type).toBe("stock_valuation");
+    });
+  });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  describe("valuation before approval (0117)", () => {
+    /** A count that finds 100 of a product the company has never valued. */
+    const unvalued = async () => {
+      await admin`UPDATE products SET cost_price = 0 WHERE id = ${widget}`;
+      asRole("Admin");
+      const r = await submit([item(widget, "increase", 100, "Found")]);
+      const [line] = await admin`
+        SELECT id FROM stock_adjustment_lines WHERE adjustment_id = ${r.adjustmentId}`;
+      return { ...r, lineId: line.id };
+    };
+
+    it("refuses to approve while a line admits stock at no cost", async () => {
+      const { adjustmentId } = await unvalued();
+
+      const res = await adjustments.applyApprovedStockAdjustmentPg(adjustmentId);
+
+      expect(res.success).toBe(false);
+      expect(res.message).toMatch(/cost/i);
+      const [row] = await admin`
+        SELECT status, journal_entry_id FROM stock_adjustments WHERE id = ${adjustmentId}`;
+      expect(row.status).toBe("pending_valuation");
+      expect(row.journal_entry_id).toBeNull();
+    });
+
+    it("refuses at the DATABASE too, whatever route the write takes", async () => {
+      // The routing above is advisory — a direct write, a future caller or a
+      // status set by hand during a repair all bypass it. The invariant is
+      // that stock never enters the books at a value nobody established, so
+      // it lives in a trigger.
+      const { adjustmentId } = await unvalued();
+
+      await expect(
+        admin`
+          UPDATE stock_adjustments
+             SET status = 'approved', approved_at = now(), approved_by_name = 'Sneaky'
+           WHERE id = ${adjustmentId}`,
+      ).rejects.toThrow(/positive_line_needs_cost/);
+    });
+
+    it("lets finance supply the cost, and posts it on approval", async () => {
+      const { adjustmentId, lineId } = await unvalued();
+
+      asRole("Finance Manager");
+      const valued = await adjustments.valueStockAdjustmentPg(adjustmentId, [
+        { lineId, unitCost: "250" },
+      ]);
+      expect(valued.success).toBe(true);
+
+      const [afterValuing] = await admin`
+        SELECT status, valued_by_name FROM stock_adjustments WHERE id = ${adjustmentId}`;
+      // Valuing does NOT approve: the count keeps its second signature.
+      expect(afterValuing.status).toBe("draft");
+      expect(afterValuing.valued_by_name).toBe("Finance Manager User");
+
+      asRole("Store Manager");
+      const approved = await adjustments.applyApprovedStockAdjustmentPg(adjustmentId);
+      expect(approved.success).toBe(true);
+
+      const [row] = await admin`
+        SELECT status, journal_entry_id FROM stock_adjustments WHERE id = ${adjustmentId}`;
+      expect(row.status).toBe("approved");
+      // THE POINT OF ALL OF THIS. Before 0117 this was null: the quantity rose
+      // and the balance sheet did not move.
+      expect(row.journal_entry_id).not.toBeNull();
+
+      // 100 found at 250 = 25,000 into Inventory.
+      const posted = await entryLines(adjustmentId);
+      const inventory = posted.find((l) => l.account_code === "1300");
+      expect(inventory.debit).toBe(25000);
+    });
+
+    it("will not take a cost from somebody who may not set one", async () => {
+      const { adjustmentId, lineId } = await unvalued();
+
+      // A Store Manager may APPROVE the count and may not decide what the
+      // goods were worth — the same split as raising versus approving.
+      asRole("Store Manager");
+      const res = await adjustments.valueStockAdjustmentPg(adjustmentId, [
+        { lineId, unitCost: "250" },
+      ]);
+
+      expect(res.success).toBe(false);
+      const [row] = await admin`
+        SELECT status FROM stock_adjustments WHERE id = ${adjustmentId}`;
+      expect(row.status).toBe("pending_valuation");
+    });
+
+    it("refuses a cost of zero, which is the state it is resolving", async () => {
+      const { adjustmentId, lineId } = await unvalued();
+
+      asRole("CFO");
+      const res = await adjustments.valueStockAdjustmentPg(adjustmentId, [
+        { lineId, unitCost: "0" },
+      ]);
+
+      expect(res.success).toBe(false);
+      const [row] = await admin`
+        SELECT status FROM stock_adjustments WHERE id = ${adjustmentId}`;
+      expect(row.status).toBe("pending_valuation");
+    });
+
+    it("cannot be used to edit the count, only to value it", async () => {
+      const { adjustmentId, lineId } = await unvalued();
+
+      asRole("CFO");
+      await adjustments.valueStockAdjustmentPg(adjustmentId, [
+        { lineId, unitCost: "250" },
+      ]);
+
+      const [line] = await admin`
+        SELECT system_quantity::float8 AS sys, physical_quantity::float8 AS phys,
+               adjustment_quantity::float8 AS qty, reason
+        FROM stock_adjustment_lines WHERE id = ${lineId}`;
+      expect(line.sys).toBe(100);
+      expect(line.phys).toBe(200);
+      expect(line.qty).toBe(100);
+      expect(line.reason).toBe("Found");
+    });
+
+    it("leaves a product that already has an average cost alone", async () => {
+      // The special path is for stock with no defensible cost. A positive
+      // count variance on a product carrying a weighted average is valued at
+      // that average and takes the ordinary route.
+      asRole("Admin");
+      const r = await submit([item(widget, "increase", 10, "Found")]);
+
+      const [row] = await admin`
+        SELECT status, journal_entry_id FROM stock_adjustments WHERE id = ${r.adjustmentId}`;
+      expect(row.status).toBe("approved");
+      expect(row.journal_entry_id).not.toBeNull();
     });
   });
 

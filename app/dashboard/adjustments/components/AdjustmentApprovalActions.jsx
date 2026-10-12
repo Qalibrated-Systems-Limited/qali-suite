@@ -45,7 +45,15 @@ export default function AdjustmentApprovalActions({ adjustmentId, canApprove }) 
         done?.();
         router.refresh();
       } else {
-        toast.error(res?.error ?? "That did not work");
+        /*
+          `message`, not `error`. Both adjustment actions return
+          { success, message } — there is no `error` key on either — so every
+          refusal showed the fallback and the actual reason ("Can only approve
+          draft adjustments. Current status: approved", "You do not have
+          authority…") was thrown away. `error` is kept first for the shape
+          other action modules use.
+        */
+        toast.error(res?.error ?? res?.message ?? "That did not work");
       }
     });
 

@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { can } from "@/lib/capabilities";
 import AdjustmentApprovalActions from "../components/AdjustmentApprovalActions";
+import AdjustmentValuationForm from "../components/AdjustmentValuationForm";
 
 /**
  * One stock adjustment, in full.
@@ -35,8 +36,14 @@ export const metadata = {
 
 const STATUS_STYLES = {
   draft: "bg-yellow-500/10 text-yellow-600 border-yellow-500/20",
+  pending_valuation: "bg-amber-500/10 text-amber-600 border-amber-500/20",
   approved: "bg-green-500/10 text-green-600 border-green-500/20",
   cancelled: "bg-red-500/10 text-red-600 border-red-500/20",
+};
+
+/** `pending_valuation` is two words to a reader, one token to Postgres. */
+const STATUS_LABELS = {
+  pending_valuation: "Awaiting valuation",
 };
 
 const money = (n) =>
@@ -97,7 +104,7 @@ export default async function AdjustmentDetailPage({ params }) {
               {adjustment.adjustmentNumber}
             </span>
             <Badge variant="outline" className={STATUS_STYLES[adjustment.status]}>
-              {adjustment.status}
+              {STATUS_LABELS[adjustment.status] ?? adjustment.status}
             </Badge>
             {adjustment.adjustmentType && (
               <Badge variant="outline" className="text-xs">
@@ -141,6 +148,19 @@ export default async function AdjustmentDetailPage({ params }) {
           />
         )}
       </div>
+
+      {/*
+        THE MISSING NUMBER COMES FIRST, above the figures — because while it is
+        missing the figures are wrong: an increase valued at nothing reads as a
+        count that found nothing worth anything.
+      */}
+      {adjustment.status === "pending_valuation" && (
+        <AdjustmentValuationForm
+          adjustmentId={adjustment._id}
+          lines={adjustment.unvaluedLines ?? []}
+          canValue={can(session.user.role, "product.cost.set")}
+        />
+      )}
 
       {/* The register's own three figures, so the number clicked is the number
           shown. */}

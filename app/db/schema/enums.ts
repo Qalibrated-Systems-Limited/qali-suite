@@ -698,8 +698,18 @@ export const adjustmentTypeEnum = pgEnum("adjustment_type", [
  * `cancel()` refuses anything that is not a draft, which is what lets the two
  * pair CHECKs in 0066 be biconditionals rather than implications.
  */
+/**
+ * `pending_valuation` sits BEFORE draft, not beside it (0117).
+ *
+ * An adjustment that admits stock the company cannot value is not a draft
+ * waiting for a signature — it is missing a number nobody has supplied. The
+ * distinction matters because `approveAdjustment` claims a row by updating
+ * `status = 'draft'`, so a document in this state cannot be approved by
+ * anybody who mistakes it for a finished one.
+ */
 export const adjustmentStatusEnum = pgEnum("adjustment_status", [
   "draft",
+  "pending_valuation",
   "approved",
   "cancelled",
 ]);
@@ -1142,6 +1152,14 @@ export const approvalTypeEnum = pgEnum("approval_type", [
   "price_change",
   "stock_writeoff",
   "stock_adjustment",
+  /**
+   * Stock admitted with no cost basis (0117) — routed at the roles that may
+   * ESTABLISH a cost, which `stock_adjustment` is not. Distinct from
+   * `stock_writeoff` on purpose: a write-off is stock leaving the books and
+   * this is stock entering them, and reusing that matrix would have made the
+   * register describe the opposite of what happened.
+   */
+  "stock_valuation",
   "bill_payment",
   "expense_payment",
   "credit_note",

@@ -28,6 +28,9 @@ const ADJUSTMENT_TYPES = [
 const STATUSES = [
   { value: "all", label: "All Statuses" },
   { value: "draft", label: "Draft" },
+  // The queue finance looks for: counts held because the stock they admit has
+  // no cost on record.
+  { value: "pending_valuation", label: "Awaiting valuation" },
   { value: "approved", label: "Approved" },
   { value: "cancelled", label: "Cancelled" },
 ];

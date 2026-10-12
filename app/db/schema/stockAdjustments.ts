@@ -66,6 +66,20 @@ export const stockAdjustments = pgTable(
     notes: text("notes"),
     referenceNumber: text("reference_number"),
 
+    /**
+     * Who established the cost these goods were admitted at, and when (0117).
+     *
+     * Separate from the approval because they are separate acts: procurement
+     * may supply a cost that finance then approves. "Who decided this stock
+     * was worth this" is the question asked about admitted inventory, and the
+     * approver's name does not answer it.
+     */
+    valuedAt: timestamp("valued_at", { withTimezone: true }),
+    valuedById: text("valued_by_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    valuedByName: text("valued_by_name"),
+
     approvedAt: timestamp("approved_at", { withTimezone: true }),
     approvedById: text("approved_by_id").references(() => users.id, {
       onDelete: "set null",
@@ -122,6 +136,12 @@ export const stockAdjustments = pgTable(
     check(
       "stock_adjustments_cancellation_pair",
       sql`(${t.status} = 'cancelled') = (${t.cancelledAt} IS NOT NULL AND ${t.cancelledByName} IS NOT NULL AND ${t.cancellationReason} IS NOT NULL)`,
+    ),
+    // Paired on the NAME, not the id: the id is nulled when the user row goes
+    // and the record of who valued the stock has to outlive the account.
+    check(
+      "stock_adjustments_valuation_pair",
+      sql`(${t.valuedAt} IS NOT NULL) = (${t.valuedByName} IS NOT NULL)`,
     ),
     check(
       "stock_adjustments_entry_only_when_approved",

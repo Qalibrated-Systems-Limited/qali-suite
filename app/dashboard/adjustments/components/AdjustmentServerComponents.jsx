@@ -30,8 +30,19 @@ const ADJUSTMENT_TYPE_LABELS = {
 
 const STATUS_STYLES = {
   draft: "bg-yellow-500/10 text-yellow-600 border-yellow-500/20",
+  pending_valuation: "bg-amber-500/10 text-amber-600 border-amber-500/20",
   approved: "bg-green-500/10 text-green-600 border-green-500/20",
   cancelled: "bg-red-500/10 text-red-600 border-red-500/20",
+};
+
+/**
+ * `pending_valuation` is one token to Postgres and two words to a reader, and
+ * the register is read by people looking for what is holding a count up. An
+ * unmapped status falls through to the raw value, which is what the badge did
+ * for all three before.
+ */
+const STATUS_LABELS = {
+  pending_valuation: "Awaiting valuation",
 };
 
 // ============================================
@@ -269,7 +280,7 @@ export async function AdjustmentsTableServer({
                       variant="outline"
                       className={STATUS_STYLES[adjustment.status]}
                     >
-                      {adjustment.status}
+                      {STATUS_LABELS[adjustment.status] ?? adjustment.status}
                     </Badge>
                   </td>
                   <td className="p-4 text-sm text-muted-foreground">
@@ -302,7 +313,7 @@ export async function AdjustmentsTableServer({
                   variant="outline"
                   className={STATUS_STYLES[adjustment.status]}
                 >
-                  {adjustment.status}
+                  {STATUS_LABELS[adjustment.status] ?? adjustment.status}
                 </Badge>
               </div>
               <div className="flex items-center justify-between text-xs">

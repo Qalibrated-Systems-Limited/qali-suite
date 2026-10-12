@@ -259,7 +259,14 @@ async function applyApprovalPayload(approval: {
     }
 
     case "stock_adjustment":
-    case "stock_writeoff": {
+    case "stock_writeoff":
+    /*
+     * Same applier. A `stock_valuation` request is the same adjustment taking
+     * a narrower route, and `applyApprovedStockAdjustmentPg` refuses it until
+     * the cost has actually been supplied — so approving one that is still
+     * unvalued says so, rather than admitting the goods at nothing.
+     */
+    case "stock_valuation": {
       const adjustmentId = targetId || String(payload.adjustmentId ?? "");
       if (!adjustmentId) return { success: false, error: "Missing adjustment reference" };
       const { applyApprovedStockAdjustmentPg } = await import("./adjustment-actions");

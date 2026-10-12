@@ -9,6 +9,7 @@ import * as productsRepo from "./products";
 import * as movementsRepo from "./stockMovements";
 import * as accountsRepo from "./accounts";
 import { createJournalEntry } from "./journal";
+import { isUuid } from "./sqlHelpers";
 
 /**
  * Stock adjustments — the last module of substance that posted into the Mongo
@@ -140,6 +141,12 @@ export async function createAdjustment(tx: Tx, input: CreateAdjustmentInput) {
 }
 
 export async function getAdjustment(tx: Tx, adjustmentId: string) {
+  // An id a uuid column cannot hold is NOT FOUND, not a 22P02 with the whole
+  // SELECT in the message. The detail page calls `notFound()` on null and had
+  // no way to reach it: a mistyped or stale adjustment id came back as a
+  // Postgres syntax error rendered as a runtime error screen. Same guard as
+  // `getCategory` in the categories repository, for the same reason.
+  if (!isUuid(adjustmentId)) return null;
   const [adjustment] = await tx
     .select()
     .from(stockAdjustments)
@@ -276,6 +283,13 @@ export async function approveAdjustment(
       .select({ status: stockAdjustments.status })
       .from(stockAdjustments)
       .where(eq(stockAdjustments.id, adjustmentId));
+
+    if (existing?.status === "pending_valuation") {
+      throw new Error(
+        "This adjustment admits stock with no cost. Finance or procurement " +
+          "has to establish a unit cost before it can be approved.",
+      );
+    }
 
     throw new Error(
       existing
@@ -664,8 +678,158 @@ export async function decideRouting(
       !hasZeroCostIncrease &&
       (hasFullAuthority || (mayAutoApproveSmall && !isHighRisk && !isHighValue)),
     isHighRisk,
+    /**
+     * NOT just "this needs a signature" — this needs a NUMBER first (0117).
+     *
+     * The caller routes on it: an adjustment that admits stock nobody has
+     * valued goes to the roles that may establish a cost, and is held in
+     * `pending_valuation` rather than sitting as a draft that looks ready to
+     * approve. A positive line on a product that already carries a defensible
+     * weighted average is not this case — `unit_cost` was read from the
+     * product when the line was written, so this is only ever true where that
+     * read produced nothing.
+     */
+    needsValuation: hasZeroCostIncrease,
     totalValue,
     threshold,
     reason: reasonParts.join("; ") || "Requires approval",
   };
+}
+
+/**
+ * Parks a freshly created adjustment in `pending_valuation`.
+ *
+ * Set AFTER the insert rather than as the insert's status, because what
+ * decides it is `decideRouting`, which sums the lines — and the lines do not
+ * exist until the adjustment they belong to does. Conditional on `draft` so it
+ * cannot walk an already-decided document backwards.
+ */
+export async function holdForValuation(tx: Tx, adjustmentId: string) {
+  const [held] = await tx
+    .update(stockAdjustments)
+    .set({ status: "pending_valuation", updatedAt: new Date() })
+    .where(
+      and(
+        eq(stockAdjustments.id, adjustmentId),
+        eq(stockAdjustments.status, "draft"),
+      ),
+    )
+    .returning();
+  return held ?? null;
+}
+
+/**
+ * The lines that are holding an adjustment in `pending_valuation`.
+ *
+ * Positive lines only, and only those with no cost. A DECREASE at zero cost is
+ * arithmetically nothing and posts nothing; it is the admission of unvalued
+ * goods that misstates the balance sheet, not the removal of them.
+ */
+export async function getUnvaluedLines(tx: Tx, adjustmentId: string) {
+  return tx
+    .select({
+      id: stockAdjustmentLines.id,
+      productId: stockAdjustmentLines.productId,
+      sku: stockAdjustmentLines.productSkuAtAdjustment,
+      name: stockAdjustmentLines.productNameAtAdjustment,
+      unit: stockAdjustmentLines.productUnitAtAdjustment,
+      quantity: stockAdjustmentLines.adjustmentQuantity,
+    })
+    .from(stockAdjustmentLines)
+    .where(
+      and(
+        eq(stockAdjustmentLines.adjustmentId, adjustmentId),
+        sql`${stockAdjustmentLines.adjustmentQuantity} > 0`,
+        sql`COALESCE(${stockAdjustmentLines.unitCost}, 0) <= 0`,
+      ),
+    )
+    .orderBy(stockAdjustmentLines.createdAt);
+}
+
+/**
+ * Finance or procurement supplies the missing cost, and nothing else.
+ *
+ * WHAT THIS DELIBERATELY CANNOT TOUCH: the quantities and the reasons. The
+ * counted figure is a statement about what is physically on the shelf, made by
+ * the person who was standing in front of it — valuation is a separate act
+ * that says what those goods were worth, and letting it edit the count would
+ * turn a second signature into a second opinion about the stock itself.
+ *
+ * Only the lines that are actually unvalued are written, and only while the
+ * adjustment is in `pending_valuation`. A cost cannot be slipped onto a line
+ * that already had one, and it cannot be changed after approval.
+ */
+export async function valueAdjustment(
+  tx: Tx,
+  adjustmentId: string,
+  costs: Array<{ lineId: string; unitCost: string }>,
+  valuer: { id: string | null; name: string },
+) {
+  const [adjustment] = await tx
+    .select()
+    .from(stockAdjustments)
+    .where(eq(stockAdjustments.id, adjustmentId));
+
+  if (!adjustment) throw new Error("Adjustment not found");
+  if (adjustment.status !== "pending_valuation") {
+    throw new Error(
+      `Only an adjustment awaiting valuation can be valued. Current status: ${adjustment.status}`,
+    );
+  }
+
+  const outstanding = await getUnvaluedLines(tx, adjustmentId);
+  const wanted = new Map(outstanding.map((line) => [line.id, line]));
+
+  for (const { lineId, unitCost } of costs) {
+    if (!wanted.has(lineId)) {
+      throw new Error("That line is not awaiting a cost.");
+    }
+    if (!(Number(unitCost) > 0)) {
+      throw new Error(
+        `A unit cost of ${unitCost} values the goods at nothing, which is the ` +
+          "state this is here to resolve.",
+      );
+    }
+    await tx
+      .update(stockAdjustmentLines)
+      // No `updatedAt` on the lines table — 0066 gave it created_at only,
+      // because a line is written once and its arithmetic is generated.
+      .set({ unitCost })
+      .where(eq(stockAdjustmentLines.id, lineId));
+    wanted.delete(lineId);
+  }
+
+  // PARTIAL VALUATION IS REFUSED rather than saved. Half a valuation leaves
+  // the adjustment in exactly the state it was already in, and the trigger
+  // would refuse the approval later anyway — better to say so now, while the
+  // person who can fix it is still looking at the form.
+  if (wanted.size > 0) {
+    const first = [...wanted.values()][0];
+    throw new Error(
+      `${first.sku || first.name} still has no cost. Every admitted line needs one.`,
+    );
+  }
+
+  const [updated] = await tx
+    .update(stockAdjustments)
+    .set({
+      status: "draft",
+      valuedAt: new Date(),
+      valuedById: valuer.id,
+      valuedByName: valuer.name,
+      lastModifiedById: valuer.id,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(stockAdjustments.id, adjustmentId),
+        // The same conditional-update claim `approveAdjustment` uses: two
+        // people valuing at once must not both succeed.
+        eq(stockAdjustments.status, "pending_valuation"),
+      ),
+    )
+    .returning();
+
+  if (!updated) throw new Error("Someone else valued this adjustment first.");
+  return updated;
 }

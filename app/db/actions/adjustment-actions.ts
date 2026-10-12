@@ -27,6 +27,15 @@ import { rolesFor } from "@/lib/capabilities";
 
 const CREATE_ROLES = rolesFor("adjustment.create");
 const APPROVE_ROLES = rolesFor("adjustment.approve");
+/**
+ * Who may establish a cost for stock the company has never valued (0117).
+ *
+ * The cost-setting list from lib/permissions.js, not the approval one: this
+ * writes a number that reaches inventory valuation and COGS, which is a
+ * finance and procurement decision and not a custody one. A Store Manager may
+ * approve the adjustment and may not decide what the goods were worth.
+ */
+const VALUE_ROLES = rolesFor("product.cost.set");
 
 export interface AdjustmentActionResult {
   success: boolean;
@@ -153,6 +162,21 @@ export async function createStockAdjustmentPg(
         lines,
       );
 
+      /**
+       * STOCK NOBODY HAS VALUED IS HELD, NOT DRAFTED (0117).
+       *
+       * `routing.needsValuation` means a line admits goods at a unit cost of
+       * zero — the product carries no weighted average to read one from. The
+       * adjustment is parked in `pending_valuation` so it cannot be mistaken
+       * for a draft awaiting a signature, and the request is raised as
+       * `stock_valuation`, whose approver matrix is the roles that may
+       * establish a cost. Before this it was raised as `stock_adjustment`,
+       * which finance cannot even see.
+       */
+      if (routing.needsValuation) {
+        await adjustmentsRepo.holdForValuation(tx, adjustment.id);
+      }
+
       if (routing.autoApprove) {
         await adjustmentsRepo.approveAdjustment(tx, adjustment.id, {
           id: user.id ?? null,
@@ -176,7 +200,14 @@ export async function createStockAdjustmentPg(
         "@/app/db/actions/approval-actions"
       );
       const result = await submitApproval({
-        type: routing.isHighRisk ? "stock_writeoff" : "stock_adjustment",
+        // Valuation outranks the high-risk branch: a write-off that admits
+        // nothing still needs its increase valued, and there is only one
+        // request. `stock_valuation` is the narrower queue of the two.
+        type: routing.needsValuation
+          ? "stock_valuation"
+          : routing.isHighRisk
+            ? "stock_writeoff"
+            : "stock_adjustment",
         targetRef: {
           kind: "InventoryAdjustment",
           id: adjustment.id,
@@ -201,7 +232,9 @@ export async function createStockAdjustmentPg(
 
       return {
         success: true,
-        message: `Stock adjustment ${adjustment.adjustmentNumber} submitted for approval (${result.approval.requestNumber})`,
+        message: routing.needsValuation
+          ? `Stock adjustment ${adjustment.adjustmentNumber} is awaiting a unit cost from finance or procurement (${result.approval.requestNumber})`
+          : `Stock adjustment ${adjustment.adjustmentNumber} submitted for approval (${result.approval.requestNumber})`,
         adjustmentNumber: adjustment.adjustmentNumber,
         adjustmentId: adjustment.id,
       };
@@ -266,6 +299,57 @@ export async function applyApprovedStockAdjustmentPg(
       success: false,
       message:
         error instanceof Error ? error.message : "Could not approve the adjustment.",
+    };
+  }
+}
+
+/**
+ * Supplies the missing unit costs and releases the adjustment for approval.
+ *
+ * GATED ON WHO MAY SET A COST, not on who may approve an adjustment. They are
+ * different lists on purpose: a Procurement Officer knows what the goods cost
+ * and may say so, and may not then sign off the adjustment that admits them —
+ * which is the segregation this whole module is built around, applied to the
+ * one number that was previously nobody's to supply.
+ *
+ * It does NOT approve. The adjustment returns to `draft` and takes the
+ * ordinary approval path from there, so the count keeps its second signature.
+ */
+export async function valueStockAdjustmentPg(
+  adjustmentId: string,
+  costs: Array<{ lineId: string; unitCost: string }>,
+): Promise<AdjustmentActionResult> {
+  if (!costs?.length) {
+    return { success: false, message: "No costs were supplied." };
+  }
+
+  try {
+    return await withAuthorizedTenant(VALUE_ROLES, async (tx, { user }) => {
+      const adjustment = await adjustmentsRepo.valueAdjustment(
+        tx,
+        adjustmentId,
+        costs,
+        {
+          id: user.id ?? null,
+          name: user.name || user.email || "Unknown User",
+        },
+      );
+
+      revalidatePath("/dashboard/adjustments");
+      revalidatePath(`/dashboard/adjustments/${adjustmentId}`);
+
+      return {
+        success: true,
+        message: `${adjustment.adjustmentNumber} valued and ready for approval`,
+        adjustmentNumber: adjustment.adjustmentNumber,
+        adjustmentId: adjustment.id,
+      };
+    });
+  } catch (error) {
+    return {
+      success: false,
+      message:
+        error instanceof Error ? error.message : "Could not value the adjustment.",
     };
   }
 }
@@ -397,8 +481,21 @@ export async function getAdjustmentById(adjustmentId: string) {
     const adjustment = await adjustmentsRepo.getAdjustment(tx, adjustmentId);
     if (!adjustment) return null;
 
+    /**
+     * The lines holding it in `pending_valuation`, for the form that clears
+     * them. Read only in that state: on every other adjustment it is an empty
+     * array and the query is not worth a round trip per page view.
+     */
+    const unvaluedLines =
+      adjustment.status === "pending_valuation"
+        ? (await adjustmentsRepo.getUnvaluedLines(tx, adjustmentId)).map(
+            (line) => ({ ...line, quantity: Number(line.quantity) }),
+          )
+        : [];
+
     return {
       ...adjustment,
+      unvaluedLines,
       _id: adjustment.id,
       totalIncreaseValue: Number(adjustment.increase),
       totalDecreaseValue: Number(adjustment.decrease),
