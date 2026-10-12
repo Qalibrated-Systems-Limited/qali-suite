@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useEffect } from "react";
 import NextForm from "next/form";
 import { Button } from "@/components/ui/button";
 import {
@@ -78,6 +78,31 @@ export function EditUserForm({ user, isSuperAdmin = false }) {
     },
   });
 
+  /**
+   * A SAVE ENDS ON THE LIST, the way Cancel already did.
+   *
+   * `updateUserPg` returns `{ success, message }` and does not redirect — a
+   * server action that redirects cannot also report what it changed, and this
+   * one has something worth reporting ("Saved. Their existing sessions have
+   * been ended."). So the navigation belongs here.
+   *
+   * It did not happen at all: a successful save left the editor open with the
+   * word "Saved" rendered inside the DESTRUCTIVE alert below, because that
+   * banner printed `state.message` without asking whether the message was a
+   * failure. The person was shown their success in red and left on the form,
+   * with no way to tell whether it had worked.
+   *
+   * The message travels on the query string, which is what `FormBanner` on
+   * the users page reads — the same route every other list in the app uses to
+   * confirm a write.
+   */
+  useEffect(() => {
+    if (!state?.success) return;
+    router.push(
+      `/dashboard/users?success=${encodeURIComponent(state.message ?? "Saved")}`,
+    );
+  }, [state, router]);
+
   const handleCancel = () => {
     router.push("/dashboard/users");
   };
@@ -117,8 +142,9 @@ export function EditUserForm({ user, isSuperAdmin = false }) {
         <CardContent className="pt-6">
           <Form {...form}>
             <NextForm action={dispatch} className="space-y-8">
-              {/* Error Alert */}
-              {state.message && (
+              {/* Error Alert — FAILURES only. A success navigates away, and
+                  until this asked, "Saved" was rendered here in red. */}
+              {state.message && !state.success && (
                 <Alert
                   variant="destructive"
                   className="bg-red-500/10 border-red-500/20"

@@ -1,4 +1,5 @@
 import { Suspense } from "react";
+import { FormBanner } from "@/components/ui/form-banner";
 import {
   searchUsersPg,
   getUserStatsPg,
@@ -108,6 +109,11 @@ async function UsersPage(props) {
 
   return (
     <div className="flex flex-col gap-4">
+      {/* What the editor redirects back with. Every other list in the app
+          confirms a write this way; this one had no banner, so a save had
+          nowhere to report itself. */}
+      <FormBanner searchParams={searchParams} />
+
       {/* Header */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
