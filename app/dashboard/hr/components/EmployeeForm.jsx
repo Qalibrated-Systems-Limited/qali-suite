@@ -112,13 +112,56 @@ export default function EmployeeForm({ departments = [], managers = [], defaults
             <option value="other">Other</option>
           </Select>
         </div>
+        {/*
+          IDENTITY AND TAX REGISTRATION, both required (0120).
+          Payroll cannot run without either: PAYE is remitted against the KRA
+          PIN, and the national ID is what NSSF, SHA and the bank match on.
+          Both were optional, collected on paper and typed in later — which is
+          the arrangement that produces a payroll run with people nobody can
+          file for.
+
+          The PASSPORT sits between them because it is the alternative to the
+          ID and only to the ID: a non-citizen employee has no Kenyan one, and
+          is registered for PAYE like anybody else.
+        */}
         <div>
-          <Label>National ID</Label>
-          <Input name="nationalId" placeholder="12345678" defaultValue={d.nationalId} />
+          <Label required>National ID</Label>
+          <Input
+            name="nationalId"
+            placeholder="12345678"
+            defaultValue={d.nationalId}
+            aria-describedby="national-id-hint"
+          />
+          <p
+            id="national-id-hint"
+            className="mt-1 text-xs text-muted-foreground"
+          >
+            Or a passport number, for a non-citizen employee.
+          </p>
         </div>
         <div>
-          <Label>KRA PIN</Label>
-          <Input name="kraPin" placeholder="A000000000X" defaultValue={d.kraPin} />
+          <Label>Passport Number</Label>
+          <Input
+            name="passportNumber"
+            placeholder="For a non-citizen employee"
+            defaultValue={d.passportNumber}
+          />
+        </div>
+        <div>
+          <Label required>KRA PIN</Label>
+          <Input
+            name="kraPin"
+            placeholder="A000000000X"
+            defaultValue={d.kraPin}
+            // The shape is checked on the server, where a bulk import is
+            // checked too; this only spares the round trip.
+            pattern="[AaPp][0-9]{9}[A-Za-z]"
+            title="One letter, nine digits, one letter — e.g. A012345678Z"
+            aria-describedby="kra-pin-hint"
+          />
+          <p id="kra-pin-hint" className="mt-1 text-xs text-muted-foreground">
+            PAYE is remitted against this. Format: A012345678Z.
+          </p>
         </div>
         <div>
           <Label>NSSF Number</Label>

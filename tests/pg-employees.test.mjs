@@ -76,6 +76,13 @@ suite("employees repository", () => {
         companyId: over.companyId ?? companyA,
         firstName: "Jane",
         lastName: "Wanjiru",
+        // REQUIRED since 0120, and required of the fixture for the same
+        // reason they are required of a person: payroll cannot remit PAYE
+        // without the PIN, and NSSF, SHA and the bank all match on the ID.
+        // Unique per company, so each hire gets its own — two employees
+        // sharing a PIN means one of them is typed wrong.
+        nationalId: String(Math.floor(10_000_000 + Math.random() * 89_999_999)),
+        kraPin: `A${String(Math.floor(Math.random() * 1e9)).padStart(9, "0")}Z`,
         hireDate: "2026-01-15",
         basicSalary: 80000,
         allowanceHousing: 20000,
@@ -266,6 +273,7 @@ suite("employees repository", () => {
       const report = await asTenant(companyA, (tx) =>
         staff.createEmployee(tx, {
           companyId: companyA, firstName: "Ben", lastName: "Ochieng",
+          nationalId: "22223333", kraPin: "A222233334B",
           hireDate: "2026-02-01", managerId: boss.id,
         }));
 
@@ -276,6 +284,76 @@ suite("employees repository", () => {
           })),
         /reports to them/i,
       );
+    });
+  });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  describe("identity and tax registration (0120)", () => {
+    /**
+     * Both were nullable with no check, and the form asked for neither — so an
+     * employee could be created, put on a payroll run and paid without either.
+     * Neither is optional in the country this payroll files in: PAYE is
+     * remitted against the KRA PIN, and NSSF, SHA and the bank all match on
+     * the national ID.
+     */
+    it("refuses an employee with no KRA PIN", async () => {
+      await expectRejection(
+        hire({ kraPin: null }),
+        /kra_pin_present/i,
+      );
+    });
+
+    it("refuses an employee with no identity document at all", async () => {
+      await expectRejection(
+        hire({ nationalId: null }),
+        /identity_document_present/i,
+      );
+    });
+
+    it("takes a passport instead of a national ID", async () => {
+      // A non-citizen employee has no Kenyan ID and is identified by passport.
+      // Requiring `national_id` outright would make the system unable to
+      // employ them, which is a worse bug than the one being fixed.
+      const hired = await hire({
+        nationalId: null,
+        passportNumber: "AK0123456",
+      });
+      expect(hired.id).toEqual(expect.any(String));
+    });
+
+    it("still wants a PIN from a passport holder", async () => {
+      // The passport stands in for the ID and only for the ID: a foreign
+      // national on a Kenyan payroll is registered for PAYE like anybody else.
+      await expectRejection(
+        hire({ nationalId: null, passportNumber: "AK0123456", kraPin: null }),
+        /kra_pin_present/i,
+      );
+    });
+
+    it("refuses two employees sharing a KRA PIN", async () => {
+      // Two people on one PIN means one of them is typed wrong, and the P9 it
+      // produces is wrong for both.
+      await hire({ kraPin: "A111122223X", nationalId: "11112222" });
+      await expectRejection(
+        hire({ kraPin: "A111122223X", nationalId: "33334444" }),
+        /kra_pin/i,
+      );
+    });
+
+    it("lets another company use the same PIN", async () => {
+      // Uniqueness is per tenant: one person may be employed by two companies
+      // in the same group, and it is the same PIN in both.
+      await hire({ kraPin: "A555566667Y", nationalId: "55556666" });
+      const elsewhere = await hire({
+        companyId: otherCompany,
+        kraPin: "A555566667Y",
+        nationalId: "55556666",
+      });
+      expect(elsewhere.id).toEqual(expect.any(String));
+    });
+
+    it("treats a blank string as missing, which is what a form posts", async () => {
+      await expectRejection(hire({ kraPin: "   " }), /kra_pin_present/i);
     });
   });
 
@@ -551,6 +629,7 @@ suite("employees repository", () => {
       await asTenant(otherCompany, (tx) =>
         staff.createEmployee(tx, {
           companyId: otherCompany, firstName: "Stranger", lastName: "Person",
+          nationalId: "44445555", kraPin: "A444455556C",
           hireDate: "2026-01-01",
         }));
 

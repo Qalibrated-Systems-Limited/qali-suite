@@ -92,7 +92,21 @@ export const employees = pgTable(
     lastName: text("last_name").notNull(),
     dateOfBirth: date("date_of_birth"),
     gender: text("gender"),
+    /**
+     * REQUIRED, by a CHECK rather than NOT NULL (0120).
+     *
+     * `national_id` may be null when `passport_number` is not — a non-citizen
+     * employee has no Kenyan ID and is identified by passport. The constraint
+     * `employees_identity_document_present` states the pair; neither column
+     * can state it alone, which is why neither is NOT NULL.
+     */
     nationalId: text("national_id"),
+    /**
+     * REQUIRED — `employees_kra_pin_present`. PAYE is deducted and remitted
+     * against it, so an employee without one cannot be filed for. Not nullable
+     * in practice; typed as such only because the CHECK, not the column,
+     * carries the rule.
+     */
     kraPin: text("kra_pin"),
     nssfNumber: text("nssf_number"),
     /** Social Health Authority — replaced NHIF in October 2024. */

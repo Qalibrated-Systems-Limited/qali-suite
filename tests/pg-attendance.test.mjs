@@ -71,6 +71,7 @@ suite("attendance", () => {
     jane = await asTenant(companyA, (tx) =>
       staff.createEmployee(tx, {
         companyId: companyA, firstName: "Jane", lastName: "Wanjiru",
+        nationalId: "40000001", kraPin: "A400000001Z",
         hireDate: "2024-01-08",
       }));
   });
@@ -417,6 +418,7 @@ suite("attendance", () => {
       await asTenant(companyA, (tx) =>
         staff.createEmployee(tx, {
           companyId: companyA, firstName: "Peter", lastName: "Otieno",
+          nationalId: "40000002", kraPin: "A400000002Y",
           hireDate: "2024-01-08",
         }));
       await asTenant(companyA, (tx) =>

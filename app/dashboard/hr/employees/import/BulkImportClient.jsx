@@ -7,10 +7,18 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { bulkImportEmployees } from "@/app/db/actions/hr-employee-actions";
 
-// CSV template columns and sample row
+/*
+  CSV template columns and sample row.
+
+  `nationalId` and `kraPin` are REQUIRED of every row (0120) — payroll cannot
+  remit PAYE without the PIN, and NSSF, SHA and the bank all match on the ID.
+  `passportNumber` is here because it is the alternative to the ID and only to
+  the ID: a non-citizen employee has no Kenyan one, and is still registered for
+  PAYE like anybody else.
+*/
 const CSV_HEADERS = [
   "firstName","lastName","email","phone",
-  "nationalId","kraPin","nssfNumber","shaNumber","gender",
+  "nationalId","passportNumber","kraPin","nssfNumber","shaNumber","gender",
   "department","designation","employmentType","hireDate",
   "basicSalary","housingAllowance","transportAllowance",
   "paymentMethod","bankName","bankBranch","bankAccount","mpesaNumber",
@@ -18,11 +26,20 @@ const CSV_HEADERS = [
 
 const SAMPLE_ROWS = [
   ["Jane","Doe","jane.doe@company.com","0712345678",
-   "12345678","A000000000X","1234567","12345678","female",
+   "12345678","","A012345678Z","1234567","12345678","female",
    "Finance","Accountant","full_time","2026-01-15",
    "80000","20000","10000","bank","KCB Bank","Westlands","1234567890",""],
+  /*
+    The second row is the non-citizen case, so the template shows what to do
+    with it rather than leaving somebody to guess: passport instead of the
+    national ID, and a KRA PIN all the same.
+
+    Its PIN used to read "B000000001Y", which is not a KRA PIN — they begin A
+    or P. The template was teaching a format the import now refuses, which is
+    the worst possible place for that example to live.
+  */
   ["John","Kamau","john.kamau@company.com","0723456789",
-   "87654321","B000000001Y","","","male",
+   "","AK0123456","A987654321B","","","male",
    "Operations","Driver","full_time","2026-02-01",
    "35000","0","5000","mpesa","","","","0712000000"],
 ];

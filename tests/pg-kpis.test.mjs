@@ -260,9 +260,11 @@ suite("the number somebody is accountable for", () => {
             VALUES (${partyId}, ${companyA}, 'employee', true, ${"Staff " + n})`);
           await tx.execute(sql`
             INSERT INTO employees (company_id, party_id, employee_number,
-                                   first_name, last_name, hire_date, status,
-                                   termination_date)
+                                   first_name, last_name, national_id, kra_pin,
+                                   hire_date, status, termination_date)
             VALUES (${companyA}, ${partyId}::uuid, ${n}, 'Staff', ${n},
+                    ${"9000000" + n.slice(-1)},
+                    ${"A90000000" + n.slice(-1) + "Z"},
                     '2020-01-01'::date, ${status},
                     ${status === "terminated" ? "2025-12-31" : null})`);
         }
@@ -698,9 +700,11 @@ suite("the number somebody is accountable for", () => {
           VALUES (${partyId}, ${companyA}, 'employee', true, 'Wanjiku Mwangi')`);
         await tx.execute(sql`
           INSERT INTO employees (id, company_id, party_id, employee_number,
-                                 first_name, last_name, hire_date, status)
+                                 first_name, last_name, national_id, kra_pin,
+                                 hire_date, status)
           VALUES (${employeeId}, ${companyA}, ${partyId}::uuid, 'EMP-001',
-                  'Wanjiku', 'Mwangi', '2021-06-01'::date, 'active')`);
+                  'Wanjiku', 'Mwangi', '91000001', 'A910000001Z',
+                  '2021-06-01'::date, 'active')`);
       });
     });
 

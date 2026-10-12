@@ -90,9 +90,15 @@ suite("linking a login to an employee party", () => {
   };
 
   const makeEmployee = (companyId, partyId, num = "EMP-1") =>
+    // `national_id` and `kra_pin` are required since 0120, and unique per
+    // company — derived from the employee number so two fixtures in one
+    // company cannot collide.
     admin`INSERT INTO employees (company_id, party_id, employee_number,
-                                 first_name, last_name, hire_date)
+                                 first_name, last_name, national_id, kra_pin,
+                                 hire_date)
           VALUES (${companyId}, ${partyId}, ${num}, 'Wanjiku', 'Mwangi',
+                  ${"8" + num.replace(/\D/g, "").padStart(7, "0")},
+                  ${"A8" + num.replace(/\D/g, "").padStart(8, "0") + "Z"},
                   '2021-01-01'::date)`;
 
   beforeAll(async () => {

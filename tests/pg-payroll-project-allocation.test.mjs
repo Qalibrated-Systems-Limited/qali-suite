@@ -214,6 +214,8 @@ suite("payroll labour reaches the project", () => {
         companyId: companyA,
         firstName: "Jane",
         lastName: "Wanjiru",
+        nationalId: "30000001",
+        kraPin: "A300000001Z",
         hireDate: "2024-01-08",
         basicSalary: 80000,
         allowanceHousing: 20000,

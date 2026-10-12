@@ -75,11 +75,13 @@ suite("leave", () => {
     jane = await asTenant(companyA, (tx) =>
       staff.createEmployee(tx, {
         companyId: companyA, firstName: "Jane", lastName: "Wanjiru",
+        nationalId: "20000001", kraPin: "A200000001Z",
         hireDate: "2025-01-06", gender: "female", basicSalary: 60000,
       }));
     peter = await asTenant(companyA, (tx) =>
       staff.createEmployee(tx, {
         companyId: companyA, firstName: "Peter", lastName: "Otieno",
+        nationalId: "20000002", kraPin: "A200000002Y",
         hireDate: "2025-01-06", gender: "male",
       }));
 
@@ -412,6 +414,7 @@ suite("leave", () => {
       const late = await asTenant(companyA, (tx) =>
         staff.createEmployee(tx, {
           companyId: companyA, firstName: "Late", lastName: "Joiner",
+          nationalId: "20000003", kraPin: "A200000003X",
           hireDate: "2026-04-01",
         }));
 

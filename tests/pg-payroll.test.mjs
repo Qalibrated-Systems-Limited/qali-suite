@@ -127,6 +127,10 @@ suite("payroll", () => {
         companyId: companyA,
         firstName: "Jane",
         lastName: "Wanjiru",
+        // Required since 0120 — payroll cannot remit PAYE without a PIN, and
+        // a payroll fixture without one is a payroll nobody could file.
+        nationalId: "10000001",
+        kraPin: "A100000001Z",
         hireDate: "2024-01-08",
         basicSalary: 80000,
         allowanceHousing: 20000,
@@ -303,6 +307,7 @@ suite("payroll", () => {
       await asTenant(companyA, (tx) =>
         staff.createEmployee(tx, {
           companyId: companyA, firstName: "Late", lastName: "Joiner",
+          nationalId: "10000002", kraPin: "A100000002Y",
           hireDate: "2026-08-17", basicSalary: 21000, allowanceHousing: 0,
         }));
 

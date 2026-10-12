@@ -74,6 +74,54 @@ const num = (fd: FormData, key: string) => {
 const sent = (fd: FormData, key: string) =>
   fd.has(key) ? (orNull(fd, key) ?? "") : undefined;
 
+/**
+ * The Kenyan PIN format, checked where it can be explained.
+ *
+ * One letter, nine digits, one letter — A012345678Z. `A` for an individual,
+ * `P` for a body corporate; an employee is an individual, but both are
+ * accepted rather than refused on a rule the payroll does not actually
+ * depend on. Checked HERE and not in the database on purpose: 0120 makes the
+ * database insist the PIN is PRESENT, and leaves the shape to this layer,
+ * where a mistyped one is reported against the field that holds it and a
+ * bulk import of historical records can still be landed and corrected.
+ */
+const KRA_PIN = /^[AP]\d{9}[A-Z]$/i;
+
+/** Stored upper-case, because iTax is and a PIN is not case-sensitive data. */
+const normalisePin = (pin: string) => pin.trim().toUpperCase();
+
+/**
+ * Identity and tax registration — the two fields payroll cannot run without.
+ *
+ * WHY THIS IS SHARED. Three ways in write this table — the form, the edit
+ * form and the bulk import — and a rule enforced in one of them is a rule the
+ * other two get to ignore. The constraints added in 0120 catch everything
+ * eventually; what this adds is a message a person can act on instead of a
+ * Postgres constraint name.
+ *
+ * A PASSPORT STANDS IN FOR THE NATIONAL ID, and only for it. A non-citizen
+ * employee has no Kenyan ID; they are still registered for PAYE like anybody
+ * else, so the PIN has no substitute.
+ */
+function identityErrors(
+  values: { nationalId: string; kraPin: string; passportNumber: string },
+): Record<string, string> {
+  const errors: Record<string, string> = {};
+
+  if (!values.kraPin) {
+    errors.kraPin = "Required — PAYE is remitted against it";
+  } else if (!KRA_PIN.test(values.kraPin)) {
+    errors.kraPin = "Not a KRA PIN. It looks like A012345678Z.";
+  }
+
+  if (!values.nationalId && !values.passportNumber) {
+    errors.nationalId =
+      "Required — or enter a passport number for a non-citizen employee";
+  }
+
+  return errors;
+}
+
 export async function createEmployee(
   _prevState: unknown,
   formData: FormData,
@@ -85,6 +133,14 @@ export async function createEmployee(
   if (!firstName) fieldErrors.firstName = "Required";
   if (!lastName) fieldErrors.lastName = "Required";
   if (!hireDate) fieldErrors.hireDate = "Required";
+  Object.assign(
+    fieldErrors,
+    identityErrors({
+      nationalId: str(formData, "nationalId"),
+      kraPin: str(formData, "kraPin"),
+      passportNumber: str(formData, "passportNumber"),
+    }),
+  );
   if (Object.keys(fieldErrors).length) {
     return {
       success: false,
@@ -109,7 +165,7 @@ export async function createEmployee(
           dateOfBirth: orNull(formData, "dateOfBirth"),
           gender: orNull(formData, "gender"),
           nationalId: orNull(formData, "nationalId"),
-          kraPin: orNull(formData, "kraPin"),
+          kraPin: normalisePin(str(formData, "kraPin")),
           nssfNumber: orNull(formData, "nssfNumber"),
           // The form key was renamed when NHIF became SHIF; both are accepted
           // so an older cached form does not silently drop the number.
@@ -163,6 +219,36 @@ export async function updateEmployee(
   const id = str(formData, "employeeId") || str(formData, "profileId");
   if (!id) return { success: false, error: "Employee ID is required" };
 
+  /*
+   * AN EDIT MAY NOT UNDO THE RULE A CREATE HAD TO MEET.
+   *
+   * Only for the fields this form actually sent — `sent()` exists because a
+   * partial form must not clear the columns it does not show, and the same
+   * reasoning applies to validating them: a form with no KRA PIN field is not
+   * a form that cleared the KRA PIN. Where the field IS present and blank,
+   * this is somebody removing it, and that is what 0120's constraints refuse —
+   * here with a message rather than a constraint name.
+   */
+  if (
+    formData.has("kraPin") ||
+    formData.has("nationalId") ||
+    formData.has("passportNumber")
+  ) {
+    const fieldErrors = identityErrors({
+      nationalId: str(formData, "nationalId"),
+      kraPin: str(formData, "kraPin"),
+      passportNumber: str(formData, "passportNumber"),
+    });
+    if (Object.keys(fieldErrors).length) {
+      return {
+        success: false,
+        error: "Please fill in all required fields",
+        fieldErrors,
+        values: submitted(formData),
+      };
+    }
+  }
+
   try {
     await withAuthorizedTenant([...HR_WRITE_ROLES], (tx, { user, companyId }) =>
       employees.updateEmployee(tx, {
@@ -179,7 +265,11 @@ export async function updateEmployee(
         dateOfBirth: sent(formData, "dateOfBirth"),
         gender: sent(formData, "gender"),
         nationalId: sent(formData, "nationalId"),
-        kraPin: sent(formData, "kraPin"),
+        // Upper-cased on the way in, as on create: iTax is, and a PIN is not
+        // case-sensitive data that should be stored two ways.
+        kraPin: formData.has("kraPin")
+          ? normalisePin(str(formData, "kraPin"))
+          : undefined,
         nssfNumber: sent(formData, "nssfNumber"),
         shaNumber: sent(formData, "shaNumber") ?? sent(formData, "nhifNumber"),
         passportNumber: sent(formData, "passportNumber"),
@@ -498,6 +588,8 @@ export interface ImportRow {
   email?: string;
   phone?: string;
   nationalId?: string;
+  /** The alternative to a national ID, for a non-citizen employee. */
+  passportNumber?: string;
   kraPin?: string;
   nssfNumber?: string;
   shaNumber?: string;
@@ -570,6 +662,30 @@ export async function bulkImportEmployees(rows: ImportRow[]) {
       continue;
     }
 
+    /*
+     * THE SAME RULE THE FORMS MEET, checked per row.
+     *
+     * An import is the way a hundred employees arrive at once, which makes it
+     * the way a hundred employees arrive without a KRA PIN. 0120's constraints
+     * would refuse each one, but as a constraint violation on row 74 of a
+     * spreadsheet — this reports it the way the rest of the import does, with
+     * the row number the person is looking at, and lets the good rows land.
+     */
+    const identity = identityErrors({
+      nationalId: (row.nationalId ?? "").trim(),
+      kraPin: (row.kraPin ?? "").trim(),
+      passportNumber: (row.passportNumber ?? "").trim(),
+    });
+    if (Object.keys(identity).length) {
+      results.push({
+        row: rowNumber,
+        name,
+        status: "error",
+        message: Object.values(identity).join("; "),
+      });
+      continue;
+    }
+
     try {
       const created = await withAuthorizedTenant(
         [...HR_ADMIN_ROLES],
@@ -599,7 +715,8 @@ export async function bulkImportEmployees(rows: ImportRow[]) {
             email: (row.email ?? "").trim().toLowerCase() || null,
             phone: (row.phone ?? "").trim() || null,
             nationalId: (row.nationalId ?? "").trim() || null,
-            kraPin: (row.kraPin ?? "").trim() || null,
+            passportNumber: (row.passportNumber ?? "").trim() || null,
+            kraPin: normalisePin(row.kraPin ?? ""),
             nssfNumber: (row.nssfNumber ?? "").trim() || null,
             shaNumber:
               (row.shaNumber ?? "").trim() || (row.nhifNumber ?? "").trim() || null,
