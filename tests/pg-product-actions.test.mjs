@@ -360,7 +360,11 @@ suite("product actions (end to end)", () => {
         product({ sku: "B-1", name: "Low", reorderLevel: "5" }),
       );
 
-      const { rows, total, stats } = await productActions.getProductsPg({});
+      // `withStats` is opt-in: the aggregate is a full pass over `products`
+      // and two of the three callers on the stock page never read it.
+      const { rows, total, stats } = await productActions.getProductsPg({
+        withStats: true,
+      });
       expect(total).toBe(2);
       expect(stats.total).toBe(2);
       // B-1 has nothing on hand against a level of 5.
@@ -380,6 +384,39 @@ suite("product actions (end to end)", () => {
 
       const { rows } = await productActions.getProductsPg({ lowStockOnly: true });
       expect(rows.map((p) => p.SKU)).toEqual(["B-1"]);
+    });
+
+    /**
+     * The pagination count and the list it paginates must filter identically.
+     *
+     * They are separate queries now — the control needs an integer and was
+     * fetching a page of rows plus a stats aggregate to get one. A count that
+     * filters differently is worse than no count: it offers a page that comes
+     * back empty. Both read `productFilters`, and this is what holds them to
+     * it.
+     */
+    it("counts exactly what the list returns, under every filter", async () => {
+      await productActions.addProductPg(
+        null,
+        product({ sku: "A-1", name: "Alpha", initialStock: "10", costPrice: "40", reorderLevel: "2" }),
+      );
+      await productActions.addProductPg(null, product({ sku: "B-1", name: "Beta", reorderLevel: "5" }));
+      await productActions.addProductPg(null, product({ sku: "C-1", name: "Gamma", reorderLevel: "0" }));
+
+      for (const filters of [
+        {},
+        { lowStockOnly: true },
+        { query: "et" },
+        { status: "active" },
+        { query: "nothing-matches-this" },
+      ]) {
+        const { rows } = await productActions.getProductsPg({
+          ...filters,
+          perPage: 200,
+        });
+        const { total } = await productActions.countProductsPg(filters);
+        expect({ ...filters, total }).toEqual({ ...filters, total: rows.length });
+      }
     });
   });
 });

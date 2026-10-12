@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Check, ChevronsUpDown } from "lucide-react";
+import { Check, ChevronsUpDown, Plus, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
@@ -20,6 +20,15 @@ import {
 
 /**
  * CategoryCombobox - Searchable category selector
+ *
+ * IT CAN ALSO CREATE ONE. Category is required on step one of the product
+ * wizard, and the list starts empty on a new tenant — so without this the
+ * first product could not be filed without abandoning the wizard, visiting
+ * /dashboard/categories, and starting the form again. Typing a name that
+ * matches nothing offers it as a new category, in place.
+ *
+ * `onCreate` is optional: the combobox is a plain picker wherever it is not
+ * passed, which is what the read-only and filter uses want.
  */
 export function CategoryCombobox({
   value,
@@ -30,8 +39,12 @@ export function CategoryCombobox({
   error,
   required = false,
   categories = [],
+  onCreate,
 }) {
   const [open, setOpen] = React.useState(false);
+  const [search, setSearch] = React.useState("");
+  const [creating, setCreating] = React.useState(false);
+  const [createError, setCreateError] = React.useState("");
 
   // Find selected category name
   const selectedCategory = categories.find((cat) => cat._id === value);
@@ -40,8 +53,40 @@ export function CategoryCombobox({
   const handleSelect = (categoryId) => {
     // Toggle off if same value selected
     const newValue = categoryId === value ? "" : categoryId;
-    onChange?.(newValue);
+    const selected = categories.find((cat) => cat._id === newValue);
+    onChange?.(newValue, selected ?? null);
     setOpen(false);
+  };
+
+  const typed = search.trim();
+  // Case-insensitively, because "Tools" and "tools" are the same category to
+  // the person typing, and offering to create the second one is a trap.
+  const exists = categories.some(
+    (cat) => cat.name?.trim().toLowerCase() === typed.toLowerCase(),
+  );
+  const canOffer = Boolean(onCreate) && typed.length >= 2 && !exists;
+
+  const handleCreate = async () => {
+    if (!canOffer || creating) return;
+    setCreating(true);
+    setCreateError("");
+    try {
+      const created = await onCreate(typed);
+      if (created?._id) {
+        // Selected as well as created: the point of the shortcut is that the
+        // field is filled when the popover closes, not that a name exists
+        // somewhere and still has to be picked.
+        onChange?.(created._id, created);
+        setSearch("");
+        setOpen(false);
+      } else {
+        setCreateError(created?.error || "Could not create that category.");
+      }
+    } catch (e) {
+      setCreateError(e?.message || "Could not create that category.");
+    } finally {
+      setCreating(false);
+    }
   };
 
   return (
@@ -49,7 +94,16 @@ export function CategoryCombobox({
       {/* Hidden input for form submission */}
       <input type="hidden" name={name} value={value || ""} />
 
-      <Popover open={open} onOpenChange={setOpen}>
+      <Popover
+        open={open}
+        onOpenChange={(next) => {
+          setOpen(next);
+          if (!next) {
+            setSearch("");
+            setCreateError("");
+          }
+        }}
+      >
         <PopoverTrigger asChild>
           <Button
             type="button"
@@ -74,9 +128,27 @@ export function CategoryCombobox({
           align="start"
         >
           <Command>
-            <CommandInput placeholder="Search categories..." />
+            <CommandInput
+              placeholder={
+                onCreate ? "Search or type a new name..." : "Search categories..."
+              }
+              value={search}
+              onValueChange={setSearch}
+            />
             <CommandList>
-              <CommandEmpty>No categories found.</CommandEmpty>
+              {/*
+                CommandEmpty renders only when nothing matches, which is
+                exactly when the create row matters most — but it is not the
+                ONLY time it should appear: "Tool" matching "Tooling" is a
+                match, and the user may still mean a new "Tool". So the offer
+                lives in its own always-mounted group below, and the empty
+                state carries the message alone.
+              */}
+              <CommandEmpty>
+                {onCreate
+                  ? "No match — type a name to create one."
+                  : "No categories found."}
+              </CommandEmpty>
               <CommandGroup>
                 {categories.map((category) => (
                   <CommandItem
@@ -96,8 +168,35 @@ export function CategoryCombobox({
                   </CommandItem>
                 ))}
               </CommandGroup>
+
+              {canOffer && (
+                <CommandGroup forceMount>
+                  <CommandItem
+                    // `forceMount` + a value that always matches the query, so
+                    // Command's own filtering cannot hide the create row —
+                    // it is the one item that must survive a search matching
+                    // nothing.
+                    forceMount
+                    value={typed}
+                    disabled={creating}
+                    onSelect={handleCreate}
+                  >
+                    {creating ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <Plus className="mr-2 h-4 w-4" />
+                    )}
+                    Create &ldquo;{typed}&rdquo;
+                  </CommandItem>
+                </CommandGroup>
+              )}
             </CommandList>
           </Command>
+          {createError && (
+            <p className="border-t px-3 py-2 text-sm text-red-500">
+              {createError}
+            </p>
+          )}
         </PopoverContent>
       </Popover>
 

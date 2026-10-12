@@ -578,6 +578,20 @@ export async function deleteProductPg(productId: string) {
 }
 
 /** The products list, its filters and the figures above it. */
+/**
+ * `withStats` IS OPT-IN, and it used to be unconditional.
+ *
+ * `getProductStats` is a full pass over `products` — five FILTERed counts and
+ * two SUMs, unfiltered by the caller's query, so no index helps it. One
+ * `/dashboard/stocks` render calls this function THREE times: the metrics bar
+ * (which wants only the stats), the table (only the rows) and the pagination
+ * (only the page count). Two of those three aggregates were computed and
+ * dropped on the floor, on every render, per user.
+ *
+ * Every caller was checked: `StockMetricsBar` is the only one that reads
+ * `stats`, and it now asks. The others destructure `rows` or `pages`, so an
+ * absent `stats` cannot break them silently.
+ */
 export async function getProductsPg(opts: {
   query?: string;
   category?: string;
@@ -585,13 +599,35 @@ export async function getProductsPg(opts: {
   lowStockOnly?: boolean;
   page?: number;
   perPage?: number;
+  withStats?: boolean;
 } = {}) {
   return withAuthorizedTenant([], async (tx) => {
     const [list, stats] = await Promise.all([
       productsRepo.searchProducts(tx, opts),
-      productsRepo.getProductStats(tx),
+      opts.withStats ? productsRepo.getProductStats(tx) : Promise.resolve(null),
     ]);
     return { ...list, rows: list.rows.map(shapeProduct), stats };
+  });
+}
+
+/**
+ * The page count for the products list, without the page.
+ *
+ * `StockPaginationServer` called `getProductsPg` for this: a 25-row SELECT it
+ * discarded, plus the stats aggregate it also discarded, to learn one integer.
+ * `perPage` here only divides the total — nothing is fetched.
+ */
+export async function countProductsPg(opts: {
+  query?: string;
+  category?: string;
+  status?: "all" | "active" | "inactive";
+  lowStockOnly?: boolean;
+  perPage?: number;
+} = {}) {
+  const perPage = Math.min(Math.max(1, opts.perPage ?? 25), 200);
+  return withAuthorizedTenant([], async (tx) => {
+    const total = await productsRepo.countProducts(tx, opts);
+    return { total, perPage, pages: Math.ceil(total / perPage) };
   });
 }
 
@@ -615,6 +651,8 @@ export async function getProductPg(productId: string) {
 function shapeProduct(r: Record<string, unknown>) {
   const onHand = String(r.quantity_on_hand ?? r.quantityOnHand ?? "0");
   const reorder = String(r.reorder_level ?? r.reorderLevel ?? "0");
+  const cost = num(r.cost_price ?? r.costPrice);
+  const price = num(r.selling_price ?? r.sellingPrice);
   return {
     _id: String(r.id),
     id: String(r.id),
@@ -633,17 +671,42 @@ function shapeProduct(r: Record<string, unknown>) {
       quantityOnHold: num(r.quantity_on_hold ?? r.quantityOnHold),
       quantityAvailable: num(r.quantity_available ?? r.quantityAvailable),
       reorderLevel: Number(reorder),
+      reorderQuantity: num(r.reorder_quantity ?? r.reorderQuantity),
     },
     costing: {
-      costPrice: num(r.cost_price ?? r.costPrice),
+      costPrice: cost,
       costingMethod: String(r.costing_method ?? r.costingMethod ?? "average"),
       lastPurchaseCost: num(r.last_purchase_cost ?? r.lastPurchaseCost),
+      lastPurchaseDate: (r.last_purchase_date ?? r.lastPurchaseDate) ?? null,
     },
     pricing: {
-      sellingPrice: num(r.selling_price ?? r.sellingPrice),
+      sellingPrice: price,
       wholesalePrice: num(r.wholesale_price ?? r.wholesalePrice),
       minimumPrice: num(r.minimum_price ?? r.minimumPrice),
+      /**
+       * DERIVED, and null when it cannot be derived.
+       *
+       * The product page read `pricing.marginPercentage` and nothing ever put
+       * it there, so its Margin tile fell through `?? 0` and printed "0.0%"
+       * for every product in the catalogue — including correctly priced ones.
+       * There is no such column and there should not be: margin is a ratio of
+       * two columns that are already here, and storing it is how it goes
+       * stale the first time either one moves.
+       *
+       * NULL RATHER THAN ZERO when the denominator is zero, because an
+       * unpriced product is not a zero-margin product — the same distinction
+       * `getPricingHealth` makes, and the reason it filters on
+       * `cost_price > 0 AND selling_price > 0`. The screen prints "—".
+       */
+      marginPercentage: price > 0 ? ((price - cost) / price) * 100 : null,
+      markupPercentage: cost > 0 ? ((price - cost) / cost) * 100 : null,
     },
+    /** Present in the table and previously unmapped, so the page showed blanks. */
+    location: (r.location as string) ?? null,
+    binNumber: (r.bin_number ?? r.binNumber ?? null) as string | null,
+    taxInfo: { defaultTaxRate: num(r.default_tax_rate ?? r.defaultTaxRate) },
+    createdAt: (r.created_at ?? r.createdAt) ?? null,
+    updatedAt: (r.updated_at ?? r.updatedAt) ?? null,
     isLowStock: Number(onHand) <= Number(reorder),
   };
 }
@@ -679,28 +742,51 @@ export async function getStockPdfDataPg() {
       string,
       Array<{ SKU: string; name: string; unit: string; quantity: number }>
     > = {};
+    let total = 0;
 
-    for (let page = 1; ; page += 1) {
-      const { rows, pages } = await getProductsPg({
-        page,
-        perPage,
-        status: "active",
-      });
-      for (const p of rows) {
-        // A product with no category still has to appear: an item missing from
-        // a stock report reads as stock that is not there.
-        const key = p.category || "Uncategorised";
-        (data[key] ??= []).push({
-          SKU: p.SKU,
-          name: p.name,
-          unit: p.unit,
-          quantity: p.inventory.quantityOnHand,
+    /**
+     * ONE TRANSACTION over the whole export, and the REPOSITORY rather than
+     * `getProductsPg`.
+     *
+     * The action re-entered `withAuthorizedTenant` per page — a fresh tenant
+     * transaction each time — and every one of those also ran
+     * `getProductStats`, a full aggregate over the products table, whose
+     * result this throws away. A thousand-product catalogue paid five tenant
+     * setups and five needless aggregates to print a list.
+     *
+     * It also read each page in a SEPARATE snapshot, so a product created
+     * mid-export could shift the ordering between pages and be printed twice
+     * or missed. One transaction is one snapshot, which is the only way a
+     * stock report as at a moment is actually as at that moment.
+     */
+    await withAuthorizedTenant([], async (tx) => {
+      for (let page = 1; ; page += 1) {
+        const { rows, pages } = await productsRepo.searchProducts(tx, {
+          page,
+          perPage,
+          status: "active",
         });
+        for (const raw of rows) {
+          const p = shapeProduct(raw);
+          // A product with no category still has to appear: an item missing
+          // from a stock report reads as stock that is not there.
+          const key = p.category || "Uncategorised";
+          (data[key] ??= []).push({
+            SKU: p.SKU,
+            name: p.name,
+            unit: p.unit,
+            quantity: p.inventory.quantityOnHand,
+          });
+          total += 1;
+        }
+        if (rows.length === 0 || page >= pages) break;
       }
-      if (page >= pages || rows.length === 0) break;
-    }
+    });
 
-    return { success: true, data };
+    // `total` rather than leaving the caller to count an object of arrays:
+    // an EMPTY export is a thing to refuse, not a blank page to download, and
+    // the button is the only place that can say so.
+    return { success: true, data, total };
   } catch (e) {
     return {
       success: false,

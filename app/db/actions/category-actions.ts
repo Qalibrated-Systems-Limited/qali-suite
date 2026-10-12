@@ -105,6 +105,66 @@ export async function createCategoryPg(
   );
 }
 
+/**
+ * Create a category WITHOUT leaving the page.
+ *
+ * `createCategoryPg` above redirects to the category list on success, which is
+ * right for the category screen and impossible for the product wizard: the
+ * redirect would throw away three steps of half-entered form state to file a
+ * word the user typed in passing. Category is a REQUIRED field on step one, so
+ * on a tenant with no categories yet — every new tenant — the wizard could not
+ * be completed at all without first abandoning it.
+ *
+ * Same gate, same repository, same tenant scoping as the full create. What it
+ * does not take is a parent, attributes or a sort order: this is the shortcut,
+ * and anything richer belongs on the category screen, which is one click away.
+ */
+export async function createCategoryQuickPg(
+  rawName: string,
+): Promise<
+  | { success: true; category: { _id: string; id: string; name: string } }
+  | { success: false; error: string }
+> {
+  const name = String(rawName ?? "").trim();
+  if (name.length < 2) return { success: false, error: "A category needs a name." };
+
+  try {
+    const category = await withAuthorizedTenant(
+      [...CATEGORY_MANAGE_ROLES],
+      (tx, { user, companyId }) =>
+        categoriesRepo.createCategory(tx, {
+          companyId,
+          name,
+          description: null,
+          parentId: null,
+          sortOrder: 0,
+          createdById: user.id,
+        }),
+    );
+
+    // The category screen is a different route with its own cached list; the
+    // wizard gets the new row back in this response and does not reload.
+    revalidatePath("/dashboard/categories");
+
+    return {
+      success: true,
+      category: {
+        _id: String(category.id),
+        id: String(category.id),
+        name: category.name,
+      },
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    // The sibling-name unique index, said in words. Reaching it means the name
+    // is already in the list the user just searched, so point them back at it.
+    if (/unique|duplicate/i.test(message)) {
+      return { success: false, error: `"${name}" already exists — pick it from the list.` };
+    }
+    return { success: false, error: userMessage(err, "Could not create that category.") };
+  }
+}
+
 export async function updateCategoryPg(
   categoryId: string,
   _prevState: unknown,

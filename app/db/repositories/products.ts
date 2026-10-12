@@ -731,20 +731,20 @@ export async function updateProductPricing(
  * `COUNT(*) OVER ()` rather than a second query, so the count cannot describe
  * a different set from the rows beside it.
  */
-export async function searchProducts(
-  tx: Tx,
-  opts: {
-    query?: string;
-    category?: string;
-    status?: "all" | "active" | "inactive";
-    lowStockOnly?: boolean;
-    page?: number;
-    perPage?: number;
-  } = {},
-) {
-  const page = Math.max(1, opts.page ?? 1);
-  const perPage = Math.min(Math.max(1, opts.perPage ?? 25), 200);
-
+/**
+ * The list's WHERE, built once and used by both readers of it.
+ *
+ * It was inline in `searchProducts`, which meant the only way to ask "how many
+ * match" was to fetch a page of rows and read the window count off them. That
+ * is what the stock page's pagination did: a full 25-row SELECT, plus the
+ * stats aggregate, for a single integer it then divided.
+ */
+function productFilters(opts: {
+  query?: string;
+  category?: string;
+  status?: "all" | "active" | "inactive";
+  lowStockOnly?: boolean;
+}) {
   const where = [sql`TRUE`];
   if (opts.query) {
     const like = likeContains(opts.query);
@@ -760,6 +760,49 @@ export async function searchProducts(
   if (opts.lowStockOnly) {
     where.push(sql`p.quantity_on_hand <= p.reorder_level`);
   }
+  return where;
+}
+
+/**
+ * How many products match — the integer, and nothing else.
+ *
+ * For the pagination control, which needs a page count and no rows. Sharing
+ * `productFilters` with `searchProducts` is the point: a count that filters
+ * differently from the list it paginates is worse than no count, because it
+ * offers a page eight that is empty.
+ */
+export async function countProducts(
+  tx: Tx,
+  opts: {
+    query?: string;
+    category?: string;
+    status?: "all" | "active" | "inactive";
+    lowStockOnly?: boolean;
+  } = {},
+) {
+  const [row] = (await tx.execute(sql`
+    SELECT count(*)::int AS n
+      FROM products p
+     WHERE ${sql.join(productFilters(opts), sql` AND `)}
+  `)) as unknown as Array<{ n: number }>;
+  return Number(row?.n ?? 0);
+}
+
+export async function searchProducts(
+  tx: Tx,
+  opts: {
+    query?: string;
+    category?: string;
+    status?: "all" | "active" | "inactive";
+    lowStockOnly?: boolean;
+    page?: number;
+    perPage?: number;
+  } = {},
+) {
+  const page = Math.max(1, opts.page ?? 1);
+  const perPage = Math.min(Math.max(1, opts.perPage ?? 25), 200);
+
+  const where = productFilters(opts);
 
   const rows = (await tx.execute(sql`
     SELECT p.*,

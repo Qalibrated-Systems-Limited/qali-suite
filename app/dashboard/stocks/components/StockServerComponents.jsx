@@ -1,7 +1,7 @@
 import { Card, CardContent } from "@/components/ui/card";
 import Link from "next/link";
 import { Skeleton } from "@/components/ui/skeleton";
-import { getProductsPg } from "@/app/db/actions/product-actions";
+import { getProductsPg, countProductsPg } from "@/app/db/actions/product-actions";
 import { getCategoriesPg } from "@/app/db/actions/category-actions";
 import { ResponsiveInventoryTable } from "../table";
 import Pagination from "@/components/pagination";
@@ -30,7 +30,9 @@ import { canSeePricing } from "@/lib/permissions";
  * as counts change.
  */
 export async function StockMetricsBar({ searchParams = {} }) {
-  const { stats } = await getProductsPg({ perPage: 1 });
+  // The only caller that reads `stats`, so the only one that asks for it —
+  // see the note on getProductsPg. `perPage: 1` because the rows are unread.
+  const { stats } = await getProductsPg({ perPage: 1, withStats: true });
 
   /**
    * KEEP THE FILTERS ALREADY APPLIED. `href={withQuantity("low-stock")}` replaces
@@ -205,7 +207,10 @@ export function StockTableSkeleton() {
 // ============================================
 
 export async function StockPaginationServer({ query, filters }) {
-  const { pages: totalPages } = await getProductsPg({
+  // COUNT, not a page. This called getProductsPg, which fetched 25 rows and
+  // ran the stats aggregate, then read one integer off the result and threw
+  // the rest away — on every render of the list.
+  const { pages: totalPages } = await countProductsPg({
     query,
     category: filters?.category,
     lowStockOnly: filters?.quantity === "low-stock",

@@ -186,8 +186,8 @@ export function ProductCategoryField({
   error,
   disabled,
   categories = [],
+  onCreate,
 }) {
-  console.log("ProductCategoryField categories:", categories);
   return (
     <FormField label="Category" name="category" required error={error}>
       <CategoryCombobox
@@ -196,6 +196,7 @@ export function ProductCategoryField({
         disabled={disabled}
         error={error}
         categories={categories}
+        onCreate={onCreate}
         required
       />
     </FormField>

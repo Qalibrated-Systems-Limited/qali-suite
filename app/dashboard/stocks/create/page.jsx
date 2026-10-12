@@ -6,20 +6,26 @@ import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import AddProductWizard from "../components/AddProductWizard";
 import { getCategoriesPg as getCategories } from "@/app/db/actions/category-actions";
+import { canWriteProducts } from "@/lib/permissions";
 
 async function CreateStockPage() {
   const session = await auth();
   const user = session && session.user;
-  const canCreateStock =
-    user?.role === "Store Manager" || user?.role === "Admin";
-  // `getCategories` was imported on the line above and never called: this read
-  // the MONGO collection, which nothing has written since categories moved in
-  // 0062, so the dropdown was empty. It also had no tenant filter — a plain
-  // `find({})` — which would have been a cross-tenant read had that collection
-  // still held anything. `getCategoriesPg` returns `{ _id, name, ... }`, the
-  // shape this mapped to.
-  const categories = await getCategories();
-
+  /**
+   * THE SAME GATE THE SERVER APPLIES — `canWriteProducts`, which is what
+   * `addProductPg` checks before it writes.
+   *
+   * This was a hand-rolled `Store Manager || Admin`, narrower than the action
+   * in both directions that matter: SuperAdmin, CFO, Finance Manager and
+   * Manager may all create products, and all four were shown Access Denied.
+   * The stock list's own button used ["Admin", "Store Manager", "SuperAdmin"],
+   * so a SuperAdmin was offered "Add Product" and then refused by the page it
+   * pointed at.
+   *
+   * One helper, so a role added to PRODUCT_WRITE_ROLES reaches the page, the
+   * button and the action together.
+   */
+  const canCreateStock = canWriteProducts(user?.role);
   if (!canCreateStock) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] p-6">
@@ -34,8 +40,8 @@ async function CreateStockPage() {
                 Access Denied
               </AlertTitle>
               <AlertDescription className="text-red-600 dark:text-red-400 mt-2">
-                You don't have permission to create stock items. Only Store
-                Managers and Administrators can add new stock.
+                You don't have permission to create stock items. Ask an
+                administrator for stock-management rights.
               </AlertDescription>
             </Alert>
             <div className="mt-6 flex justify-center">
@@ -55,6 +61,17 @@ async function CreateStockPage() {
       </div>
     );
   }
+
+  // AFTER the gate, not before it. `getCategories` opens a tenant transaction;
+  // running it for somebody about to be refused is a query nobody reads.
+  //
+  // `getCategories` was imported and never called: this read the MONGO
+  // collection, which nothing has written since categories moved in 0062, so
+  // the dropdown was empty. It also had no tenant filter — a plain `find({})`
+  // — which would have been a cross-tenant read had that collection still held
+  // anything. `getCategoriesPg` returns `{ _id, name, ... }`, the shape this
+  // mapped to.
+  const categories = await getCategories();
 
   return (
     <main className="flex flex-col gap-6">

@@ -44,6 +44,7 @@ import {
 } from "./ProductFormField";
 
 import { addProductPg } from "@/app/db/actions/product-actions";
+import { createCategoryQuickPg } from "@/app/db/actions/category-actions";
 import { canSetProductCost, canEditPricing as canSetSellingPrice } from "@/lib/permissions";
 
 // ============================================
@@ -81,6 +82,40 @@ const STEPS = [
     description: "Review and submit",
   },
 ];
+
+/**
+ * WHICH STEP OWNS WHICH FIELD.
+ *
+ * `addProductPg` refuses with a FIELD error — `sku`, `initialStock`,
+ * `category` — and those render beside their input, on the step that holds it.
+ * The last step is Review, which holds no inputs and rendered only
+ * `error._form`. So every field-scoped refusal arrived on a screen with
+ * nowhere to show it: the button went to "Creating…", came back, and nothing
+ * whatsoever appeared. The report was "the create product button does not
+ * submit" — it submitted every time and was refused in silence.
+ *
+ * The three that actually bite are all ones the client cannot pre-empt: a SKU
+ * that is already taken, a category deleted since the picker loaded, and
+ * opening stock on a product with no cost — which is most products, since cost
+ * is an output of receiving stock and not a field the wizard sets.
+ */
+const FIELD_STEP = {
+  name: "basic",
+  sku: "basic",
+  category: "basic",
+  type: "basic",
+  unit: "basic",
+  description: "basic",
+  costPrice: "pricing",
+  sellingPrice: "pricing",
+  taxRate: "pricing",
+  initialStock: "inventory",
+  reorderLevel: "inventory",
+  reorderQuantity: "inventory",
+  costingMethod: "inventory",
+  location: "inventory",
+  binNumber: "inventory",
+};
 
 // ============================================
 // STEP INDICATOR
@@ -179,9 +214,35 @@ function StepIndicator({ steps, currentStep, completedSteps, onStepClick }) {
 // STEP CONTENT COMPONENTS
 // ============================================
 
-function BasicInfoStep({ formData, setFormData, errors, categories }) {
+function BasicInfoStep({
+  formData,
+  setFormData,
+  errors,
+  categories,
+  onCreateCategory,
+}) {
   const handleChange = (field, value) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
+  };
+
+  /**
+   * THE NAME IS STORED BESIDE THE ID, for the review step.
+   *
+   * `category` is a uuid — it is what the form posts and what `addProductPg`
+   * resolves. The review step renders `categoryName || category`, and nothing
+   * ever set `categoryName`, so the last thing shown before submitting was a
+   * row reading "Category  3f2a1c9e-…". A person cannot check an id against
+   * what they meant, which is the entire job of a review step.
+   */
+  const handleCategoryChange = (id, selected) => {
+    setFormData((prev) => ({
+      ...prev,
+      category: id,
+      categoryName:
+        selected?.name ??
+        categories.find((c) => c._id === id)?.name ??
+        "",
+    }));
   };
 
   return (
@@ -203,7 +264,8 @@ function BasicInfoStep({ formData, setFormData, errors, categories }) {
       <ProductCategoryField
         categories={categories}
         value={formData.category}
-        onChange={(v) => handleChange("category", v)}
+        onChange={handleCategoryChange}
+        onCreate={onCreateCategory}
         error={errors?.category?.[0]}
       />
 
@@ -485,7 +547,7 @@ function ReviewStep({ formData, canEditPricing, mayCost, mayPrice }) {
 
 export default function AddProductWizard({
   userRole = "employee",
-  categories = [],
+  categories: initialCategories = [],
 }) {
   // The same rules the server applies (lib/permissions.js). This used to be
   // ["admin", "manager"]: it hid the step from SuperAdmin, CFO, Finance
@@ -526,6 +588,43 @@ export default function AddProductWizard({
     isActive: true,
   });
 
+  /**
+   * THE LIST IS STATE, not the prop straight through.
+   *
+   * A category created from inside the wizard has to appear in the picker in
+   * the same breath. The server page read the list once; re-reading it means a
+   * navigation, and a navigation is the one thing the shortcut exists to
+   * avoid.
+   */
+  const [categories, setCategories] = useState(initialCategories);
+  // A prop change (the page re-rendering after a revalidate) still wins —
+  // otherwise a category added on the category screen in another tab would
+  // never reach a wizard left open.
+  useEffect(() => {
+    setCategories((prev) => {
+      const seen = new Set(initialCategories.map((c) => c._id));
+      // Anything created here that the server has not caught up with yet is
+      // kept: dropping it would clear a field the user has already filled.
+      const extra = prev.filter((c) => !seen.has(c._id));
+      // Returning `prev` unchanged rather than an equal-but-new array, so the
+      // first render after mount does not re-render the whole wizard for a
+      // list that did not move.
+      if (!extra.length && prev.length === initialCategories.length) return prev;
+      return [...initialCategories, ...extra];
+    });
+  }, [initialCategories]);
+
+  const handleCreateCategory = async (name) => {
+    const res = await createCategoryQuickPg(name);
+    if (!res?.success) return { error: res?.error || "Could not create that category." };
+    setCategories((prev) =>
+      prev.some((c) => c._id === res.category._id)
+        ? prev
+        : [...prev, { ...res.category, level: 0 }],
+    );
+    return res.category;
+  };
+
   const router = useRouter();
 
   // Form action state
@@ -548,6 +647,29 @@ export default function AddProductWizard({
 
   // Combine server errors with client validation errors
   const errors = state?.error || clientErrors;
+
+  /**
+   * A refusal moves the wizard to where the refusal can be read.
+   *
+   * Without this the message exists in `state.error` and is rendered by an
+   * input three steps back that nobody is looking at. `_form` errors are left
+   * alone — the banner above the card carries those, and the Review step is
+   * the right place to be standing when you read one.
+   */
+  useEffect(() => {
+    const serverError = state?.error;
+    if (!serverError) return;
+    const offending = Object.keys(serverError)
+      .filter((field) => field !== "_form" && serverError[field]?.length)
+      .map((field) => FIELD_STEP[field])
+      .find(Boolean);
+    if (!offending) return;
+    const index = visibleSteps.findIndex((step) => step.id === offending);
+    if (index >= 0) setCurrentStep(index);
+    // visibleSteps is derived from the role and does not change within a
+    // mounted wizard, so `state` alone is the trigger — one jump per refusal.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state]);
 
   // Validate current step (client-side)
   const validateStep = (stepId) => {
@@ -572,6 +694,32 @@ export default function AddProductWizard({
 
       case "inventory":
         if (formData.trackInventory) {
+          /**
+           * OPENING STOCK NEEDS A COST, and the server has always said so —
+           * silently, from the Review step, where no field error can render.
+           *
+           * Stock admitted at no value raises the quantity on the shelf while
+           * the balance sheet stays still, and leaves units with nothing to
+           * charge to cost of sales when they sell. It is the same rule 0117
+           * enforces on a stock adjustment; here it is caught on the step that
+           * owns the field, next to the box that caused it.
+           */
+          if (Number(formData.initialStock) > 0) {
+            if (!mayCost) {
+              newErrors.initialStock = [
+                "Opening stock has to be valued, and you do not set cost " +
+                  "prices. Save with zero stock and ask someone with cost " +
+                  "rights to add it.",
+              ];
+            } else if (!(parseFloat(formData.costPrice) > 0)) {
+              newErrors.initialStock = [
+                "Opening stock needs a cost price. Set one on the Pricing " +
+                  "step, or save with zero stock and receive it through a " +
+                  "goods receipt.",
+              ];
+            }
+          }
+
           const initialStock = Number(formData.initialStock);
           if (formData.initialStock && (!Number.isInteger(initialStock) || initialStock < 0)) {
             newErrors.initialStock = ["Initial stock must be a non-negative whole number"];
@@ -630,6 +778,7 @@ export default function AddProductWizard({
             formData={formData}
             setFormData={setFormData}
             errors={errors}
+            onCreateCategory={handleCreateCategory}
           />
         );
       case "pricing":
@@ -677,11 +826,24 @@ export default function AddProductWizard({
         onStepClick={goToStep}
       />
 
-      {/* Form-level Error from server */}
-      {state?.error?._form && (
+      {/*
+        EVERY server message, not just `_form`. The jump above puts the offending
+        field on screen, and this says what happened in one place regardless —
+        a field error that scrolled out of view was the whole failure mode.
+      */}
+      {state?.error && Object.keys(state.error).length > 0 && (
         <Alert variant="destructive" className="mb-6">
           <AlertCircle className="h-4 w-4" />
-          <AlertDescription>{state.error._form[0]}</AlertDescription>
+          <AlertDescription>
+            {Object.values(state.error)
+              .flat()
+              .filter(Boolean)
+              .map((message, i) => (
+                <span key={i} className="block">
+                  {message}
+                </span>
+              ))}
+          </AlertDescription>
         </Alert>
       )}
 

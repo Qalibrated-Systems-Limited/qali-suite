@@ -687,10 +687,24 @@ export async function listPendingRequestsForProduct(
   productId: string,
   limit = 20,
 ) {
+  /*
+    ALIASED, because the columns are not called what this used to ask for.
+    `stock_request_items` has `requested_quantity` and `total_fulfilled`; this
+    selected `quantity_requested` and `quantity_fulfilled`, which do not exist,
+    so every product detail page threw 42703 the moment a request touched the
+    product. It was invisible until then: with no stock requests the join
+    matched nothing and Postgres still raised the column error only when the
+    query ran — which it did on every render, for every product.
+
+    The aliases keep the names `getProductActivityPg` reads, so the fix is one
+    query and not a query plus a shaper plus a panel.
+  */
   return tx.execute(sql`
     SELECT r.id, r.request_number, r.status, r.priority,
            r.required_by_date, r.requester_name_at_request,
-           i.quantity_requested, i.quantity_fulfilled
+           i.requested_quantity   AS quantity_requested,
+           i.total_fulfilled      AS quantity_fulfilled,
+           i.remaining_to_fulfil  AS quantity_outstanding
       FROM stock_request_items i
       JOIN stock_requests r ON r.id = i.request_id
      WHERE i.product_id = ${productId}::uuid

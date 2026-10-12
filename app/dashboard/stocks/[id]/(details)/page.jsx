@@ -149,12 +149,30 @@ function StatusBadge({ status }) {
   };
   const style = config[status] || config.inactive;
 
+  /*
+    `NaN`, on every product, for the whole life of this page.
+
+    The label was `status?.charAt(0).toUpperCase() + status?.slice(1)`. The
+    optional chaining guards the CALLS and not the addition between them, so an
+    undefined status gives `undefined + undefined` — which is NaN, and React
+    renders it. And the status WAS always undefined: `shapeProduct` returns
+    `isActive`, never `status`, so the badge beside every product name read
+    "NaN".
+
+    Two changes, because either alone leaves the trap: the caller passes
+    something real, and the label is built so that nothing can be added to
+    undefined again.
+  */
+  const label = typeof status === "string" && status
+    ? status.charAt(0).toUpperCase() + status.slice(1)
+    : "Unknown";
+
   return (
     <span
       className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-full ${style.bg} ${style.text}`}
     >
       <span className={`size-1.5 rounded-full ${style.dot}`} />
-      {status?.charAt(0).toUpperCase() + status?.slice(1)}
+      {label}
     </span>
   );
 }
@@ -454,7 +472,14 @@ export default async function ProductDetailPage({ params, searchParams }) {
   const costPrice = product.costing?.costPrice ?? 0;
   const sellPrice = product.pricing?.sellingPrice ?? 0;
   const inventoryValue = qty * costPrice;
-  const margin = product.pricing?.marginPercentage ?? 0;
+  /*
+    NULL, not zero, when there is nothing to divide by. An unpriced product is
+    not a zero-margin product, and printing "0.0%" beside a sell price of
+    Ksh 0 states a fact that was never measured.
+  */
+  const margin = product.pricing?.marginPercentage ?? null;
+  const markup = product.pricing?.markupPercentage ?? null;
+  const pct = (v) => (v == null ? "—" : `${v.toFixed(1)}%`);
 
   return (
     <div className="flex-1 space-y-6">
@@ -484,7 +509,11 @@ export default async function ProductDetailPage({ params, searchParams }) {
               <h1 className="text-2xl sm:text-3xl font-semibold text-foreground tracking-tight">
                 {product.name}
               </h1>
-              <StatusBadge status={product.status} />
+              {/* `isActive` is what shapeProduct returns; `status` never
+                  existed on it. */}
+              <StatusBadge
+                status={product.isActive ? "active" : "inactive"}
+              />
             </div>
             <p className="text-muted-foreground">
               View and manage product details
@@ -570,10 +599,20 @@ export default async function ProductDetailPage({ params, searchParams }) {
           <KPICard
             icon={BarChart3}
             label="Margin"
-            value={`${margin.toFixed(1)}%`}
+            value={pct(margin)}
             iconColor="text-blue-500"
             iconBg="bg-blue-500/20"
-            trend={margin > 25 ? margin - 25 : margin - 25}
+            /*
+              NO TREND. This read `margin > 25 ? margin - 25 : margin - 25` —
+              both branches identical, so the condition decided nothing and the
+              figure was always "distance from 25%". On an unpriced product
+              that rendered a red "↘ 25.0%" above a value of "0.0%": the tile
+              disagreed with itself, and the arrow pointed at a decline that
+              had not happened, against a 25% target nothing in the app sets.
+
+              A trend needs a previous period to compare with, and this page
+              loads none. Showing nothing is the honest version.
+            */
           />
         )}
       </div>
@@ -762,14 +801,12 @@ export default async function ProductDetailPage({ params, searchParams }) {
                 />
                 <DataRow
                   label="Margin"
-                  value={`${margin.toFixed(1)}%`}
+                  value={pct(margin)}
                   valueColor="text-emerald-500"
                 />
                 <DataRow
                   label="Markup"
-                  value={`${(product.pricing?.markupPercentage || 0).toFixed(
-                    1
-                  )}%`}
+                  value={pct(markup)}
                   valueColor="text-blue-500"
                 />
               </div>

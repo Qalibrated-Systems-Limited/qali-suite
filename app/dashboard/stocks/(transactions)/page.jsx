@@ -21,6 +21,7 @@ import {
   CategoryFilterSkeleton,
 } from "../components/StockServerComponents";
 import { GenerateStockPDF } from "../export-to-pdf";
+import { canWriteProducts } from "@/lib/permissions";
 import { Plus } from "lucide-react";
 
 // ============================================
@@ -81,10 +82,9 @@ async function StockPage(props) {
         }
         Action={() => (
           <ActionButtons
-            canCreate={
-              action !== "request" &&
-              ["Admin", "Store Manager", "SuperAdmin"].includes(user?.role)
-            }
+            // The same helper the create PAGE and `addProductPg` use, so the
+            // button cannot offer what the page then refuses.
+            canCreate={action !== "request" && canWriteProducts(user?.role)}
           />
         )}
       />
