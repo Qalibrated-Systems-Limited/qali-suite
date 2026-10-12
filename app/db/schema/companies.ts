@@ -147,7 +147,21 @@ export const companySettings = pgTable(
       .default("5"),
 
     /** Bill approval posts to GR/IR instead of inventory; an accepted GRN admits stock. */
-    requireGrn: boolean("require_grn").notNull().default(false),
+    /**
+     * Three-way match: inventory is admitted by the GOODS RECEIPT, and the
+     * bill clears GR/IR rather than debiting inventory itself (0121).
+     *
+     * Default true since 0121. It shipped false and, worse, unread — nothing
+     * passed it to `approveBill`, so every inventory bill posted straight to
+     * stock and the receiving workflow was optional in practice. Receipt-driven
+     * inventory is what every ERP above SMB bookkeeping does; the name GR/IR
+     * is Goods Receipt / Invoice Receipt, and the account exists precisely
+     * because the two are separate events.
+     *
+     * Applies to stock lines only — `productId AND account_type = 'asset'`.
+     * Services and consumables post direct, as they should.
+     */
+    requireGrn: boolean("require_grn").notNull().default(true),
 
     fiscalYearStartMonth: integer("fiscal_year_start_month").notNull().default(1),
 

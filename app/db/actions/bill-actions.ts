@@ -6,6 +6,7 @@ import { withAuthorizedTenant } from "../tenant";
 import { BILL_WRITE_ROLES, BILL_APPROVE_ROLES, ADMIN_ROLES } from "@/lib/utils/role-gates";
 import * as billsRepo from "../repositories/bills";
 import * as accountsRepo from "../repositories/accounts";
+import * as companySettingsRepo from "../repositories/companySettings";
 import * as partiesRepo from "../repositories/parties";
 import * as productsRepo from "../repositories/products";
 import * as paymentsRepo from "../repositories/payments";
@@ -573,7 +574,7 @@ export async function approveBill(billId: string): Promise<ActionResult> {
   try {
     const bill = await withAuthorizedTenant(
       [...BILL_APPROVE_ROLES],
-      async (tx, { user }) => {
+      async (tx, { user, companyId }) => {
         const existing = await billsRepo.getBill(tx, billId);
         if (!existing) throw new Error("Bill not found");
 
@@ -597,7 +598,28 @@ export async function approveBill(billId: string): Promise<ActionResult> {
         // raises a named error if a line needs it and it is absent.
         const grni = await accountsRepo.getSystemAccount(tx, "grni");
 
+        /**
+         * THE THREE-WAY MATCH SWITCH, READ AT LAST.
+         *
+         * `approveBill` takes `requireGRN` and defaults it to false, and
+         * nothing ever passed it. `company_settings.require_grn` existed, was
+         * writable, and was read by nobody — so strict three-way match was
+         * dead code for every tenant regardless of what the column said, and
+         * every inventory bill posted DR Inventory / CR AP and put the goods
+         * on the shelf at approval.
+         *
+         * That is the control this module's own header describes deferring to
+         * the GRN. With the flag off it is inert, which is what every tenant
+         * gets today; with it on, the Inventory debit waits for the receipt
+         * and the bill posts to GR/IR instead.
+         */
+        const settings = await companySettingsRepo.getCompanySettings(
+          tx,
+          companyId,
+        );
+
         return billsRepo.approveBill(tx, billId, {
+          requireGRN: settings.requireGrn,
           apAccountId: ap.id,
           vatInputAccountId: vatInput?.id ?? null,
           whtPayableAccountId: whtPayable?.id ?? null,
