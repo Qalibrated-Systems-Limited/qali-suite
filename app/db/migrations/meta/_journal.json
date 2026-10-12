@@ -827,6 +827,13 @@
       "when": 1787049850566,
       "tag": "0117_adjustment_valuation",
       "breakpoints": true
+    },
+    {
+      "idx": 118,
+      "version": "7",
+      "when": 1787049910566,
+      "tag": "0118_view_security_invoker",
+      "breakpoints": true
     }
   ]
 }
