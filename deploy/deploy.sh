@@ -153,8 +153,37 @@ say "Checking out $TARGET_SHA..."
 run "git reset --hard '$TARGET_SHA'"
 
 # ── 4. Dependencies ─────────────────────────────────────────────────────────
-say "Installing dependencies (npm ci)..."
-run "npm ci"
+say "Installing dependencies..."
+#
+# `npm ci` FIRST, and a fallback that does not touch the lockfile.
+#
+# package-lock.json is generated on macOS arm64 and npm records only the
+# optional platform packages it resolved there (npm/cli#4828). On this host
+# that lock is incomplete: @tailwindcss/oxide@4.2.2 declares twelve platform
+# packages and the lock contains one, darwin-arm64. npm 11 does not tolerate
+# that — it refuses outright:
+#
+#   npm error `npm ci` can only install packages when your package.json and
+#   npm error package-lock.json are in sync.
+#   npm error Missing: @tailwindcss/oxide-linux-x64-gnu@4.2.2 from lock file
+#
+# and prints its own help, which reads like a scripting mistake rather than a
+# platform one.
+#
+# --no-package-lock is the whole point of the fallback. Past deploys fell back
+# to a plain `npm install`, which REWROTE package-lock.json on the server —
+# which is where the +8,894/-5,039 of uncommitted lockfile drift on this box
+# came from, and why the dependency tree running in production stopped matching
+# the one in the repository. This installs what package.json asks for and
+# leaves the lockfile exactly as committed.
+#
+# The root fix is a platform-complete lockfile. Generating one is a deliberate
+# dependency pass, not something a deploy should do at 2am.
+if ! run "npm ci"; then
+  echo "    npm ci refused (platform-incomplete lockfile, npm/cli#4828)."
+  echo "    Falling back to npm install --no-package-lock."
+  run "npm install --no-package-lock --no-audit --no-fund"
+fi
 
 # ── 4b. Repair the platform-native bindings npm left out ────────────────────
 #
