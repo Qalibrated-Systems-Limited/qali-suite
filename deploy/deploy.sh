@@ -31,6 +31,11 @@ set -euo pipefail
 
 APP_DIR="/opt/qalisuite"
 HEALTH_URL="http://localhost:3000/api/health"
+# The site as the world sees it. Checked after the local one passes, because
+# the two fail for different reasons: localhost says the app came back, and
+# this says DNS, Caddy and the certificate are also doing their jobs. An app
+# that is healthy on :3000 and unreachable on the domain is still an outage.
+PUBLIC_HEALTH_URL="https://erp.qalisuite.com/api/health"
 PM2_NAME="qalisuite"
 BACKUP_DIR="/var/backups/qalisuite"
 
@@ -220,8 +225,20 @@ for i in $(seq 1 30); do
   if curl -fsS -m 5 "$HEALTH_URL" >/dev/null 2>&1; then
     echo ""
     echo "============================================"
-    echo "  Deploy complete — $(curl -fsS "$HEALTH_URL")"
+    echo "  App healthy — $(curl -fsS "$HEALTH_URL")"
     echo "  $TARGET_SHA on $BRANCH"
+
+    # Not fatal, and not silent. The deploy itself succeeded — the app is
+    # serving on :3000 — so rolling the code back would fix nothing. What is
+    # broken is in front of it, and the operator needs to know that now rather
+    # than from a customer.
+    if curl -fsS -m 20 "$PUBLIC_HEALTH_URL" >/dev/null 2>&1; then
+      echo "  Public  — $PUBLIC_HEALTH_URL is up."
+    else
+      echo "  WARNING — $PUBLIC_HEALTH_URL did NOT answer, though the app did."
+      echo "            That is Caddy, DNS or the certificate, not this deploy."
+      echo "            sudo systemctl status caddy"
+    fi
     echo "============================================"
     exit 0
   fi
