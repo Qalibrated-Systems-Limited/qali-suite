@@ -1,11 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useState, useTransition } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Checkbox } from "@/components/ui/checkbox";
 import { MetricBar } from "@/components/metric-bar";
 import {
   Select,
@@ -66,13 +65,9 @@ const MOM = ["CESMM4", "SMM7", "POMI", "NRM2", "Contract-specific"];
 const EMPTY_ITEM = {
   itemCode: "",
   description: "",
-  isHeading: false,
   unit: "",
   quantity: "",
   rate: "",
-  parentItemId: "",
-  costCodeId: "",
-  taskId: "",
   sortOrder: "",
 };
 
@@ -90,14 +85,6 @@ function qty(n) {
   );
 }
 
-/** Today as the site sees it. `toISOString()` is UTC, and Nairobi is UTC+3,
- *  so between midnight and 03:00 local time it defaults to yesterday. */
-function localToday() {
-  const d = new Date();
-  const pad = (n) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
-
 export default function BoqRegister({
   projectId,
   boq,
@@ -105,8 +92,6 @@ export default function BoqRegister({
   summary,
   versions = [],
   contractValue = null,
-  costCodes = [],
-  tasks = [],
   canManage = false,
   canAward = false,
 }) {
@@ -116,32 +101,9 @@ export default function BoqRegister({
   const [measuringId, setMeasuringId] = useState(null);
   const [measurement, setMeasurement] = useState({
     quantity: "",
-    measuredOn: localToday(),
+    measuredOn: new Date().toISOString().slice(0, 10),
     reference: "",
   });
-
-  /*
-   * THE MEASURE BUTTON LOOKED DEAD, AND IT WAS WORKING.
-   *
-   * Pressing it set `measuringId`, and the form it opened rendered BELOW THE
-   * WHOLE BILL — after the table card. On a real bill of forty items that is
-   * a screen or two further down, and on a phone the table is 720px wide
-   * inside a sideways scroll, so the button is at the far right and the form
-   * is somewhere nobody is looking. Nothing on the row changed either. The
-   * click did its job; the person saw no result, pressed again, and closed it.
-   *
-   * So opening the form now scrolls it into view and puts the cursor in the
-   * quantity box, the row being measured is highlighted, and its button reads
-   * Close while it is open.
-   */
-  const measureFormRef = useRef(null);
-  const measureQtyRef = useRef(null);
-  useEffect(() => {
-    if (!measuringId) return;
-    measureFormRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-    const t = setTimeout(() => measureQtyRef.current?.focus({ preventScroll: true }), 250);
-    return () => clearTimeout(t);
-  }, [measuringId]);
 
   const isDraft = boq?.status === "draft";
   const isAwarded = boq?.status === "awarded";
@@ -169,16 +131,13 @@ export default function BoqRegister({
       const fd = new FormData();
       fd.set("boqId", boq.id);
       fd.set("projectId", projectId);
-      Object.entries(form).forEach(([k, v]) => {
-        fd.set(k, k === "isHeading" ? (v ? "true" : "") : (v ?? ""));
-      });
+      Object.entries(form).forEach(([k, v]) => fd.set(k, v ?? ""));
       const res = await createProjectBoqItem(null, fd);
       if (res?.success) {
         toast.success(res.message);
-        // The code, unit and parent are kept: a bill is typed in runs, and
-        // re-picking the section for every line is the fastest way to make
-        // somebody give up on the form.
-        setForm((f) => ({ ...EMPTY_ITEM, unit: f.unit, parentItemId: f.parentItemId }));
+        // Keep the unit — a bill is typed in runs of the same unit, and
+        // re-picking it every line is the fastest way to make somebody give up.
+        setForm((f) => ({ ...EMPTY_ITEM, unit: f.unit }));
       } else {
         toast.error(Object.values(res?.errors ?? {}).flat()[0] || "Failed to save");
       }
@@ -219,7 +178,7 @@ export default function BoqRegister({
         setMeasuringId(null);
         setMeasurement({
           quantity: "",
-          measuredOn: localToday(),
+          measuredOn: new Date().toISOString().slice(0, 10),
           reference: "",
         });
       } else {
@@ -262,8 +221,6 @@ export default function BoqRegister({
 
   const overBilled =
     contractValue > 0 && Math.abs(summary.billed - contractValue) >= 1;
-
-  const sections = items.filter((i) => i.isHeading || i.childCount > 0);
 
   return (
     <div className="space-y-4">
@@ -369,22 +326,11 @@ export default function BoqRegister({
             </Button>
           </div>
 
-          <div className="flex items-center gap-2">
-            <Checkbox
-              id="isHeading"
-              checked={form.isHeading}
-              onCheckedChange={(v) => set("isHeading", Boolean(v))}
-            />
-            <label htmlFor="isHeading" className="text-sm">
-              A section heading — carries no quantity of its own
-            </label>
-          </div>
-
           <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
             <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground">Item code</label>
+              <label className="text-xs font-medium text-muted-foreground">Item No.</label>
               <Input
-                placeholder="B.2.14"
+                placeholder="1.1"
                 className="h-9"
                 value={form.itemCode}
                 onChange={(e) => set("itemCode", e.target.value)}
@@ -401,105 +347,44 @@ export default function BoqRegister({
             </div>
           </div>
 
-          {!form.isHeading && (
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-muted-foreground">Unit</label>
-                <Select value={form.unit || undefined} onValueChange={(v) => set("unit", v)}>
-                  <SelectTrigger className="h-9"><SelectValue placeholder="m3" /></SelectTrigger>
-                  <SelectContent>
-                    {UNITS.map((u) => (
-                      <SelectItem key={u} value={u}>{u}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-muted-foreground">Quantity</label>
-                <Input
-                  type="number"
-                  step="0.0001"
-                  className="h-9"
-                  value={form.quantity}
-                  onChange={(e) => set("quantity", e.target.value)}
-                />
-              </div>
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-muted-foreground">Rate (KES)</label>
-                <Input
-                  type="number"
-                  step="0.0001"
-                  className="h-9"
-                  value={form.rate}
-                  onChange={(e) => set("rate", e.target.value)}
-                />
-              </div>
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-muted-foreground">Amount</label>
-                <div className="h-9 flex items-center px-3 rounded-md border bg-background text-sm tabular-nums text-muted-foreground">
-                  {money(Number(form.quantity || 0) * Number(form.rate || 0))}
-                </div>
-              </div>
-            </div>
-          )}
-
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground">Under section</label>
-              <Select
-                value={form.parentItemId || "none"}
-                onValueChange={(v) => set("parentItemId", v === "none" ? "" : v)}
-              >
-                <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+              <label className="text-xs font-medium text-muted-foreground">Unit</label>
+              <Select value={form.unit || undefined} onValueChange={(v) => set("unit", v)}>
+                <SelectTrigger className="h-9"><SelectValue placeholder="m3" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="none">Top level</SelectItem>
-                  {sections.map((s) => (
-                    <SelectItem key={s.id} value={s.id}>
-                      {s.itemCode ? `${s.itemCode} — ` : ""}
-                      {s.description}
-                    </SelectItem>
+                  {UNITS.map((u) => (
+                    <SelectItem key={u} value={u}>{u}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
-            {!form.isHeading && costCodes.length > 0 && (
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-muted-foreground">Cost code</label>
-                <Select
-                  value={form.costCodeId || "none"}
-                  onValueChange={(v) => set("costCodeId", v === "none" ? "" : v)}
-                >
-                  <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">None</SelectItem>
-                    {costCodes.map((c) => (
-                      <SelectItem key={c.id} value={c.id}>
-                        {c.code} — {c.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">Quantity</label>
+              <Input
+                type="number"
+                step="0.0001"
+                className="h-9"
+                value={form.quantity}
+                onChange={(e) => set("quantity", e.target.value)}
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">Rate (KShs)</label>
+              <Input
+                type="number"
+                step="0.0001"
+                className="h-9"
+                value={form.rate}
+                onChange={(e) => set("rate", e.target.value)}
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">Amount (KShs)</label>
+              <div className="h-9 flex items-center px-3 rounded-md border bg-background text-sm tabular-nums font-medium">
+                {money(Number(form.quantity || 0) * Number(form.rate || 0))}
               </div>
-            )}
-            {!form.isHeading && tasks.length > 0 && (
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-muted-foreground">
-                  Programme activity
-                </label>
-                <Select
-                  value={form.taskId || "none"}
-                  onValueChange={(v) => set("taskId", v === "none" ? "" : v)}
-                >
-                  <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">None</SelectItem>
-                    {tasks.map((t) => (
-                      <SelectItem key={t.id} value={t.id}>{t.title}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
+            </div>
           </div>
 
           <div className="flex justify-end gap-2">
@@ -518,56 +403,51 @@ export default function BoqRegister({
       <Card className="p-0 overflow-hidden">
         {items.length === 0 ? (
           <p className="text-sm text-muted-foreground text-center py-12 px-4">
-            Nothing in this bill yet. Add a section, then the items priced under
-            it.
+            No items in this bill yet. Add your first item — Amount is calculated
+            automatically from Quantity × Rate.
           </p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm min-w-[720px]">
               <thead>
                 <tr className="border-b bg-muted/40 text-left">
-                  <th className="px-3 py-2 font-medium text-muted-foreground">Item</th>
+                  <th className="px-3 py-2 font-medium text-muted-foreground w-20">Item No.</th>
+                  <th className="px-2 py-2 font-medium text-muted-foreground">Description</th>
                   <th className="px-2 py-2 font-medium text-muted-foreground w-16">Unit</th>
-                  <th className="px-2 py-2 font-medium text-muted-foreground text-right w-24">Qty</th>
-                  <th className="px-2 py-2 font-medium text-muted-foreground text-right w-24">Rate</th>
-                  <th className="px-2 py-2 font-medium text-muted-foreground text-right w-28">Amount</th>
-                  <th className="px-2 py-2 font-medium text-muted-foreground text-right w-24">Measured</th>
-                  <th className="px-2 py-2 font-medium text-muted-foreground text-right w-16">%</th>
+                  <th className="px-2 py-2 font-medium text-muted-foreground text-right w-24">Quantity</th>
+                  <th className="px-2 py-2 font-medium text-muted-foreground text-right w-28">Rate (KShs)</th>
+                  <th className="px-2 py-2 font-medium text-muted-foreground text-right w-32">Amount (KShs)</th>
+                  {isAwarded && (
+                    <>
+                      <th className="px-2 py-2 font-medium text-muted-foreground text-right w-24">Measured</th>
+                      <th className="px-2 py-2 font-medium text-muted-foreground text-right w-16">%</th>
+                    </>
+                  )}
                   <th className="px-2 py-2 w-24" />
                 </tr>
               </thead>
               <tbody>
                 {items.map((it) => {
-                  const isSection = it.isHeading || it.childCount > 0;
                   const pct =
                     it.billedAmount > 0
                       ? Math.round((it.measuredAmount / it.billedAmount) * 100)
                       : null;
                   const over = it.quantity != null && it.measuredQuantity > it.quantity;
                   return (
-                    <tr
-                      key={it.id}
-                      className={`border-b last:border-0 ${isSection ? "bg-muted/20 font-medium" : ""} ${
-                        measuringId === it.id ? "bg-yellow-500/10" : ""
-                      }`}
-                    >
-                      <td className="px-3 py-2">
-                        <div style={{ paddingLeft: `${Math.min(it.depth, 5) * 16}px` }}>
-                          <span className="font-mono text-xs text-muted-foreground mr-2">
-                            {it.itemCode || ""}
-                          </span>
-                          {it.description}
-                          {it.costCode && (
-                            <span className="ml-2 text-[10px] text-muted-foreground">
-                              {it.costCode}
-                            </span>
-                          )}
-                          {it.taskTitle && (
-                            <Badge variant="outline" className="ml-2 text-[10px] font-normal">
-                              {it.taskTitle}
-                            </Badge>
-                          )}
-                        </div>
+                    <tr key={it.id} className="border-b last:border-0">
+                      <td className="px-3 py-2 font-mono text-xs text-muted-foreground align-top">
+                        {it.itemCode || ""}
+                      </td>
+                      <td className="px-2 py-2">
+                        {it.description}
+                        {it.costCode && (
+                          <span className="ml-2 text-[10px] text-muted-foreground">{it.costCode}</span>
+                        )}
+                        {it.taskTitle && (
+                          <Badge variant="outline" className="ml-2 text-[10px] font-normal">
+                            {it.taskTitle}
+                          </Badge>
+                        )}
                       </td>
                       <td className="px-2 py-2 text-muted-foreground">{it.unit || ""}</td>
                       <td className="px-2 py-2 text-right tabular-nums">
@@ -576,29 +456,31 @@ export default function BoqRegister({
                       <td className="px-2 py-2 text-right tabular-nums">
                         {it.rate == null ? "" : money(it.rate)}
                       </td>
-                      <td className="px-2 py-2 text-right tabular-nums">
+                      <td className="px-2 py-2 text-right tabular-nums font-medium">
                         {money(it.billedAmount)}
                       </td>
-                      <td
-                        className={`px-2 py-2 text-right tabular-nums ${over ? "text-amber-600" : ""}`}
-                        title={over ? "Measured beyond the billed quantity" : undefined}
-                      >
-                        {it.quantity == null ? money(it.measuredAmount) : qty(it.measuredQuantity)}
-                      </td>
-                      <td className="px-2 py-2 text-right tabular-nums text-muted-foreground">
-                        {pct === null ? "" : `${pct}%`}
-                      </td>
+                      {isAwarded && (
+                        <>
+                          <td
+                            className={`px-2 py-2 text-right tabular-nums ${over ? "text-amber-600" : ""}`}
+                            title={over ? "Measured beyond the billed quantity" : undefined}
+                          >
+                            {it.quantity == null ? money(it.measuredAmount) : qty(it.measuredQuantity)}
+                          </td>
+                          <td className="px-2 py-2 text-right tabular-nums text-muted-foreground">
+                            {pct === null ? "" : `${pct}%`}
+                          </td>
+                        </>
+                      )}
                       <td className="px-2 py-2 text-right whitespace-nowrap">
                         {isAwarded && canManage && it.quantity != null && (
                           <Button
                             size="sm"
-                            variant={measuringId === it.id ? "secondary" : "outline"}
+                            variant="ghost"
                             className="h-7 text-xs"
-                            onClick={() =>
-                              setMeasuringId(measuringId === it.id ? null : it.id)
-                            }
+                            onClick={() => setMeasuringId(measuringId === it.id ? null : it.id)}
                           >
-                            {measuringId === it.id ? "Close" : "Measure"}
+                            Measure
                           </Button>
                         )}
                         {isDraft && canManage && (
@@ -617,6 +499,14 @@ export default function BoqRegister({
                   );
                 })}
               </tbody>
+              <tfoot>
+                <tr className="border-t-2 bg-muted/30 font-semibold">
+                  <td className="px-3 py-2.5" colSpan={5}>Total (KShs)</td>
+                  <td className="px-2 py-2.5 text-right tabular-nums">{money(summary.billed)}</td>
+                  {isAwarded && <td colSpan={2} />}
+                  <td />
+                </tr>
+              </tfoot>
             </table>
           </div>
         )}
@@ -624,37 +514,17 @@ export default function BoqRegister({
 
       {/* ── Recording a remeasure ──────────────────────────────────────────── */}
       {measuringId && (
-        <Card
-          ref={measureFormRef}
-          className="p-4 sm:p-5 space-y-3 border-yellow-500/50 bg-muted/30 scroll-mt-24"
-        >
-          {(() => {
-            const it = items.find((i) => i.id === measuringId);
-            if (!it) return null;
-            return (
-              <div className="space-y-0.5">
-                <h4 className="text-sm font-medium">
-                  Measure — {it.itemCode ? `${it.itemCode} ` : ""}
-                  {it.description}
-                </h4>
-                {/* What the person measuring needs in front of them: the
-                    billed quantity and what is already measured. */}
-                <p className="text-xs text-muted-foreground tabular-nums">
-                  Billed {qty(it.quantity)} {it.unit || ""} · measured so far{" "}
-                  {qty(it.measuredQuantity)} {it.unit || ""}
-                </p>
-              </div>
-            );
-          })()}
+        <Card className="p-4 sm:p-5 space-y-3 bg-muted/30">
+          <h4 className="text-sm font-medium">
+            Measure — {items.find((i) => i.id === measuringId)?.description}
+          </h4>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div className="space-y-1">
               <label className="text-xs font-medium text-muted-foreground">
                 Quantity this measure *
               </label>
               <Input
-                ref={measureQtyRef}
                 type="number"
-                inputMode="decimal"
                 step="0.0001"
                 className="h-9"
                 value={measurement.quantity}

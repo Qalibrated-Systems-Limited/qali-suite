@@ -47,22 +47,25 @@ export default async function ProjectSetup({ projectId, sections }) {
       href: `/dashboard/projects/${projectId}/edit`,
       cta: "Add the client",
     },
-    {
-      done: state.hasCostCodes,
-      label: "Have cost codes to budget with",
-      why: "A budget is built from codes, not from the chart of accounts.",
-      href: "/dashboard/projects/cost-codes",
-      cta: "Manage cost codes",
-    },
-    {
-      done: state.hasBudget,
-      label: "Draft a budget",
-      why: "What the job is expected to cost, by code.",
-      href: `/dashboard/projects/${projectId}/budget`,
-      cta: "Build the budget",
-    },
-    // The rest depend on the project's type, so they are only asked for where
-    // the type says the section exists at all.
+    // The order below IS the process, by dependency: the bill is priced first
+    // because the budget is built from its items, the budget is approved before
+    // the methodology can be written, and so on. Cost codes are no longer a
+    // step of their own — they are created from the bill items the moment a
+    // budget line selects them (0118), so pricing the bill and building the
+    // budget together produce the code vocabulary.
+    ...(sections?.boq
+      ? [
+          {
+            done: state.hasBoq,
+            label: "Price the bill of quantities",
+            why: "The foundation: the budget, its cost codes and every certificate are built from the priced bill.",
+            href: `/dashboard/projects/boq?project=${projectId}`,
+            cta: state.hasBoq ? "Open the bill" : "Start the bill",
+          },
+        ]
+      : []),
+    // Contract terms come before the budget — retention and the advance are
+    // part of setting the job up, and a certificate is computed from them.
     ...(sections?.certificates
       ? [
           {
@@ -74,17 +77,35 @@ export default async function ProjectSetup({ projectId, sections }) {
           },
         ]
       : []),
-    ...(sections?.boq
+    {
+      done: state.hasBudget,
+      label: "Build the budget from the bill",
+      why: "The department manager selects bill items to budget — a cost code is created for each — then posts it for approval.",
+      href: `/dashboard/projects/${projectId}/budget`,
+      cta: "Build the budget",
+    },
+    {
+      done: state.hasApprovedBudget,
+      label: "Get the budget approved",
+      why: "Finance approves it. The methodology and implementation open once the budget is approved.",
+      href: `/dashboard/projects/${projectId}/budget`,
+      cta: state.hasBudget ? "Review & approve" : "Post for approval",
+    },
+    // Methodology rides the BOQ flag (no shows_methodology column) and only
+    // becomes editable once the budget is approved — the step says so.
+    ...(sections?.methodology
       ? [
           {
-            done: state.hasAwardedBoq,
-            label: "Price and award a bill of quantities",
-            why: "Makes progress a measurement rather than a typed percentage.",
-            href: `/dashboard/projects/boq?project=${projectId}`,
-            cta: state.hasBoq ? "Finish the bill" : "Start the bill",
+            done: state.hasMethodology,
+            label: "Write the implementation methodology",
+            why: "The method statement for delivering the works — opens once the budget is approved.",
+            href: `/dashboard/projects/methodology?project=${projectId}`,
+            cta: "Open the methodology",
           },
         ]
       : []),
+    // The rest depend on the project's type, so they are only asked for where
+    // the type says the section exists at all.
     ...(sections?.programme
       ? [
           {

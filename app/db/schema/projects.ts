@@ -124,6 +124,61 @@ export const projects = pgTable(
     budgetAmount: money("budget_amount").notNull().default("0"),
     budgetCurrency: text("budget_currency").notNull().default("KES"),
 
+    // ── Project data sheet — 0122 (QSL Project Control template) ────────────
+    /** Identification */
+    awardedToCompany: text("awarded_to_company"),
+    contractNumber: text("contract_number"),
+    county: text("county"),
+    scope: text("scope"),
+    /** Commercial */
+    contractSumSource: text("contract_sum_source"),
+    vatRate: numeric("vat_rate", { precision: 9, scale: 4, mode: "string" }),
+    retentionPercent: numeric("retention_percent", { precision: 9, scale: 4, mode: "string" }),
+    defectsMonths: integer("defects_months"),
+    advanceAmount: money("advance_amount"),
+    /** Cost of being paid */
+    bondCost: money("bond_cost"),
+    insuranceCost: money("insurance_cost"),
+    financeCost: money("finance_cost"),
+    statutoryCost: money("statutory_cost"),
+    /** Programme */
+    contractMonths: integer("contract_months"),
+    /** Control */
+    bankAccount: text("bank_account"),
+    siteAgentName: text("site_agent_name"),
+    qsName: text("qs_name"),
+    fundsRingfenced: boolean("funds_ringfenced").notNull().default(false),
+    boqOnFile: boolean("boq_on_file").notNull().default(false),
+
+    // ── Contract administration — 0124 (FIDIC conditions) ───────────────────
+    formOfContract: text("form_of_contract"),
+    engineerName: text("engineer_name"),
+    noticeDays: integer("notice_days"),
+    detailClaimDays: integer("detail_claim_days"),
+    employerPaysDays: integer("employer_pays_days"),
+    latePaymentInterestPct: numeric("late_payment_interest_pct", { precision: 9, scale: 4, mode: "string" }),
+    retentionLimit: money("retention_limit"),
+    ldPerDay: money("ld_per_day"),
+    damagesCapPct: numeric("damages_cap_pct", { precision: 9, scale: 4, mode: "string" }),
+    variationCapPct: numeric("variation_cap_pct", { precision: 9, scale: 4, mode: "string" }),
+    perfSecurityExpires: date("perf_security_expires"),
+    advanceGuaranteeExpires: date("advance_guarantee_expires"),
+
+    /**
+     * The default expense account a budget line charges — 0119.
+     *
+     * A budget is built from BOQ items and a cost code is created for each
+     * (0118); every one of those codes needs an account. Most projects charge
+     * the same account for every item, so picking it on every line is the
+     * loudest bit of friction in building a budget. This remembers it per
+     * project: new BOQ budget lines pre-select it, and any line may override.
+     * `set null` — if the account is retired the project simply has no default.
+     */
+    defaultCostAccountId: uuid("default_cost_account_id").references(
+      () => accounts.id,
+      { onDelete: "set null" },
+    ),
+
     tags: text("tags").array().notNull().default(sql`'{}'`),
 
     createdById: text("created_by_id").references(() => users.id, {
@@ -308,6 +363,36 @@ export const projectCostCodes = pgTable(
   ],
 );
 
+/**
+ * Which BOQ items a cost code covers — 0118.
+ *
+ * Cost codes come from the bill: a code is created against one BOQ item (its
+ * Item No. and description) or a GROUP of items chosen to be budgeted together.
+ * A code with rows here is BOQ-derived; a manual code (the fallback) has none.
+ * The account a code charges is still finance's, picked when the code is made.
+ */
+export const projectCostCodeBoqItems = pgTable(
+  "project_cost_code_boq_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "restrict" }),
+    costCodeId: uuid("cost_code_id")
+      .notNull()
+      .references(() => projectCostCodes.id, { onDelete: "cascade" }),
+    boqItemId: uuid("boq_item_id")
+      .notNull()
+      .references(() => projectBoqItems.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("project_cost_code_boq_items_uq").on(t.costCodeId, t.boqItemId),
+    index("project_cost_code_boq_items_item_idx").on(t.companyId, t.boqItemId),
+    index("project_cost_code_boq_items_code_idx").on(t.costCodeId),
+  ],
+);
+
 export const projectBudgetLines = pgTable(
   "project_budget_lines",
   {
@@ -343,6 +428,8 @@ export const projectBudgetLines = pgTable(
     accountNameAtBudget: text("account_name_at_budget").notNull().default(""),
 
     description: text("description").notNull().default(""),
+    /** Cost category for the line — Materials, Labour, Plant hire, … (0122). */
+    category: text("category"),
     amount: money("amount").notNull(),
   },
   (t) => [

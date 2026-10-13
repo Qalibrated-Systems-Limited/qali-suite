@@ -862,6 +862,76 @@
       "when": 1787050150566,
       "tag": "0122_goods_receipt_supplier",
       "breakpoints": true
+    },
+    {
+      "idx": 123,
+      "version": "7",
+      "when": 1787050210566,
+      "tag": "0123_project_methodology",
+      "breakpoints": true
+    },
+    {
+      "idx": 124,
+      "version": "7",
+      "when": 1787050270566,
+      "tag": "0124_cost_code_boq_items",
+      "breakpoints": true
+    },
+    {
+      "idx": 125,
+      "version": "7",
+      "when": 1787050330566,
+      "tag": "0125_project_default_cost_account",
+      "breakpoints": true
+    },
+    {
+      "idx": 126,
+      "version": "7",
+      "when": 1787050390566,
+      "tag": "0126_custom_roles",
+      "breakpoints": true
+    },
+    {
+      "idx": 127,
+      "version": "7",
+      "when": 1787050450566,
+      "tag": "0127_role_permissions",
+      "breakpoints": true
+    },
+    {
+      "idx": 128,
+      "version": "7",
+      "when": 1787050510566,
+      "tag": "0128_project_data_sheet",
+      "breakpoints": true
+    },
+    {
+      "idx": 129,
+      "version": "7",
+      "when": 1787050570566,
+      "tag": "0129_project_awarded_to",
+      "breakpoints": true
+    },
+    {
+      "idx": 130,
+      "version": "7",
+      "when": 1787050630566,
+      "tag": "0130_project_contract_admin",
+      "breakpoints": true
+    },
+    {
+      "idx": 131,
+      "version": "7",
+      "when": 1787050690566,
+      "tag": "0131_commissions",
+      "breakpoints": true
+    },
+    {
+      "idx": 132,
+      "version": "7",
+      "when": 1787050750566,
+      "tag": "0132_project_documents",
+      "breakpoints": true
     }
   ]
 }

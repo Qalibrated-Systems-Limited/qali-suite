@@ -1,4 +1,5 @@
 import { CreateUserForm } from "./form";
+import { getCustomRoles } from "@/app/db/actions/role-actions";
 import { auth } from "@/auth";
 import { Card, CardContent } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -63,7 +64,7 @@ async function CreateUserPage() {
       </div>
 
       {/* Form */}
-      <CreateUserForm isSuperAdmin={isSuperAdmin} />
+      <CreateUserForm isSuperAdmin={isSuperAdmin} customRoles={await getCustomRoles()} />
     </main>
   );
 }

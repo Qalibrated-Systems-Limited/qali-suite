@@ -209,14 +209,34 @@ export async function resolveRoleForCompany(
   companyId: string | null | undefined,
 ): Promise<string | null> {
   if (!userId) return null;
+  /**
+   * CUSTOM ROLES RESOLVE TO THEIR BASE — 0120.
+   *
+   * The effective role is the per-company grant or the user's global role. If
+   * that name is a company CUSTOM role, its `base_role` is returned instead, so
+   * every downstream permission gate sees a canonical role and a custom role
+   * can never grant more than the base the code already trusts. The custom name
+   * itself stays on the access/users row for the admin UI to display.
+   *
+   * Privileged, so RLS is bypassed — the join is scoped to the context company
+   * explicitly (the active company, or the user's home company when none is
+   * passed).
+   */
   const rows = (await privilegedDb().execute(sql`
-    SELECT COALESCE(a.role, u.role) AS role
-      FROM users u
-      LEFT JOIN user_company_access a
-        ON a.user_id = u.id
-       AND a.status = 'active'
-       AND a.company_id = ${companyId ?? null}::uuid
-     WHERE u.id = ${String(userId)}
+    SELECT COALESCE(cr.base_role, raw.role) AS role
+      FROM (
+        SELECT COALESCE(a.role, u.role) AS role,
+               COALESCE(${companyId ?? null}::uuid, u.home_company_id) AS ctx
+          FROM users u
+          LEFT JOIN user_company_access a
+            ON a.user_id = u.id
+           AND a.status = 'active'
+           AND a.company_id = ${companyId ?? null}::uuid
+         WHERE u.id = ${String(userId)}
+      ) raw
+      LEFT JOIN custom_roles cr
+        ON cr.company_id = raw.ctx
+       AND lower(cr.name) = lower(raw.role)
   `)) as unknown as Array<{ role: string }>;
   return rows.length ? String(rows[0].role) : null;
 }

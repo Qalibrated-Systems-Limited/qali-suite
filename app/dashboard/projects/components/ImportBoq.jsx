@@ -47,7 +47,7 @@ export default function ImportBoq({ projectId }) {
   function submit() {
     const file = inputRef.current?.files?.[0];
     if (!file) {
-      toast.error("Choose a .csv or .xlsx file first");
+      toast.error("Choose a .csv, .xlsx or .pdf file first");
       return;
     }
     const fd = new FormData();
@@ -56,6 +56,14 @@ export default function ImportBoq({ projectId }) {
       const res = await importBoqFile(projectId, fd);
       if (res?.success) {
         toast.success(res.message);
+        // A PDF import reconciles each bill against the Grand Summary; any bill
+        // that fell back to a lump line is reported here so it is never silent.
+        if (res.warnings?.length) {
+          toast.warning(
+            `${res.warnings.length} bill(s) imported as a lump sum — ${res.warnings[0]}`,
+            { duration: 12000 },
+          );
+        }
         setOpen(false);
         setFileName("");
         router.refresh();
@@ -86,7 +94,8 @@ export default function ImportBoq({ projectId }) {
                 <h3 className="text-lg font-semibold">Import bill</h3>
                 <p className="text-sm text-muted-foreground">
                   Upload a .csv or .xlsx with columns:{" "}
-                  <span className="font-medium">Section, Item code, Description, Unit, Quantity, Rate</span>.
+                  <span className="font-medium">Item No., Description, Unit, Quantity, Rate</span>. Amount is calculated automatically.
+                  A <span className="font-medium">.pdf</span> bill is read too — each bill is checked against the Grand Summary, and any that doesn&apos;t add up is imported as a lump sum you can replace from a spreadsheet.
                 </p>
               </div>
               <button className="text-muted-foreground hover:text-foreground" onClick={() => setOpen(false)} aria-label="Close">
@@ -99,11 +108,11 @@ export default function ImportBoq({ projectId }) {
               <span className="text-sm font-medium">
                 {fileName || "Click to choose a spreadsheet"}
               </span>
-              <span className="text-xs text-muted-foreground">.csv or .xlsx</span>
+              <span className="text-xs text-muted-foreground">.csv, .xlsx or .pdf</span>
               <input
                 ref={inputRef}
                 type="file"
-                accept=".csv,.xlsx,.txt"
+                accept=".csv,.xlsx,.pdf,.txt"
                 className="hidden"
                 onChange={(e) => setFileName(e.target.files?.[0]?.name || "")}
               />

@@ -31,13 +31,18 @@
  */
 export const SECTIONS = [
   { key: "boq", href: "/dashboard/projects/boq", label: "Bill of Quantities" },
+  { key: "methodology", href: "/dashboard/projects/methodology", label: "Methodology" },
   { key: "milestones", href: "/dashboard/projects/milestones", label: "Milestones" },
   { key: "programme", href: "/dashboard/projects/programme", label: "Programme" },
   { key: "instructions", href: "/dashboard/projects/instructions", label: "Engineer's Instructions" },
   { key: "diary", href: "/dashboard/projects/diary", label: "Site Diary" },
   { key: "timesheets", href: "/dashboard/projects/timesheets", label: "Timesheets" },
   { key: "certificates", href: "/dashboard/projects/ipc", label: "IPC & Payments" },
+  { key: "variations", href: "/dashboard/projects/variations", label: "Variations" },
+  { key: "contract", href: "/dashboard/projects/contract", label: "Contract" },
+  { key: "costs", href: "/dashboard/projects/costs", label: "Cost Lines" },
   { key: "cashRequisitions", href: "/dashboard/projects/cash-requisitions", label: "Cash Requisitions" },
+  { key: "documents", href: "/dashboard/projects/documents", label: "Documents" },
 ];
 
 /** Everything on — what a project with no type gets, and the safe default. */
@@ -58,6 +63,12 @@ export function sectionsFor(project) {
   if (!project) return ALL_SECTIONS;
   return {
     boq: project.showsBoq !== false,
+    /**
+     * The implementation method statement follows the same jobs the bill does —
+     * a project that has a priced bill has works to plan a method for. No
+     * `shows_methodology` column; it rides the BOQ flag rather than a migration.
+     */
+    methodology: project.showsBoq !== false,
     /**
      * NO `shows_milestones` COLUMN, and none is needed. A milestone exists to
      * be valued and to release retention, and both happen on a certificate —
@@ -81,7 +92,14 @@ export function sectionsFor(project) {
      */
     timesheets: true,
     certificates: project.showsCertificates !== false,
+    // Money-in and reporting screens follow the same flags: variations move the
+    // certified contract sum, cost lines are the budget's actuals.
+    variations: project.showsCertificates !== false,
+    contract: project.showsCertificates !== false,
+    costs: project.showsBoq !== false,
     cashRequisitions: project.showsCashRequisitions !== false,
+    // Documents are not type-gated: every project carries files.
+    documents: true,
   };
 }
 
