@@ -2,6 +2,7 @@ import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 
 import { DASHBOARD_FOR_ROLE } from "@/lib/permissions";
+import SharedServicesBand from "@/components/shared-services-band";
 
 // Role-specific dashboards
 import { AdminDashboardPage } from "./components/AdminDashboard";
@@ -57,5 +58,17 @@ export default async function DashboardPage() {
     "EmployeeDashboard";
 
   const render = COMPONENT_REGISTRY[componentName] || COMPONENT_REGISTRY.EmployeeDashboard;
-  return await render();
+  const dashboard = await render();
+
+  // Shared services ride above every role's dashboard, so the things anyone
+  // does regardless of role — requisitions, expenses, leave, tickets, tasks,
+  // approvals — are one reach from the landing, whoever just logged in.
+  return (
+    <>
+      <div className="px-4 pt-4 sm:px-5 lg:px-6">
+        <SharedServicesBand />
+      </div>
+      {dashboard}
+    </>
+  );
 }

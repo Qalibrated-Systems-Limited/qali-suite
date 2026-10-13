@@ -47,7 +47,7 @@ jobs:
   test:
     name: Vitest suite
     runs-on: ubuntu-latest  # free Ubuntu runner; ~5s startup
-    timeout-minutes: 30     # the Postgres suites are integration tests; 10 was sized for Mongo alone
+    timeout-minutes: 45     # the Postgres suites run sequentially (~24 min); headroom for a slow runner so the job is not canceled mid-suite
 
     # ── Postgres, empty, created fresh for every run ──────────────────
     # The suites are `DATABASE_URL ? describe : describe.skip`, so without

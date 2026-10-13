@@ -1,4 +1,5 @@
 import { EditUserForm } from "./form";
+import { getCustomRoles } from "@/app/db/actions/role-actions";
 import { auth } from "@/auth";
 import { getUserByIdPg } from "@/app/db/actions/user-actions";
 import { notFound } from "next/navigation";
@@ -76,7 +77,7 @@ async function EditUserPage(props) {
       </div>
 
       {/* Form */}
-      <EditUserForm user={user} isSuperAdmin={isSuperAdmin} />
+      <EditUserForm user={user} isSuperAdmin={isSuperAdmin} customRoles={await getCustomRoles()} />
     </main>
   );
 }
