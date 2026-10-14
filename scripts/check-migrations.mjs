@@ -125,17 +125,19 @@ for (let i = 0; i < Math.min(sortedFiles.length, tags.length); i++) {
 // ── 5. Naming convention ────────────────────────────────────────────────────
 // Legacy: NNNN_name. New (2026-09-09 onward): YYYYMMDDHHMM_name, so two people
 // on separate branches cannot pick the same number in the first place.
+// `npm run db:new` writes YYYYMMDDTHHMMSS_name (scripts/new-migration.mjs) —
+// accept both, or every migration that script creates fails here.
 const LEGACY = /^\d{4}_/;
-const STAMPED = /^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})_/;
+const STAMPED = /^(\d{4})(\d{2})(\d{2})T?(\d{2})(\d{2})(\d{2})?_/;
 let sawStamped = false;
 
 for (const tag of tags) {
   const stamped = STAMPED.exec(tag);
   if (stamped) {
     sawStamped = true;
-    const [, y, mo, d, h, mi] = stamped.map(Number);
-    if (mo < 1 || mo > 12 || d < 1 || d > 31 || h > 23 || mi > 59) {
-      fail(`not a real timestamp: ${tag}`, "Expected YYYYMMDDHHMM_name.sql.");
+    const [, , mo, d, h, mi, sec = 0] = stamped.map(Number);
+    if (mo < 1 || mo > 12 || d < 1 || d > 31 || h > 23 || mi > 59 || sec > 59) {
+      fail(`not a real timestamp: ${tag}`, "Expected YYYYMMDDTHHMMSS_name.sql.");
     }
     continue;
   }
@@ -151,7 +153,7 @@ for (const tag of tags) {
   }
   fail(
     `unrecognised migration name: ${tag}`,
-    "Expected NNNN_name.sql (legacy) or YYYYMMDDHHMM_name.sql (current).",
+    "Expected NNNN_name.sql (legacy) or YYYYMMDDTHHMMSS_name.sql (current).",
   );
 }
 
