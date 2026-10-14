@@ -176,6 +176,12 @@ export const employees = pgTable(
     emergencyPhone: text("emergency_phone"),
     emergencyAlternatePhone: text("emergency_alternate_phone"),
 
+    /** Who receives final dues and benefits — not the emergency contact. */
+    nextOfKinName: text("next_of_kin_name"),
+    nextOfKinRelationship: text("next_of_kin_relationship"),
+    nextOfKinPhone: text("next_of_kin_phone"),
+    nextOfKinIdNumber: text("next_of_kin_id_number"),
+
     notes: text("notes"),
 
     /** GENERATED: "First Last". Sorted and searched on. */

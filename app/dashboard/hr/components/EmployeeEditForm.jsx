@@ -243,6 +243,26 @@ export default function EmployeeEditForm({ employee, departments = [], managers 
         </div>
       </SectionCard>
 
+      {/* Next of Kin */}
+      <SectionCard title="Next of Kin">
+        <div>
+          <Label>Name</Label>
+          <Input name="nextOfKinName" defaultValue={v.nextOfKinName} placeholder="Full name" />
+        </div>
+        <div>
+          <Label>Relationship</Label>
+          <Input name="nextOfKinRelationship" defaultValue={v.nextOfKinRelationship} placeholder="e.g. Spouse, Parent" />
+        </div>
+        <div>
+          <Label>Phone</Label>
+          <Input name="nextOfKinPhone" type="tel" defaultValue={v.nextOfKinPhone} placeholder="+254 7xx xxx xxx" />
+        </div>
+        <div>
+          <Label>ID Number</Label>
+          <Input name="nextOfKinIdNumber" defaultValue={v.nextOfKinIdNumber} placeholder="National ID / passport" />
+        </div>
+      </SectionCard>
+
       {/* Notes */}
       <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
         <h2 className="mb-3 font-semibold text-foreground">Notes</h2>

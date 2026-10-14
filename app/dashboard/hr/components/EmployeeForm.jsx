@@ -294,6 +294,26 @@ export default function EmployeeForm({ departments = [], managers = [], defaults
         </div>
       </SectionCard>
 
+      {/* Next of Kin */}
+      <SectionCard title="Next of Kin">
+        <div>
+          <Label>Name</Label>
+          <Input name="nextOfKinName" placeholder="Full name" defaultValue={d.nextOfKinName} />
+        </div>
+        <div>
+          <Label>Relationship</Label>
+          <Input name="nextOfKinRelationship" placeholder="e.g. Spouse, Parent" defaultValue={d.nextOfKinRelationship} />
+        </div>
+        <div>
+          <Label>Phone</Label>
+          <Input name="nextOfKinPhone" type="tel" placeholder="+254 7xx xxx xxx" defaultValue={d.nextOfKinPhone} />
+        </div>
+        <div>
+          <Label>ID Number</Label>
+          <Input name="nextOfKinIdNumber" placeholder="National ID / passport" defaultValue={d.nextOfKinIdNumber} />
+        </div>
+      </SectionCard>
+
       {/* Submit */}
       <div className="flex justify-end gap-3">
         <Button variant="outline" asChild>

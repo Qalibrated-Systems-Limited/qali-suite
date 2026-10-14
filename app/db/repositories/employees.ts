@@ -93,6 +93,11 @@ export interface CreateEmployeeInput {
   emergencyRelationship?: string | null;
   emergencyPhone?: string | null;
 
+  nextOfKinName?: string | null;
+  nextOfKinRelationship?: string | null;
+  nextOfKinPhone?: string | null;
+  nextOfKinIdNumber?: string | null;
+
   /** Link an existing login. */
   userId?: string | null;
   /** Attach to an existing party instead of creating one. */
@@ -185,6 +190,10 @@ export async function createEmployee(tx: Tx, input: CreateEmployeeInput) {
       emergencyName: trimmed(input.emergencyName),
       emergencyRelationship: trimmed(input.emergencyRelationship),
       emergencyPhone: trimmed(input.emergencyPhone),
+      nextOfKinName: trimmed(input.nextOfKinName),
+      nextOfKinRelationship: trimmed(input.nextOfKinRelationship),
+      nextOfKinPhone: trimmed(input.nextOfKinPhone),
+      nextOfKinIdNumber: trimmed(input.nextOfKinIdNumber),
       notes: trimmed(input.notes),
       createdById: input.actor?.id ?? null,
       createdByName: input.actor?.name ?? null,
@@ -236,6 +245,10 @@ export interface UpdateEmployeeInput {
   emergencyRelationship?: string | null;
   emergencyPhone?: string | null;
   emergencyAlternatePhone?: string | null;
+  nextOfKinName?: string | null;
+  nextOfKinRelationship?: string | null;
+  nextOfKinPhone?: string | null;
+  nextOfKinIdNumber?: string | null;
   notes?: string | null;
   actor?: { id?: string | null; name?: string | null };
 }
@@ -303,6 +316,10 @@ export async function updateEmployee(tx: Tx, input: UpdateEmployeeInput) {
     "emergencyRelationship",
     "emergencyPhone",
     "emergencyAlternatePhone",
+    "nextOfKinName",
+    "nextOfKinRelationship",
+    "nextOfKinPhone",
+    "nextOfKinIdNumber",
     "notes",
   ] as const) {
     if (has(key)) patch[key] = trimmed(input[key]);
@@ -919,6 +936,11 @@ function mapEmployee(r: Record<string, unknown>) {
     emergencyRelationship: s("emergency_relationship"),
     emergencyPhone: s("emergency_phone"),
     emergencyAlternatePhone: s("emergency_alternate_phone"),
+
+    nextOfKinName: s("next_of_kin_name"),
+    nextOfKinRelationship: s("next_of_kin_relationship"),
+    nextOfKinPhone: s("next_of_kin_phone"),
+    nextOfKinIdNumber: s("next_of_kin_id_number"),
 
     notes: s("notes"),
     createdAt: r.created_at ? new Date(r.created_at as string).toISOString() : null,

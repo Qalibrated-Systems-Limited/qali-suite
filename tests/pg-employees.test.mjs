@@ -245,6 +245,32 @@ suite("employees repository", () => {
       expect(updated.jobGrade).toBe("G3");
     });
 
+    it("keeps the next of kin apart from the emergency contact", async () => {
+      const e = await hire({
+        emergencyName: "Peter Otieno",
+        nextOfKinName: " Mary Wanjiru ",
+        nextOfKinRelationship: "Mother",
+        nextOfKinPhone: "0711000000",
+        nextOfKinIdNumber: "12345678",
+      });
+
+      const full = await asTenant(companyA, (tx) => staff.getEmployee(tx, e.id));
+      expect(full.emergencyName).toBe("Peter Otieno");
+      expect(full.nextOfKinName).toBe("Mary Wanjiru");
+      expect(full.nextOfKinRelationship).toBe("Mother");
+      expect(full.nextOfKinPhone).toBe("0711000000");
+      expect(full.nextOfKinIdNumber).toBe("12345678");
+
+      await asTenant(companyA, (tx) =>
+        staff.updateEmployee(tx, {
+          id: e.id, companyId: companyA, nextOfKinPhone: "0733000000", nextOfKinIdNumber: "",
+        }));
+      const after = await asTenant(companyA, (tx) => staff.getEmployee(tx, e.id));
+      expect(after.nextOfKinPhone).toBe("0733000000");
+      expect(after.nextOfKinIdNumber).toBeNull();
+      expect(after.nextOfKinName).toBe("Mary Wanjiru");
+    });
+
     it("records a promotion, which the source did not", async () => {
       const finance = await asTenant(companyA, (tx) =>
         depts.createDepartment(tx, { companyId: companyA, name: "Finance" }));

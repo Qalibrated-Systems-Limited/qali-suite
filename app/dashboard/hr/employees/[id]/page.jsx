@@ -131,6 +131,17 @@ function ProfileTab({ e, canSeePay }) {
           ]}
         />
       )}
+      {e.nextOfKinName && (
+        <InfoCard
+          title="Next of kin"
+          rows={[
+            ["Name", e.nextOfKinName],
+            ["Relationship", e.nextOfKinRelationship || "—"],
+            ["Phone", e.nextOfKinPhone || "—"],
+            ["ID number", e.nextOfKinIdNumber || "—"],
+          ]}
+        />
+      )}
     </div>
   );
 }
