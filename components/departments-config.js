@@ -29,7 +29,7 @@ export const DEPARTMENTS = [
   { slug: "technical", label: "Technical", icon: FlaskConical, blurb: "Calibration and inspection to ISO/IEC 17025 and 17020." },
   { slug: "business-dev", label: "Business Dev & Sales", icon: Briefcase, blurb: "The pipeline — leads, quotes, orders, bids and the shop." },
   { slug: "ict-quality", label: "ICT, Quality & Compliance", icon: ShieldCheck, blurb: "Quality, compliance, HSE, the service desk and integrations." },
-  { slug: "general-ops", label: "General Operations", icon: Activity, blurb: "Procurement, the fleet and the task spine." },
+  { slug: "procurement", label: "Procurement", icon: Activity, blurb: "Procurement, the fleet and the task spine." },
   { slug: "hr-admin", label: "HR & Admin", icon: Users, blurb: "People, payroll, users, the company record and settings." },
 ];
 
@@ -46,8 +46,8 @@ const DEPARTMENT_OF = {
   quality: "ict-quality",
   "it-service": "ict-quality",
   inventory: "finance",
-  purchases: "general-ops",
-  operations: "general-ops",
+  purchases: "procurement",
+  operations: "procurement",
   hr: "hr-admin",
   people: "hr-admin",
   company: "hr-admin",

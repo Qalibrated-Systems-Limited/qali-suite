@@ -288,7 +288,7 @@ async function ictQualityKpis(): Promise<DeptKpi[]> {
 const BUILDERS: Record<string, () => Promise<DeptKpi[]>> = {
   projects: projectsKpis,
   finance: financeKpis,
-  "general-ops": opsKpis,
+  procurement: opsKpis,
   "hr-admin": hrKpis,
   "business-dev": businessDevKpis,
   "ict-quality": ictQualityKpis,

@@ -59,7 +59,7 @@ const QUICK_ACTIONS = {
     { label: "Compliance", href: "/dashboard/compliance", icon: ShieldCheck },
     { label: "SOP Library", href: "/dashboard/sops", icon: BookOpen },
   ],
-  "general-ops": [
+  procurement: [
     { label: "Purchase order", href: "/dashboard/purchase-orders", icon: Plus },
     { label: "Products", href: "/dashboard/stocks", icon: Boxes },
   ],
