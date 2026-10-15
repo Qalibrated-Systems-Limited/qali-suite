@@ -197,7 +197,11 @@ export const getNavigationGroups = (user) => {
     label: "Inventory",
     icon: Package,
     id: "inventory",
-    defaultOpen: true,
+    // Stock lives under Finance (departmentOf), but keeps its own identity as a
+    // nested, collapsible sub-group rather than being flattened into Finance's
+    // flat module list. `nested` tells the department renderer to preserve it.
+    nested: true,
+    defaultOpen: false,
     hidden: !canSeeInventoryNav(user?.role),
     items: [
       {
@@ -766,8 +770,8 @@ export const getNavigationGroups = (user) => {
     items: [
       // QSL field-service reporting, folded in under the existing Technical
       // group. Pages are plan-gated on the projects module in their layout.
-      // Order: dashboard, new report, registry, then the ISO tools.
-      { icon: LayoutDashboard, label: "Technical dashboard", id: "technical-overview", href: "/dashboard/technical/overview" },
+      // Order: new report, registry, then the ISO tools. (The per-module
+      // "Technical dashboard" was removed — there is one overall dashboard.)
       { icon: FileText, label: "New report", id: "technical-new", href: "/dashboard/technical/new" },
       { icon: List, label: "Report registry", id: "technical-registry", href: "/dashboard/technical" },
       { icon: FlaskConical, label: "Calibration (17025)", id: "calibration", href: "/dashboard/calibration" },
@@ -979,11 +983,20 @@ const NavGroup = ({ group, user, onItemClick, collapsed }) => {
   const pathname = usePathname();
   const [isOpen, setIsOpen] = useState(group.defaultOpen ?? false);
 
-  // Check if any child is active
-  const hasActiveChild = group.items?.some((item) => {
+  // Check if any child is active. A child may itself be a nested sub-group
+  // (e.g. Inventory under Finance), so recurse one level into its items.
+  const itemIsActive = (item) => {
     if (item.hidden) return false;
+    if (item.type === "group") {
+      return (item.items || []).some(
+        (sub) =>
+          !sub.hidden &&
+          (pathname === sub.href || pathname.startsWith(sub.href + "/")),
+      );
+    }
     return pathname === item.href || pathname.startsWith(item.href + "/");
-  });
+  };
+  const hasActiveChild = group.items?.some(itemIsActive);
 
   // Auto-open if has active child
   useEffect(() => {
@@ -1021,9 +1034,38 @@ const NavGroup = ({ group, user, onItemClick, collapsed }) => {
         <DropdownMenuContent side="right" align="start" className="w-48 bg-card border-border" sideOffset={8}>
           <DropdownMenuLabel className="text-xs text-muted-foreground">{group.label}</DropdownMenuLabel>
           <DropdownMenuSeparator className="bg-border" />
-          {visibleItems.map((item) => {
+          {/* A nested sub-group (e.g. Inventory under Finance) can't open a
+              second flyout cleanly inside a dropdown, so in the collapsed rail
+              its leaves are flattened in under their own sub-heading. */}
+          {visibleItems.flatMap((item) => {
+            if (item.type === "group") {
+              const subItems = (item.items || []).filter((s) => !s.hidden);
+              if (subItems.length === 0) return [];
+              return [
+                <DropdownMenuSeparator key={`${item.id}-sep`} className="bg-border" />,
+                <DropdownMenuLabel key={`${item.id}-label`} className="text-xs text-muted-foreground">
+                  {item.label}
+                </DropdownMenuLabel>,
+                ...subItems.map((sub) => {
+                  const isActive = pathname === sub.href;
+                  return (
+                    <DropdownMenuItem key={sub.id} asChild className={clsx("cursor-pointer", { "bg-yellow-500/10 text-yellow-600 dark:text-yellow-400": isActive })}>
+                      <Link href={sub.href} onClick={() => onItemClick?.()} className="flex items-center gap-2">
+                        <sub.icon className="w-4 h-4" />
+                        <span>{sub.label}</span>
+                        {sub.badge && (
+                          <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded-md bg-yellow-500/20 text-yellow-600 dark:text-yellow-400 font-medium">
+                            {sub.badge}
+                          </span>
+                        )}
+                      </Link>
+                    </DropdownMenuItem>
+                  );
+                }),
+              ];
+            }
             const isActive = pathname === item.href;
-            return (
+            return [
               <DropdownMenuItem key={item.id} asChild className={clsx("cursor-pointer", { "bg-yellow-500/10 text-yellow-600 dark:text-yellow-400": isActive })}>
                 <Link href={item.href} onClick={() => onItemClick?.()} className="flex items-center gap-2">
                   <item.icon className="w-4 h-4" />
@@ -1034,8 +1076,8 @@ const NavGroup = ({ group, user, onItemClick, collapsed }) => {
                     </span>
                   )}
                 </Link>
-              </DropdownMenuItem>
-            );
+              </DropdownMenuItem>,
+            ];
           })}
         </DropdownMenuContent>
       </DropdownMenu>
@@ -1086,9 +1128,19 @@ const NavGroup = ({ group, user, onItemClick, collapsed }) => {
         )}
       >
         <div className="min-h-0 space-y-0.5 overflow-hidden">
-          {visibleItems.map((item) => (
-            <NavItem key={item.id} item={item} onItemClick={onItemClick} />
-          ))}
+          {visibleItems.map((item) =>
+            item.type === "group" ? (
+              <NavGroup
+                key={item.id}
+                group={item}
+                user={user}
+                onItemClick={onItemClick}
+                collapsed={false}
+              />
+            ) : (
+              <NavItem key={item.id} item={item} onItemClick={onItemClick} />
+            ),
+          )}
         </div>
       </div>
     </div>
@@ -1266,40 +1318,57 @@ export const SidebarContentGrouped = ({ onItemClick, user, collapsed }) => {
               hidden: g.hidden,
             });
 
+            // A department entry is visible to this role when it has at least
+            // one visible leaf, or a nested sub-group with a visible leaf.
+            const entryVisible = (it) => {
+              if (it.type === "group") {
+                return (it.items || []).some((s) => !s.hidden);
+              }
+              return !it.hidden;
+            };
+
             const deptGroups = DEPARTMENTS.map((dept) => {
               const members = navigationGroups.filter(
                 (g) => departmentOf(g.id) === dept.slug,
               );
-              const modules = members.flatMap((g) =>
-                g.type === "single"
-                  ? [asItem(g)]
-                  : (g.items || []).map((it) => ({
-                      ...it,
-                      hidden: Boolean(g.hidden) || Boolean(it.hidden),
-                    })),
-              );
-              // First entry is the department's own dashboard (the rich
-              // landing). A department may override where that goes — Projects
-              // points it at its own module home (/dashboard/projects), so its
-              // Dashboard and Overview are one page, not two.
-              const home = {
-                icon: LayoutDashboard,
-                label: "Dashboard",
-                id: `dept-${dept.slug}-home`,
-                href: dept.homeHref ?? `/dashboard/departments/${dept.slug}`,
-              };
+              // A `single` collapses to one leaf; a plain functional group is
+              // dissolved into its department (its items inherit its `hidden`);
+              // a group flagged `nested` (Inventory under Finance) is kept whole
+              // as its own collapsible sub-group so stock reads as one thing.
+              const modules = members.flatMap((g) => {
+                if (g.type === "single") return [asItem(g)];
+                const items = (g.items || []).map((it) => ({
+                  ...it,
+                  hidden: Boolean(g.hidden) || Boolean(it.hidden),
+                }));
+                if (g.nested) {
+                  return [
+                    {
+                      type: "group",
+                      id: g.id,
+                      label: g.label,
+                      icon: g.icon,
+                      defaultOpen: g.defaultOpen ?? false,
+                      items,
+                    },
+                  ];
+                }
+                return items;
+              });
+              // No per-department dashboard: there is one overall dashboard
+              // (the logo and the dashboard link both go to /dashboard). A
+              // department group opens straight to its modules.
               return {
                 type: "group",
                 id: `dept-${dept.slug}`,
                 label: dept.label,
                 icon: dept.icon,
                 defaultOpen: false,
-                items: [home, ...modules],
+                items: modules,
               };
             }).filter((dg) =>
-              // Show the department only if at least one real module (not just
-              // the always-present Dashboard link) is visible to this role.
-              dg.items.slice(1).some((it) => !it.hidden),
+              // Show the department only if at least one module is visible.
+              dg.items.some(entryVisible),
             );
 
             // Everything with no department: the Dashboard home and the Shared

@@ -11,12 +11,8 @@ import { Plus } from "lucide-react";
 import ProjectStats, {
   ProjectStatsSkeleton,
 } from "../components/ProjectStats";
-import ProjectPortfolioAnalytics, {
-  ProjectPortfolioAnalyticsSkeleton,
-} from "../components/ProjectPortfolioAnalytics";
 import ProjectListServerComp from "../components/ProjectListServerComp";
 import { ProjectListSkeleton } from "../components/ProjectListWithFilters";
-import SharedServicesBand from "@/components/shared-services-band";
 
 export const metadata = {
   title: "Projects | ERP System",
@@ -85,10 +81,10 @@ export default async function ProjectsPage({ searchParams }) {
             Track project budgets, costs, and profitability
           </p>
         </div>
-        {/* New Project is the one primary action here; the portfolio registers
-            (sealed budgets, findings, completed, cost codes) now live as
-            first-class shortcut cards in the dashboard below, where they have
-            room for a label and a line of context. */}
+        {/* New Project is the one primary action here. This page is the
+            projects register — list, search and paging — not a dashboard; the
+            portfolio analytics and cross-department shortcuts live on the one
+            overall dashboard (/dashboard), not duplicated per module. */}
         <div className="shrink-0">
           <Button asChild size="sm" className="bg-yellow-500 hover:bg-yellow-600 text-black font-semibold sm:size-default">
             <Link href="/dashboard/projects/create">
@@ -99,22 +95,12 @@ export default async function ProjectsPage({ searchParams }) {
         </div>
       </div>
 
-      {/* Stats */}
+      {/* A light figure strip for the register below — count, value, status
+          mix. Not a dashboard: the portfolio charts and analytics shortcuts
+          live on the one overall dashboard. */}
       <Suspense fallback={<ProjectStatsSkeleton />}>
         <ProjectStats />
       </Suspense>
-
-      {/* Portfolio dashboard — status mix, the money, findings, and the
-          analytics shortcuts. Its own Suspense so the figure strip and the
-          list are not held behind the findings roll-up. */}
-      <Suspense fallback={<ProjectPortfolioAnalyticsSkeleton />}>
-        <ProjectPortfolioAnalytics />
-      </Suspense>
-
-      {/* Shared services — the cross-department things anyone starts here to do.
-          Combining Dashboard and Overview means this lands on the one projects
-          home rather than a separate department page. */}
-      <SharedServicesBand />
 
       {/*
         SEARCH — the box that was never rendered.
