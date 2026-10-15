@@ -20,17 +20,16 @@ import {
  * The client sidebar and the dashboard both import from here.
  */
 export const DEPARTMENTS = [
-  // `homeHref` overrides where this department's "Dashboard" link and landing
-  // go. Projects has its own rich module home at /dashboard/projects (the
-  // portfolio dashboard + register), so Dashboard and Overview are one page
-  // there rather than two. A department without an override uses the generic
-  // /dashboard/departments/<slug> landing.
-  { slug: "projects", label: "Projects", icon: FolderKanban, blurb: "Project control — bills, budgets, certificates and cost.", homeHref: "/dashboard/projects" },
-  { slug: "finance", label: "Finance", icon: DollarSign, blurb: "The books — ledger, banking, tax, expenses and the financial reports." },
+  // There is one overall dashboard (/dashboard). A department is purely a
+  // navigation grouping now — it has no landing page of its own; its sidebar
+  // group opens straight to its modules, and /dashboard/departments/<slug>
+  // redirects to the overall dashboard.
+  { slug: "projects", label: "Projects", icon: FolderKanban, blurb: "Project control — bills, budgets, certificates and cost." },
+  { slug: "finance", label: "Finance", icon: DollarSign, blurb: "The books — ledger, banking, tax, expenses, stock and the financial reports." },
   { slug: "technical", label: "Technical", icon: FlaskConical, blurb: "Calibration and inspection to ISO/IEC 17025 and 17020." },
   { slug: "business-dev", label: "Business Dev & Sales", icon: Briefcase, blurb: "The pipeline — leads, quotes, orders, bids and the shop." },
   { slug: "ict-quality", label: "ICT, Quality & Compliance", icon: ShieldCheck, blurb: "Quality, compliance, HSE, the service desk and integrations." },
-  { slug: "general-ops", label: "General Operations", icon: Activity, blurb: "Stores, procurement, the fleet and the task spine." },
+  { slug: "procurement", label: "Procurement", icon: Activity, blurb: "Procurement, the fleet and the task spine." },
   { slug: "hr-admin", label: "HR & Admin", icon: Users, blurb: "People, payroll, users, the company record and settings." },
 ];
 
@@ -46,9 +45,9 @@ const DEPARTMENT_OF = {
   presales: "business-dev",
   quality: "ict-quality",
   "it-service": "ict-quality",
-  inventory: "general-ops",
-  purchases: "general-ops",
-  operations: "general-ops",
+  inventory: "finance",
+  purchases: "procurement",
+  operations: "procurement",
   hr: "hr-admin",
   people: "hr-admin",
   company: "hr-admin",

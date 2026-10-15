@@ -496,6 +496,8 @@ suite("procurement: purchase orders and goods receipts", () => {
           companyId: companyA,
           sourceType: "purchase_order",
           purchaseOrderId: po.id,
+          supplierId: supplier,
+          supplierName: "Steel Supplies Ltd",
           receivedDate: "2026-08-10",
           createdById: "storekeeper",
           lines: [{

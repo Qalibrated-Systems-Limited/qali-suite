@@ -1,0 +1,57 @@
+{
+  "cf556e44911a8da5a22d4c942587aa27b4275bf8f22037fb4c55873386f9275c": {
+    "tag": "0041_quotes",
+    "commit": "6c4d0a8",
+    "sqlDiffers": true
+  },
+  "6c3b60b68cc69626c8d719ab931d7e9bec103a13ddb8c0473d0b93d2d7bc3757": {
+    "tag": "0041_quotes",
+    "commit": "13164d8",
+    "sqlDiffers": true
+  },
+  "333c356259251c26fe587b23b91c3a9c2c6874028669faf7d71a0f6146d56504": {
+    "tag": "0052_employee_claims",
+    "commit": "8774218",
+    "sqlDiffers": true
+  },
+  "503fecb6a43b116b74e2f612bb04a4e821324bfafef467d04305eea6615fc112": {
+    "tag": "0052_employee_claims",
+    "commit": "ed86e46",
+    "sqlDiffers": true
+  },
+  "465a0200c5710b30671218bff75341cfc49fe520773a56c78abc761b93d24c79": {
+    "tag": "0056_fixed_assets",
+    "commit": "294cf5e",
+    "sqlDiffers": true
+  },
+  "99e51b6dc099bfe9d371fb1d67230c4017e833a62b165bcf66f666bfc48291da": {
+    "tag": "0056_fixed_assets",
+    "commit": "dbc0304",
+    "sqlDiffers": true
+  },
+  "5e2dd438d83eb413fd6b991db5b2b0528f53804e1359845d64bd38337f0628c2": {
+    "tag": "0059_expenses",
+    "commit": "31212d4",
+    "sqlDiffers": true
+  },
+  "bd15f4431e46e66f698e50782378a491dfb0e9f24a082bb8884601a3c2bd7a4e": {
+    "tag": "0062_categories",
+    "commit": "e5b84a8",
+    "sqlDiffers": true
+  },
+  "7111385ce1f921c48351bea3bc5c82697818f5011c98e4e5b546135816e6e1d5": {
+    "tag": "0095_an_invoice_remembers_who_sold_it",
+    "commit": "bd23d18",
+    "sqlDiffers": false
+  },
+  "be39d75cb6e714c3d11ee50b168211b0fb65101923ddd1e2afdd8e9e6db22818": {
+    "tag": "0104_helpdesk",
+    "commit": "a1090c2",
+    "sqlDiffers": false
+  },
+  "3f859d04edcd8575bb835691e762b10c89d637d05a4d24147962b8242c8e5af0": {
+    "tag": "0105_hse",
+    "commit": "a1090c2",
+    "sqlDiffers": false
+  }
+}

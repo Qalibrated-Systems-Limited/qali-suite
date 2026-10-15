@@ -1,37 +1,18 @@
 import { auth } from "@/auth";
-import { redirect, notFound } from "next/navigation";
-import { DEPARTMENTS } from "@/components/departments-config";
-import DepartmentWorkspace from "@/components/department-workspace";
-import { getDepartmentKpis } from "@/app/db/actions/department-kpi-actions";
+import { redirect } from "next/navigation";
 
 /**
- * A department's landing dashboard. The ERP is divided into departments for
- * navigation (see components/sidebar-content-grouped.jsx `DEPARTMENTS`); each
- * one's heading links here, and this lists the modules that department owns —
- * gated exactly as the sidebar gates them, because it reads the same config.
+ * Departments no longer have landing pages of their own. The ERP has ONE
+ * overall dashboard (/dashboard); a department is just a navigation grouping
+ * in the sidebar (see components/sidebar-content-grouped.jsx), so any
+ * /dashboard/departments/<slug> URL — a bookmark, an old link, the command
+ * palette — redirects to that single dashboard rather than rendering a
+ * per-department dashboard that duplicated it.
  */
-export async function generateMetadata({ params }) {
-  const { slug } = await params;
-  const dept = DEPARTMENTS.find((d) => d.slug === slug);
-  return { title: dept ? `${dept.label} | Departments` : "Departments" };
-}
+export const metadata = { title: "Dashboard | ERP System" };
 
-export default async function DepartmentPage({ params }) {
-  const { slug } = await params;
+export default async function DepartmentPage() {
   const session = await auth();
   if (!session?.user) redirect("/login");
-
-  const dept = DEPARTMENTS.find((d) => d.slug === slug);
-  if (!dept) notFound();
-
-  // A department with its own module home (Projects → /dashboard/projects) has
-  // one landing, not two: send its department URL there so Dashboard and
-  // Overview can never drift apart again.
-  if (dept.homeHref) redirect(dept.homeHref);
-
-  // Live figures, fetched server-side and passed in. getDepartmentKpis never
-  // throws — a department with no live figures just gets an empty row.
-  const kpis = await getDepartmentKpis(slug);
-
-  return <DepartmentWorkspace user={session.user} slug={slug} kpis={kpis} />;
+  redirect("/dashboard");
 }
