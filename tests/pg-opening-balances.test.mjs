@@ -321,7 +321,7 @@ suite("opening balances", () => {
       const { entry } = await postLump([
         { accountId: cashAcct, debit: "100.0000", credit: "0.0000" },
       ]);
-      await admin`UPDATE journal_entries SET status = 'reversed' WHERE id = ${entry.id}`;
+      await admin`UPDATE journal_entries SET reversed_at = now() WHERE id = ${entry.id}`;
 
       const again = await postLump([
         { accountId: cashAcct, debit: "200.0000", credit: "0.0000" },

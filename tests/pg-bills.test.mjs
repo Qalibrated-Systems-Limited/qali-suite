@@ -604,10 +604,13 @@ suite("postgres bills", () => {
       );
       expect(product.quantityOnHand).toBe("0.0000");
 
-      const [{ status }] = await asTenant(companyA, (tx) =>
-        tx.execute(sql`SELECT status FROM journal_entries WHERE id = ${after.journalEntryId}`),
+      // Reversed is a flag on a still-posted original, so it and its
+      // reversal both count and net to zero.
+      const [{ status, reversed_at }] = await asTenant(companyA, (tx) =>
+        tx.execute(sql`SELECT status, reversed_at FROM journal_entries WHERE id = ${after.journalEntryId}`),
       );
-      expect(status).toBe("reversed");
+      expect(status).toBe("posted");
+      expect(reversed_at).not.toBeNull();
     });
 
     it("refuses to cancel a bill that has been paid", async () => {

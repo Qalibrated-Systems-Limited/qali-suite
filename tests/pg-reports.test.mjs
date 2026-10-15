@@ -21,6 +21,7 @@ import {
   getProfitLoss,
   getBalanceSheet,
 } from "@/app/db/repositories/reportQueries";
+import { reverseJournalEntry } from "@/app/db/repositories/journal";
 
 const DATABASE_URL = process.env.DATABASE_URL;
 /**
@@ -292,6 +293,101 @@ suite("postgres reports", () => {
       // Only Sales moved; Cash is not a P&L account at all.
       expect(pl.revenue.accounts).toHaveLength(1);
       expect(pl.expenses.accounts).toHaveLength(0);
+    });
+  });
+
+  describe("reversals", () => {
+    let fuel;
+
+    beforeEach(async () => {
+      fuel = randomUUID();
+      await asTenant(companyA, (tx) =>
+        tx.execute(sql`
+          INSERT INTO accounts (id, company_id, account_code, account_name, account_type, sub_type)
+          VALUES (${fuel}, ${companyA}, '6500', 'Fuel', 'expense', 'operating_expense')
+        `),
+      );
+    });
+
+    async function entryId(number) {
+      const rows = await asTenant(companyA, (tx) =>
+        tx.execute(sql`SELECT id FROM journal_entries WHERE entry_number = ${number}`),
+      );
+      return rows[0].id;
+    }
+
+    // The original used to become status 'reversed', which every report
+    // skips, so only the swapped copy counted: an expense of -1,000.
+    it("leaves nothing behind: the original and its reversal net to zero", async () => {
+      await postEntry({
+        number: "JE-1", date: "2026-08-05",
+        lines: [{ account: fuel, debit: "1000.0000" }, { account: cash, credit: "1000.0000" }],
+      });
+      const id = await entryId("JE-1");
+      await asTenant(companyA, (tx) => reverseJournalEntry(tx, id, "u1", "entered twice"));
+
+      const year = String(new Date().getFullYear());
+      const pl = await asTenant(companyA, (tx) =>
+        getProfitLoss(tx, "2026-01-01", `${year}-12-31`),
+      );
+      expect(pl.expenses.total).toBe(0);
+
+      const tb = await asTenant(companyA, (tx) =>
+        getTrialBalanceReport(tx, `${year}-12-31`),
+      );
+      expect(tb.summary.exact.totalDebits).toBe(tb.summary.exact.totalCredits);
+      for (const a of tb.accounts) {
+        expect(Number(a.debit ?? 0) - Number(a.credit ?? 0)).toBe(0);
+      }
+
+      const [original] = await asTenant(companyA, (tx) =>
+        tx.execute(sql`SELECT status::text, reversed_at, reversal_entry_id FROM journal_entries WHERE id = ${id}`),
+      );
+      expect(original.status).toBe("posted");
+      expect(original.reversed_at).not.toBeNull();
+      expect(original.reversal_entry_id).not.toBeNull();
+
+      // No closed period: the reversal shares the original's date, so August
+      // reads as if the mistake never happened.
+      const [rev] = await asTenant(companyA, (tx) =>
+        tx.execute(sql`SELECT entry_date::text AS d FROM journal_entries WHERE id = ${original.reversal_entry_id}`),
+      );
+      expect(rev.d).toBe("2026-08-05");
+    });
+
+    it("reverses an entry from a closed period, posting the reversal into an open one", async () => {
+      await postEntry({
+        number: "JE-1", date: "2026-01-15",
+        lines: [{ account: fuel, debit: "250.0000" }, { account: cash, credit: "250.0000" }],
+      });
+      await asTenant(companyA, (tx) =>
+        tx.execute(sql`
+          INSERT INTO fiscal_periods (id, company_id, year, month, period_name, period_code, start_date, end_date, status)
+          VALUES (${randomUUID()}, ${companyA}, 2026, 1, 'January 2026', '2026-01', '2026-01-01', '2026-01-31', 'closed')
+        `),
+      );
+      const id = await entryId("JE-1");
+
+      const reversal = await asTenant(companyA, (tx) =>
+        reverseJournalEntry(tx, id, "u1", "wrong account"),
+      );
+      // January is closed, so the correction lands today, not in January.
+      expect(reversal.entryDate).toBe(new Date().toISOString().slice(0, 10));
+    });
+
+    it("still refuses to post a new entry into a closed period", async () => {
+      await asTenant(companyA, (tx) =>
+        tx.execute(sql`
+          INSERT INTO fiscal_periods (id, company_id, year, month, period_name, period_code, start_date, end_date, status)
+          VALUES (${randomUUID()}, ${companyA}, 2026, 1, 'January 2026', '2026-01', '2026-01-01', '2026-01-31', 'closed')
+        `),
+      );
+      await expect(
+        postEntry({
+          number: "JE-9", date: "2026-01-20",
+          lines: [{ account: fuel, debit: "10.0000" }, { account: cash, credit: "10.0000" }],
+        }),
+      ).rejects.toThrow();
     });
   });
 

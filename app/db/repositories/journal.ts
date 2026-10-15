@@ -1,4 +1,4 @@
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, isNotNull, isNull, sql } from "drizzle-orm";
 import type { Tx } from "../client";
 import { journalEntries, journalLines, accounts } from "../schema";
 import { anyOf, likeContains } from "./sqlHelpers";
@@ -179,6 +179,8 @@ export async function reverseJournalEntry(
     .where(and(eq(journalEntries.id, entryId), eq(journalEntries.status, "posted")));
 
   if (!original) throw new Error("Can only reverse a posted journal entry");
+  // Reversed is a flag, not a status: the original stays posted so it and its
+  // reversal both count and net to zero (migration a_reversal_nets_to_zero).
   if (original.reversedAt) throw new Error("Journal entry is already reversed");
 
   const lines = await tx
@@ -191,14 +193,29 @@ export async function reverseJournalEntry(
     sql`SELECT next_entry_number(${original.companyId}::uuid, 'JE-REV') AS entry_number`,
   )) as unknown as Array<{ entry_number: string }>;
 
+  // Dated with the original while its period is still open, so a correction
+  // made before the period closes leaves that period's books as if the
+  // mistake never happened. Only a closed or locked period pushes the
+  // reversal into today. Always dating it today split every correction across
+  // two periods: the expense in February, its reversal in October.
   const today = new Date().toISOString().slice(0, 10);
+  const [period] = (await tx.execute(sql`
+    SELECT status::text AS status FROM fiscal_periods
+     WHERE company_id = ${original.companyId}::uuid
+       AND ${original.entryDate}::date BETWEEN start_date AND end_date
+     LIMIT 1
+  `)) as unknown as Array<{ status: string }>;
+  const reversalDate =
+    period && (period.status === "closed" || period.status === "locked")
+      ? today
+      : original.entryDate;
 
   const [reversal] = await tx
     .insert(journalEntries)
     .values({
       companyId: original.companyId,
       entryNumber: entry_number,
-      entryDate: today,
+      entryDate: reversalDate,
       entryType: "adjustment",
       description: `Reversal of ${original.entryNumber}: ${reason || "No reason provided"}`,
       partyType: original.partyType,
@@ -226,7 +243,6 @@ export async function reverseJournalEntry(
   await tx
     .update(journalEntries)
     .set({
-      status: "reversed",
       reversedAt: new Date(),
       reversedById,
       reversalEntryId: reversal.id,
@@ -284,6 +300,29 @@ export async function getJournalEntry(tx: Tx, entryId: string) {
   return { ...entry, lines };
 }
 
+/**
+ * What the journal screens call an entry's status. "Reversed" is the flag on a
+ * posted original, not a stored status — see reverseJournalEntry.
+ */
+const DISPLAY_STATUS_SQL = sql.raw(
+  `(CASE WHEN e.reversed_at IS NOT NULL THEN 'reversed' ELSE e.status::text END)`,
+);
+const displayStatus = sql<string>`(CASE WHEN ${journalEntries.reversedAt} IS NOT NULL THEN 'reversed' ELSE ${journalEntries.status}::text END)`;
+
+function statusFilter(status: string) {
+  if (status === "reversed") return isNotNull(journalEntries.reversedAt);
+  if (status === "posted") {
+    return and(eq(journalEntries.status, "posted"), isNull(journalEntries.reversedAt));
+  }
+  return eq(journalEntries.status, status as "draft" | "posted");
+}
+
+function statusFilterSql(status: string) {
+  if (status === "reversed") return sql`AND e.reversed_at IS NOT NULL`;
+  if (status === "posted") return sql`AND e.status = 'posted' AND e.reversed_at IS NULL`;
+  return sql`AND e.status = ${status}::journal_status`;
+}
+
 export async function listJournalEntries(
   tx: Tx,
   opts: { limit?: number; offset?: number; status?: "draft" | "posted" | "reversed" } = {},
@@ -291,7 +330,7 @@ export async function listJournalEntries(
   // Capped so a UI bug cannot ask for the whole ledger.
   const limit = Math.min(opts.limit ?? 50, 200);
 
-  const where = opts.status ? eq(journalEntries.status, opts.status) : undefined;
+  const where = opts.status ? statusFilter(opts.status) : undefined;
 
   return tx
     .select({
@@ -300,7 +339,7 @@ export async function listJournalEntries(
       entryDate: journalEntries.entryDate,
       entryType: journalEntries.entryType,
       description: journalEntries.description,
-      status: journalEntries.status,
+      status: displayStatus,
       total: sql<string>`(
         SELECT COALESCE(SUM(l.debit), 0)::numeric(19,4)
         FROM ${journalLines} l WHERE l.entry_id = ${journalEntries.id}
@@ -417,7 +456,7 @@ export async function listJournalTimeline(
            e.entry_type::text                           AS "entryType",
            e.description,
            e.reference,
-           e.status::text                               AS status,
+           ${DISPLAY_STATUS_SQL}                               AS status,
            e.posted_at                                  AS "postedAt",
            e.created_at                                 AS "createdAt",
            p.name                                       AS "partyName",
@@ -432,7 +471,7 @@ export async function listJournalTimeline(
       ) t ON true
      WHERE TRUE
        ${filters.status && filters.status !== "all"
-         ? sql`AND e.status = ${filters.status}::journal_status`
+         ? statusFilterSql(filters.status)
          : sql``}
        ${filters.entryType && filters.entryType !== "all"
          ? sql`AND e.entry_type = ${filters.entryType}::journal_entry_type`
@@ -526,7 +565,7 @@ export async function getJournalStats(tx: Tx) {
       )::int                                                       AS last_month_entries,
       COUNT(*) FILTER (WHERE e.status = 'draft')::int              AS draft_count,
       COUNT(*) FILTER (
-        WHERE e.status = 'reversed'
+        WHERE e.reversed_at IS NOT NULL
           AND e.reversed_at >= (SELECT this_start FROM period)
       )::int                                                       AS reversal_count,
       COALESCE((
@@ -572,7 +611,7 @@ export async function getJournalEntryDetail(tx: Tx, entryId: string) {
            e.description,
            e.reference,
            e.notes,
-           e.status::text                    AS status,
+           ${DISPLAY_STATUS_SQL}                    AS status,
            e.fiscal_year                     AS "fiscalYear",
            e.fiscal_month                    AS "fiscalMonth",
            e.posted_at                       AS "postedAt",

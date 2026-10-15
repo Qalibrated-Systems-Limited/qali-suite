@@ -611,6 +611,11 @@ export async function listAccountDebits(
       JOIN journal_entries je ON je.id = jl.entry_id
      WHERE jl.account_id = ${accountId}::uuid
        AND je.status = 'posted'
+       -- A reversal pair nets to zero in the GL, so neither half is a
+       -- movement: the reversal of a voided expense debits the float back,
+       -- and listed here it read as a top-up.
+       AND je.reversed_at IS NULL
+       AND je.original_entry_id IS NULL
        AND jl.debit > 0
        AND je.entry_date BETWEEN ${opts.from}::date AND ${opts.to}::date
      ORDER BY je.entry_date, je.entry_number

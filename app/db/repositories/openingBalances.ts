@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, ne, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import type { Tx } from "../client";
 import {
   accounts,
@@ -56,7 +56,7 @@ export async function getOpeningLumpEntry(tx: Tx) {
     .where(
       and(
         eq(journalEntries.entryType, "opening_balance"),
-        ne(journalEntries.status, "reversed"),
+        isNull(journalEntries.reversedAt),
         sql`${journalEntries.sourceType} IS NULL`,
       ),
     );

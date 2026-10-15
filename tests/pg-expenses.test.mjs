@@ -399,12 +399,12 @@ suite("expenses on postgres", () => {
         expensesRepo.voidExpense(tx, expense.id, { reason: "x", voidedById: userId }),
       );
 
-      // Marked `reversed`, not deleted, and its lines are untouched — the
+      // Flagged reversed, not deleted, and its lines are untouched — the
       // reversal is a second entry, so both sides of the correction are on
-      // the record.
+      // the record. The original stays posted so the two net to zero.
       const [orig] = await admin`
         SELECT status, reversed_at FROM journal_entries WHERE id = ${entry.id}`;
-      expect(orig.status).toBe("reversed");
+      expect(orig.status).toBe("posted");
       expect(orig.reversed_at).not.toBeNull();
 
       const [{ count }] = await admin`
