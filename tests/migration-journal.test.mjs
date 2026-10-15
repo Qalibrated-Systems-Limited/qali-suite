@@ -2,11 +2,13 @@
  * The migration journal holds together — asserted, because the failure it
  * prevents is silent.
  *
- * `app/db/migrate.mjs` decides what to apply with one comparison:
+ * `app/db/migrate.mjs` used to decide what to apply with one comparison, and
+ * drizzle's own `migrate()` and drizzle-kit still do:
  *
  *     if (lastAt !== undefined && migration.folderMillis <= lastAt) continue;
  *
- * So a migration whose `when` is less than or equal to one already applied is
+ * (Our runner now goes by recorded hash instead — see its header — but the
+ * journal still has to hold for every other runner.) So a migration whose `when` is less than or equal to one already applied is
  * SKIPPED, and the runner prints "✓ Migrations applied" and exits zero. There
  * is no error, no warning, and no way to tell from the output that a table was
  * never created.

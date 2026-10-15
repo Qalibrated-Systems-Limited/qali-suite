@@ -44,6 +44,27 @@
  * and `created_at` = the journal's `when`), so it is a drop-in: a database
  * migrated by the old helper is picked up mid-history without re-running, and a
  * later `drizzle-kit`/`migrate()` run recognises everything this applied.
+ *
+ * ── WHAT COUNTS AS APPLIED: THE HASH, NOT THE HIGH-WATER MARK ────────────────
+ *
+ * drizzle runs a migration only when its `when` is above the newest recorded
+ * `created_at`. That is correct for one linear history and wrong for two
+ * merged ones, and the 2026-10 merge of qsl/main proved it in both directions
+ * on a database migrated from the qsl side:
+ *
+ *   - the merge re-stamped qsl's 0117–0126 as 0123–0132 with higher `when`s,
+ *     so the high-water rule re-ran them and died on 0131's CREATE TABLE
+ *     "commission_tiers" ("relation already exists");
+ *   - our 0117–0122 (adjustment valuation, the RLS security_invoker views,
+ *     GR/IR, ...) sit BELOW that database's mark, so the same rule would have
+ *     skipped them for ever and printed "✓".
+ *
+ * Renaming or re-stamping never changes a migration's content, and the content
+ * hash is what drizzle records. So a migration is applied when its hash is
+ * recorded. One exception keeps an already-applied migration that was later
+ * EDITED from re-running: a recorded row at the migration's own `when` whose
+ * hash belongs to no file in the folder is taken to be that migration's older
+ * text. Neither case changes anything on a database with one linear history.
  */
 import { sql as drizzleSql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
@@ -92,15 +113,23 @@ try {
   try {
     const rows = await db.execute(
       drizzleSql.raw(
-        `SELECT id, hash, created_at FROM "${MIGRATIONS_SCHEMA}"."${MIGRATIONS_TABLE}" ORDER BY created_at DESC LIMIT 1`,
+        `SELECT hash, created_at FROM "${MIGRATIONS_SCHEMA}"."${MIGRATIONS_TABLE}"`,
       ),
     );
-    const last = rows[0];
-    const lastAt = last ? Number(last.created_at) : undefined;
+    const recordedHashes = new Set(rows.map((r) => r.hash));
+    const folderHashes = new Set(migrations.map((m) => m.hash));
+    // `when`s whose recorded hash matches no file: an applied migration that
+    // was edited afterwards. See the header.
+    const editedAt = new Set(
+      rows
+        .filter((r) => !folderHashes.has(r.hash))
+        .map((r) => Number(r.created_at)),
+    );
 
     let applied = 0;
     for (const migration of migrations) {
-      if (lastAt !== undefined && migration.folderMillis <= lastAt) continue;
+      if (recordedHashes.has(migration.hash)) continue;
+      if (editedAt.has(migration.folderMillis)) continue;
 
       // EACH MIGRATION IN ITS OWN TRANSACTION — the whole point of this runner.
       await db.transaction(async (tx) => {
@@ -127,7 +156,10 @@ try {
     );
   }
 } catch (err) {
+  // drizzle's error message is the failed SQL; the reason Postgres refused it
+  // ("relation ... already exists") is on `cause`, and was never printed.
   console.error("✗ Migration failed:", err.message);
+  if (err.cause) console.error("\nCause:", err.cause.message ?? err.cause);
   process.exitCode = 1;
 } finally {
   await client.end();

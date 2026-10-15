@@ -772,6 +772,26 @@ Sequential integers picked at authoring time are the common cause: two people
 on two branches inevitably choose the same next number, and the fix each of
 them applies locally is invisible to the other.
 
+### 2026-10 — the third time, and the runner stopped trusting `when`
+
+A database migrated on the **qsl/main side** of the September merge could not
+migrate at all. The merge re-stamped qsl's 0117–0126 as 0123–0132 above our
+0122, so `db:migrate` re-ran them and failed on 0131's `CREATE TABLE
+"commission_tiers"` (already exists). The error printed only the SQL. Under it,
+our 0117–0122 sat below that database's mark and would have been skipped
+silently: adjustment valuation, the `security_invoker` views (0118, the RLS
+fix), GR/IR, and the identity/GRN/supplier constraints.
+
+`app/db/migrate.mjs` now treats a migration as applied **when its content hash
+is recorded**. Renames and re-stamps don't change content, so both directions
+come out right. A recorded row at a migration's own `when` whose hash matches no
+file counts as that migration edited after it was applied, and is not re-run.
+On a single linear history nothing changes. The runner now prints Postgres's
+real error too (`err.cause`).
+
+The journal rules below still apply, because drizzle-kit and `migrate()` still
+use the high-water mark.
+
 ### So: timestamps for new migrations
 
 ```

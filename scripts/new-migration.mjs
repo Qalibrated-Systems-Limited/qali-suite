@@ -15,8 +15,8 @@
 //   …                              …
 //
 // The filenames collided, which is annoying and visible. The `when` values
-// collided too, which is neither — and `when` is the only thing the runner
-// actually reads:
+// collided too, which is neither — and `when` is the only thing drizzle's
+// runner reads (app/db/migrate.mjs now goes by recorded hash; see its header):
 //
 //     if (lastAt !== undefined && migration.folderMillis <= lastAt) continue;
 //
