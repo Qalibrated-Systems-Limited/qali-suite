@@ -3,6 +3,7 @@ import { anyOf, likeContains } from "./sqlHelpers";
 import type { Tx } from "../client";
 import { goodsReceipts, goodsReceiptLines } from "../schema/goodsReceipts";
 import { bills } from "../schema/bills";
+import { purchaseOrders } from "../schema/purchaseOrders";
 import { createJournalEntry } from "./journal";
 import { recordMovement } from "./stockMovements";
 import {
@@ -85,6 +86,46 @@ export async function createGoodsReceipt(
     throw new Error("A goods receipt needs at least one line.");
   }
 
+  // A receipt against an order or a bill is from THAT document's supplier.
+  // 0122 made the supplier mandatory on those receipts, but this took it
+  // only from the caller, so receiving against an order without restating
+  // the supplier failed the constraint. It now comes from the document, and
+  // a supplier that contradicts the document is refused.
+  let supplierId = input.supplierId ?? null;
+  let supplierName = input.supplierName ?? null;
+  const source =
+    input.sourceType === "purchase_order" && input.purchaseOrderId
+      ? (
+          await tx
+            .select({ id: purchaseOrders.supplierId, name: purchaseOrders.supplierName })
+            .from(purchaseOrders)
+            .where(eq(purchaseOrders.id, input.purchaseOrderId))
+        )[0]
+      : input.sourceType === "bill" && input.billId
+        ? (
+            await tx
+              .select({ id: bills.supplierId, name: bills.supplierNameAtBill })
+              .from(bills)
+              .where(eq(bills.id, input.billId))
+          )[0]
+        : null;
+  if (input.sourceType !== "unscheduled" && !source) {
+    throw new Error(
+      input.sourceType === "purchase_order"
+        ? "Purchase order not found."
+        : "Bill not found.",
+    );
+  }
+  if (source) {
+    if (supplierId && supplierId !== source.id) {
+      throw new Error(
+        `This receipt names a different supplier from its ${input.sourceType === "bill" ? "bill" : "purchase order"} (${source.name}).`,
+      );
+    }
+    supplierId = source.id;
+    supplierName = supplierName ?? source.name;
+  }
+
   const [{ grn_number }] = (await tx.execute(
     sql`SELECT next_entry_number(
       ${input.companyId}::uuid,
@@ -102,8 +143,8 @@ export async function createGoodsReceipt(
       billId: input.billId ?? null,
       proformaInvoiceNumber: input.proformaInvoiceNumber ?? null,
       packingListNumber: input.packingListNumber ?? null,
-      supplierId: input.supplierId ?? null,
-      supplierName: input.supplierName ?? null,
+      supplierId,
+      supplierName,
       receivedDate: input.receivedDate,
       receivedById: input.receivedById ?? null,
       receivedByName: input.receivedByName ?? null,

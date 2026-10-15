@@ -513,6 +513,52 @@ suite("procurement: purchase orders and goods receipts", () => {
       ).rejects.toThrow(/Close it short instead/i);
     });
 
+    // 0122 made the supplier mandatory on a receipt against an order, but
+    // createGoodsReceipt only took it from the caller, so receiving without
+    // restating it failed the constraint.
+    it("takes a receipt's supplier from its purchase order", async () => {
+      const po = await asTenant(companyA, (tx) => openOrder(tx));
+      const grn = await asTenant(companyA, async (tx) => {
+        const [line] = await tx.execute(sql`
+          SELECT id FROM purchase_order_lines WHERE purchase_order_id = ${po.id}::uuid`);
+        return grnRepo.createGoodsReceipt(tx, {
+          companyId: companyA, sourceType: "purchase_order", purchaseOrderId: po.id,
+          receivedDate: "2026-08-10", createdById: "storekeeper",
+          lines: [{
+            purchaseOrderLineId: line.id, productId: widget, productName: "Rebar 12mm",
+            description: "Rebar 12mm", expectedQuantity: "100.0000",
+            receivedQuantity: "10.0000", unitCost: "50.0000",
+          }],
+        });
+      });
+      expect(grn.supplierId).toBe(supplier);
+      expect(grn.supplierName).toBe("Steel Supplies Ltd");
+    });
+
+    it("refuses a receipt naming a different supplier from its order", async () => {
+      const po = await asTenant(companyA, (tx) => openOrder(tx));
+      const stranger = randomUUID();
+      await asTenant(companyA, (tx) =>
+        tx.execute(sql`
+          INSERT INTO parties (id, company_id, primary_type, is_supplier, name)
+          VALUES (${stranger}::uuid, ${companyA}::uuid, 'supplier', true, 'Someone Else Ltd')`));
+      await expect(
+        asTenant(companyA, async (tx) => {
+          const [line] = await tx.execute(sql`
+            SELECT id FROM purchase_order_lines WHERE purchase_order_id = ${po.id}::uuid`);
+          return grnRepo.createGoodsReceipt(tx, {
+            companyId: companyA, sourceType: "purchase_order", purchaseOrderId: po.id,
+            supplierId: stranger, receivedDate: "2026-08-10", createdById: "storekeeper",
+            lines: [{
+              purchaseOrderLineId: line.id, productId: widget, productName: "Rebar 12mm",
+              description: "Rebar 12mm", expectedQuantity: "100.0000",
+              receivedQuantity: "10.0000", unitCost: "50.0000",
+            }],
+          });
+        }),
+      ).rejects.toThrow(/different supplier/);
+    });
+
     it("closes an order short, with a reason", async () => {
       const po = await asTenant(companyA, (tx) => openOrder(tx));
       const closed = await asTenant(companyA, (tx) =>
