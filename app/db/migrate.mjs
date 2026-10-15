@@ -65,9 +65,17 @@
  * EDITED from re-running: a recorded row at the migration's own `when` whose
  * hash belongs to no file in the folder is taken to be that migration's older
  * text. Neither case changes anything on a database with one linear history.
+ *
+ * That exception only covers an edit that kept its `when`. Some migrations
+ * were edited AND re-stamped, so meta/hash-aliases.json lists every earlier
+ * version from git history (scripts/migration-hash-aliases.mjs writes it). A
+ * recorded alias counts as its migration applied. Where the old version's SQL
+ * differs from the current file, the runner says so: that database has the
+ * older schema, and no runner can tell which of the edits it is missing.
  */
 import { sql as drizzleSql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
+import { readFileSync } from "node:fs";
 import { readMigrationFiles } from "drizzle-orm/migrator";
 import postgres from "postgres";
 
@@ -118,6 +126,22 @@ try {
     );
     const recordedHashes = new Set(rows.map((r) => r.hash));
     const folderHashes = new Set(migrations.map((m) => m.hash));
+
+    // Earlier versions of edited migrations, by the hash they were recorded
+    // under. See the header.
+    const journal = JSON.parse(
+      readFileSync("./app/db/migrations/meta/_journal.json", "utf8"),
+    );
+    const aliases = JSON.parse(
+      readFileSync("./app/db/migrations/meta/hash-aliases.json", "utf8"),
+    );
+    const aliasedTags = new Map(); // tag -> [alias, ...] recorded here
+    for (const [hash, alias] of Object.entries(aliases)) {
+      if (!recordedHashes.has(hash)) continue;
+      aliasedTags.set(alias.tag, [...(aliasedTags.get(alias.tag) ?? []), alias]);
+      folderHashes.add(hash); // claimed, so not mistaken for an in-place edit
+    }
+
     // `when`s whose recorded hash matches no file: an applied migration that
     // was edited afterwards. See the header.
     const editedAt = new Set(
@@ -127,8 +151,19 @@ try {
     );
 
     let applied = 0;
-    for (const migration of migrations) {
+    for (const [i, migration] of migrations.entries()) {
       if (recordedHashes.has(migration.hash)) continue;
+      const tag = journal.entries[i].tag;
+      const olderVersions = aliasedTags.get(tag);
+      if (olderVersions) {
+        if (olderVersions.some((a) => a.sqlDiffers)) {
+          const commits = olderVersions.map((a) => a.commit).join(", ");
+          console.warn(
+            `! ${tag}: this database ran an earlier version (${commits}) whose SQL differs from the current file; its schema may lag. Not re-run.`,
+          );
+        }
+        continue;
+      }
       if (editedAt.has(migration.folderMillis)) continue;
 
       // EACH MIGRATION IN ITS OWN TRANSACTION — the whole point of this runner.

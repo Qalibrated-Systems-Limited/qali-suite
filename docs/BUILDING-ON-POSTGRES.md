@@ -789,6 +789,15 @@ file counts as that migration edited after it was applied, and is not re-run.
 On a single linear history nothing changes. The runner now prints Postgres's
 real error too (`err.cause`).
 
+That exception assumes the edit kept its `when`, and some didn't. Faith's branch
+ran `0095_an_invoice_remembers_who_sold_it` as `0097`, under another `when`,
+before a comment in it changed. So **`meta/hash-aliases.json` lists every
+earlier version of every migration in git history**, and the runner counts a
+recorded alias as that migration applied. Where the old version's SQL (not just
+its comments) differs from today's, it prints a `!` line naming the migration:
+that database has the older schema. **After editing an applied migration, run
+`node scripts/migration-hash-aliases.mjs` and commit the result.**
+
 The journal rules below still apply, because drizzle-kit and `migrate()` still
 use the high-water mark.
 
