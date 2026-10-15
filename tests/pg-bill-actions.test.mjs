@@ -98,6 +98,9 @@ suite("bill actions (end to end)", () => {
       INSERT INTO companies (id, name, slug)
       VALUES (${companyUuid}, 'Pilot', ${"p-" + companyUuid.slice(0, 8)})
     `;
+    // approveBill reads the company's settings (the three-way-match switch), and
+    // provisioning always writes the row, so a fixture company needs one too.
+    await admin`INSERT INTO company_settings (company_id) VALUES (${companyUuid})`;
     await admin`
       INSERT INTO _migration_id_map (collection, old_object_id, new_uuid)
       VALUES ('companies', ${mongoCompanyId}, ${companyUuid})
