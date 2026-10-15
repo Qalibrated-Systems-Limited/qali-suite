@@ -1,4 +1,4 @@
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import type { Tx } from "../client";
 import {
   taxTransactions,
@@ -278,6 +278,59 @@ export async function recordBillTaxes(
   }
 
   return raised;
+}
+
+/**
+ * Removes the tax a cancelled document raised, while it is still unfiled.
+ *
+ * A cancelled bill or voided expense never happened, so its VAT and WHT must
+ * not reach a return. Neither app did this: cancelling reversed the journal
+ * entry and left the tax record behind, so the cancelled bill's input VAT
+ * stayed on the VAT return (a live tenant's October 2026 return carried one).
+ *
+ * Unfiled records are deleted: nothing was submitted, and a record that
+ * should never have existed is not history worth keeping. A FILED record
+ * cannot change (tax_transactions_filing_transitions), and the correction for
+ * a filed purchase is a credit note in the current period, so the cancel is
+ * refused rather than leaving a return that no longer matches the books.
+ */
+export async function discardDocumentTaxes(
+  tx: Tx,
+  source: { type: "invoice" | "bill" | "journal_entry"; id: string },
+) {
+  const rows = await tx
+    .select({
+      id: taxTransactions.id,
+      number: taxTransactions.transactionNumber,
+      filed: taxTransactions.filed,
+      filingPeriod: taxTransactions.filingPeriod,
+    })
+    .from(taxTransactions)
+    .where(
+      and(
+        eq(taxTransactions.sourceDocumentType, source.type),
+        eq(taxTransactions.sourceDocumentId, source.id),
+      ),
+    );
+
+  const filed = rows.filter((r) => r.filed);
+  if (filed.length) {
+    throw new Error(
+      `Tax on this document was already filed (${filed
+        .map((r) => `${r.number}, ${r.filingPeriod}`)
+        .join("; ")}). Raise a credit note in the current period instead of cancelling.`,
+    );
+  }
+
+  if (rows.length) {
+    await tx.delete(taxTransactions).where(
+      inArray(
+        taxTransactions.id,
+        rows.map((r) => r.id),
+      ),
+    );
+  }
+  return rows.length;
 }
 
 export async function getTaxTransaction(tx: Tx, id: string) {

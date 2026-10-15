@@ -15,6 +15,7 @@ import {
   type JournalLineInput,
 } from "./journal";
 import { getSystemAccount } from "./accounts";
+import { discardDocumentTaxes, recordTaxTransaction } from "./taxTransactions";
 import { isUuid, likeContains } from "./sqlHelpers";
 
 /**
@@ -44,6 +45,10 @@ import { isUuid, likeContains } from "./sqlHelpers";
 export type MoneyString = string;
 
 const money = (v: unknown): MoneyString => String(v ?? "0");
+
+/** Exact to the fourth decimal, as numeric(19,4) is: 0.1 + 0.2 is 0.3000. */
+const addMoney = (a: MoneyString, b: MoneyString): MoneyString =>
+  (Math.round(Number(a) * 10000 + Number(b) * 10000) / 10000).toFixed(4);
 
 async function systemAccountOrThrow(tx: Tx, key: string, label: string) {
   const account = await getSystemAccount(tx, key);
@@ -134,8 +139,14 @@ export interface CreateExpenseInput {
 /**
  * Creates the expense AND its journal entry, in one transaction.
  *
- *   paid    DR Expense [/ DR VAT Input]  CR Cash|Bank|Mpesa
- *   unpaid  DR Expense [/ DR VAT Input]  CR Accrued Expenses
+ *   paid    DR Expense [/ DR VAT Input]  CR Cash|Bank|Mpesa [/ CR WHT Payable]
+ *   unpaid  DR Expense [/ DR VAT Input]  CR Accrued Expenses [/ CR WHT Payable]
+ *
+ * Withholding tax is a liability to KRA, not a discount on the cost. Both apps
+ * debited the expense with `amount - withholding` and recorded no WHT Payable,
+ * so the expense was understated and the WHT owed never reached the books. In
+ * the MongoDB app an expense with both VAT and WHT did not balance and failed
+ * to post at all.
  *
  * The VAT split is Mongo's, kept: when there is tax and a `vat_input` account
  * exists, the expense line is debited NET and the tax goes to VAT Input. When
@@ -261,14 +272,17 @@ export async function createAndPostExpense(tx: Tx, input: CreateExpenseInput) {
   const vatAccount =
     Number(taxAmount) > 0 ? await getSystemAccount(tx, "vat_input") : null;
 
+  const whtAccount =
+    Number(withholdingTax) > 0
+      ? await systemAccountOrThrow(tx, "wht_payable", "WHT Payable")
+      : null;
+
   const lines: JournalLineInput[] = [
     {
       accountId: account.id,
-      // Net of VAT when the input VAT is claimable, gross when it is not —
-      // Mongo's rule, and the reason the two branches differ.
-      debit: vatAccount
-        ? String(Number(amount) - Number(withholdingTax))
-        : totalValue,
+      // Net of VAT when the input VAT is claimable, gross when it is not.
+      // Never net of withholding: that is owed to KRA, not saved.
+      debit: vatAccount ? amount : addMoney(amount, taxAmount),
       description: input.description,
     },
   ];
@@ -288,6 +302,14 @@ export async function createAndPostExpense(tx: Tx, input: CreateExpenseInput) {
       ? `Payment for ${input.description}`
       : `Accrued — ${input.description}`,
   });
+
+  if (whtAccount) {
+    lines.push({
+      accountId: whtAccount.id,
+      credit: withholdingTax,
+      description: `WHT withheld — ${input.description}`,
+    });
+  }
 
   const entry = await createJournalEntry(tx, {
     companyId: input.companyId,
@@ -323,6 +345,56 @@ export async function createAndPostExpense(tx: Tx, input: CreateExpenseInput) {
     })
     .where(eq(expenses.id, row.id))
     .returning();
+
+  // The returns read tax records, not the GL, so an expense's VAT and WHT
+  // reached neither return. A record needs a party, and KRA allows input VAT
+  // only against a supplier PIN, so a payee who is not on file raises none.
+  if (input.payeePartyId && (input.payeeType ?? "supplier") === "supplier") {
+    const base = {
+      companyId: input.companyId,
+      transactionDate: input.expenseDate,
+      baseAmount: amount,
+      totalAmount: totalValue,
+      currency: input.currency ?? "KES",
+      partyId: input.payeePartyId,
+      partyType: "supplier" as const,
+      sourceDocumentType: "journal_entry" as const,
+      sourceDocumentId: entry.id,
+      sourceDocumentNumber: expenseNumber,
+      sourceDocumentDate: input.expenseDate,
+      journalEntryId: entry.id,
+      createdById: input.createdById ?? null,
+    };
+    if (vatAccount) {
+      const rate = input.taxRate ?? "16";
+      await recordTaxTransaction(tx, {
+        ...base,
+        transactionNumber: `VAT-IN-${expenseNumber}`,
+        taxType: "vat_input",
+        taxCode: `VAT-${rate}`,
+        taxRate: rate,
+        taxAmount,
+        accountId: vatAccount.id,
+        description: `VAT Input on expense — ${input.description}`,
+      });
+    }
+    if (whtAccount) {
+      const rate =
+        Number(amount) > 0
+          ? (Math.round((Number(withholdingTax) / Number(amount)) * 10000) / 100).toFixed(2)
+          : "0";
+      await recordTaxTransaction(tx, {
+        ...base,
+        transactionNumber: `WHT-${expenseNumber}`,
+        taxType: "wht",
+        taxCode: `WHT-${rate}`,
+        taxRate: rate,
+        taxAmount: withholdingTax,
+        accountId: whtAccount.id,
+        description: `WHT withheld on payment to ${input.payeeName}`,
+      });
+    }
+  }
 
   return { expense: posted, entry };
 }
@@ -447,6 +519,10 @@ export async function voidExpense(
   }
 
   const reason = opts.reason?.trim() || `Void of expense ${expense.expenseNumber}`;
+
+  // First, so an expense whose tax was already filed is refused before the
+  // books move. A voided expense's VAT and WHT must not stay on a return.
+  await discardDocumentTaxes(tx, { type: "journal_entry", id: expense.journalEntryId });
 
   const reversals = [];
   if (expense.clearingJournalEntryId) {

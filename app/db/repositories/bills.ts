@@ -4,7 +4,7 @@ import { bills, billLines, parties, accounts, products } from "../schema";
 import { createJournalEntry, reverseJournalEntry } from "./journal";
 import { receiveStock } from "./products";
 import { recordMovement } from "./stockMovements";
-import { recordBillTaxes } from "./taxTransactions";
+import { discardDocumentTaxes, recordBillTaxes } from "./taxTransactions";
 import { isUuid, likeContains, likePrefix } from "./sqlHelpers";
 
 /**
@@ -727,6 +727,10 @@ export async function cancelBill(
       `Cannot cancel bill ${bill.billNumber}: ${bill.amountPaid} has been paid against it`,
     );
   }
+
+  // First, so a bill whose VAT or WHT was already filed is refused before
+  // anything moves. A cancelled bill's tax must not stay on the return.
+  await discardDocumentTaxes(tx, { type: "bill", id: billId });
 
   if (bill.journalEntryId) {
     await reverseJournalEntry(

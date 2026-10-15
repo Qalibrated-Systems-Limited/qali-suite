@@ -613,6 +613,47 @@ suite("postgres bills", () => {
       expect(reversed_at).not.toBeNull();
     });
 
+    // Cancelling reversed the entry and left the tax record, so a cancelled
+    // bill's input VAT stayed on the VAT return.
+    it("takes a cancelled bill's unfiled VAT and WHT off the return", async () => {
+      const bill = await makeBill({ whtApplicable: true, whtRate: "5" });
+      await asTenant(companyA, async (tx) => {
+        await billRepo.submitBill(tx, bill.id, randomUUID());
+        await billRepo.approveBill(tx, bill.id, {
+          apAccountId: accounts.ap,
+          vatInputAccountId: accounts.vatInput,
+          whtPayableAccountId: accounts.whtPayable,
+          approvedById: randomUUID(),
+        });
+      });
+      const [{ n: before }] = await admin`SELECT count(*)::int AS n FROM tax_transactions WHERE source_document_id = ${bill.id}`;
+      expect(before).toBe(2);
+
+      await asTenant(companyA, (tx) => billRepo.cancelBill(tx, bill.id, randomUUID(), "Duplicate"));
+
+      const [{ n: after }] = await admin`SELECT count(*)::int AS n FROM tax_transactions WHERE source_document_id = ${bill.id}`;
+      expect(after).toBe(0);
+    });
+
+    it("refuses to cancel a bill whose VAT was already filed", async () => {
+      const bill = await makeBill();
+      await asTenant(companyA, async (tx) => {
+        await billRepo.submitBill(tx, bill.id, randomUUID());
+        await billRepo.approveBill(tx, bill.id, {
+          apAccountId: accounts.ap,
+          vatInputAccountId: accounts.vatInput,
+          approvedById: randomUUID(),
+        });
+      });
+      await admin`UPDATE tax_transactions SET filed = true, filed_at = now() WHERE source_document_id = ${bill.id}`;
+
+      await expect(
+        asTenant(companyA, (tx) => billRepo.cancelBill(tx, bill.id, randomUUID(), "Duplicate")),
+      ).rejects.toThrow(/already filed/);
+      const after = await asTenant(companyA, (tx) => billRepo.getBill(tx, bill.id));
+      expect(after.status).toBe("approved");
+    });
+
     it("refuses to cancel a bill that has been paid", async () => {
       const bill = await makeBill();
       await asTenant(companyA, async (tx) => {

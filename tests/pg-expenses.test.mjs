@@ -165,11 +165,87 @@ suite("expenses on postgres", () => {
       expect(await accountNet(accruedAcct)).toBe(-1160);
     });
 
-    it("withholding tax reduces what is owed, not what is spent", async () => {
-      await create({ amount: "1000.0000", withholdingTax: "50.0000" });
+    describe("withholding tax", () => {
+      let whtAcct;
+      beforeEach(async () => {
+        whtAcct = randomUUID();
+        await asTenant(companyA, (tx) =>
+          tx.execute(sql`
+            INSERT INTO accounts (id, company_id, account_code, account_name, account_type, can_post, system_account)
+            VALUES (${whtAcct}::uuid, ${companyA}::uuid, '2140', 'WHT Payable', 'liability', true, 'wht_payable')`),
+        );
+      });
 
-      expect(await accountNet(expenseAcct)).toBe(950);
-      expect(await accountNet(accruedAcct)).toBe(-950);
+      // Both apps debited the expense with amount - WHT and recorded no
+      // liability: the cost was understated and the WHT owed to KRA was
+      // never on the books.
+      it("reduces what is owed to the payee, not what is spent", async () => {
+        await create({ amount: "1000.0000", withholdingTax: "50.0000" });
+
+        expect(await accountNet(expenseAcct)).toBe(1000);
+        expect(await accountNet(accruedAcct)).toBe(-950);
+        expect(await accountNet(whtAcct)).toBe(-50);
+      });
+
+      // In the MongoDB app this combination did not balance and the expense
+      // was left as a draft, never reaching the books.
+      it("posts an expense carrying both VAT and WHT, and raises both tax records", async () => {
+        await asTenant(companyA, (tx) =>
+          tx.execute(sql`
+            INSERT INTO accounts (id, company_id, account_code, account_name, account_type, can_post, system_account)
+            VALUES (${vatAcct}::uuid, ${companyA}::uuid, '1300', 'VAT Input', 'asset', true, 'vat_input')`),
+        );
+        const { expense } = await create({
+          amount: "12593.7700", taxAmount: "2015.0000", taxRate: "16.00", withholdingTax: "251.8800",
+        });
+
+        expect(expense.status).toBe("posted");
+        expect(await accountNet(expenseAcct)).toBe(12593.77);
+        expect(await accountNet(vatAcct)).toBe(2015);
+        expect(await accountNet(accruedAcct)).toBe(-14356.89);
+        expect(await accountNet(whtAcct)).toBe(-251.88);
+
+        const taxes = await admin`
+          SELECT tax_type::text, tax_amount::float8 AS amt, source_document_type::text AS src
+            FROM tax_transactions WHERE company_id = ${companyA} ORDER BY tax_type`;
+        expect(taxes).toEqual([
+          { tax_type: "vat_input", amt: 2015, src: "journal_entry" },
+          { tax_type: "wht", amt: 251.88, src: "journal_entry" },
+        ]);
+      });
+
+      it("refuses WHT when there is no WHT Payable account to owe it to", async () => {
+        await admin`UPDATE accounts SET system_account = NULL WHERE id = ${whtAcct}`;
+        await expect(
+          create({ amount: "1000.0000", withholdingTax: "50.0000" }),
+        ).rejects.toThrow(/WHT Payable/);
+      });
+
+      it("raises no tax record for a payee who is not on file", async () => {
+        await create({ amount: "1000.0000", withholdingTax: "50.0000", payeePartyId: null });
+        const [{ n }] = await admin`SELECT count(*)::int AS n FROM tax_transactions`;
+        expect(n).toBe(0);
+      });
+
+      it("a void takes the unfiled tax off the return", async () => {
+        const { expense } = await create({ amount: "1000.0000", withholdingTax: "50.0000" });
+        await asTenant(companyA, (tx) =>
+          expensesRepo.voidExpense(tx, expense.id, { reason: "x", voidedById: userId }),
+        );
+        const [{ n }] = await admin`SELECT count(*)::int AS n FROM tax_transactions`;
+        expect(n).toBe(0);
+        expect(await accountNet(whtAcct)).toBe(0);
+      });
+
+      it("refuses to void an expense whose tax was already filed", async () => {
+        const { expense } = await create({ amount: "1000.0000", withholdingTax: "50.0000" });
+        await admin`UPDATE tax_transactions SET filed = true, filed_at = now()`;
+        await expect(
+          asTenant(companyA, (tx) =>
+            expensesRepo.voidExpense(tx, expense.id, { reason: "x", voidedById: userId }),
+          ),
+        ).rejects.toThrow(/already filed/);
+      });
     });
 
     it("posts an expense whose payee is not on file", async () => {
