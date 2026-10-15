@@ -169,6 +169,31 @@ suite("backfill: documents on top of the ledger", () => {
     expect((await rejects()).length).toBe(3);
   });
 
+  // --company was compared as a string against an ObjectId, matched nothing,
+  // and fell through to migrating every company in the source.
+  it("migrates only the company it is asked for, and refuses an unknown one", async () => {
+    const { MongoClient, ObjectId } = await import("mongodb");
+    const client = new MongoClient(mongoUri);
+    await client.connect();
+    const other = new ObjectId();
+    await client.db().collection("companies").insertOne({ _id: other, name: "Someone Else", slug: "else" });
+    await client.db().collection("accounts").insertOne({
+      _id: new ObjectId(), companyId: other, accountCode: "1000", accountName: "Cash",
+      accountType: "asset", canPost: true, isActive: true, level: 0,
+    });
+    const [{ _id: target }] = await client.db().collection("companies").find({ slug: "haulage" }).toArray();
+    await client.close();
+
+    await admin`TRUNCATE companies, _migration_id_map, _migration_rejects, entry_counters CASCADE`;
+    await backfill({ mongoUri, databaseUrl: ADMIN_URL, onlyCompany: String(target) });
+    const names = (await admin`SELECT name FROM companies`).map((r) => r.name);
+    expect(names).toEqual(["Haulage Ltd"]);
+
+    await expect(
+      backfill({ mongoUri, databaseUrl: ADMIN_URL, onlyCompany: String(new ObjectId()) }),
+    ).rejects.toThrow(/matches no company/);
+  });
+
   it("reconciles the ledger exactly, and names what the MongoDB reports omitted", async () => {
     const lines = [];
     const { findings } = await reconcile({ mongoUri, databaseUrl: ADMIN_URL, log: (m) => lines.push(m) });

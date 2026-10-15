@@ -67,7 +67,7 @@
  * Steps 1-8 are implemented. See docs/POSTGRES-MIGRATION-PLAN.md §9B.
  */
 import postgres from "postgres";
-import { MongoClient } from "mongodb";
+import { MongoClient, ObjectId } from "mongodb";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
@@ -184,12 +184,21 @@ async function run({ mongo, sql, stats, onlyCompany, log }) {
   await mongo.connect();
   const db = mongo.db();
 
-  const companyFilter = onlyCompany ? { _id: { $oid: onlyCompany } } : {};
+  // --company names one tenant. It was matched as a string against an
+  // ObjectId _id, found nothing, and fell through to the fallback below,
+  // which migrated EVERY company: a rehearsal of one tenant moved all nine.
+  // An id that matches no company is now an error, never "all of them".
+  const onlyId = onlyCompany
+    ? (ObjectId.isValid(onlyCompany) ? new ObjectId(onlyCompany) : onlyCompany)
+    : null;
   const companies = await db
     .collection("companies")
-    .find(onlyCompany ? { _id: companyFilter._id.$oid } : {})
+    .find(onlyId ? { _id: onlyId } : {})
     .toArray()
     .catch(() => []);
+  if (onlyId && companies.length === 0) {
+    throw new Error(`--company ${onlyCompany} matches no company in the source`);
+  }
 
   // Fall back to deriving tenants from the accounts collection when there is
   // no companies collection (older single-tenant databases).
