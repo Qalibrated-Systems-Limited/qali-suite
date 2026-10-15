@@ -79,11 +79,28 @@ export async function reconcile({
       ? new ObjectId(company.old_object_id)
       : company.old_object_id;
 
+    // Posted AND reversed. The MongoDB app marked a reversed original
+    // 'reversed' and its reports skipped it while counting the swapped
+    // reversal, so a cancelled bill showed as a negative expense. Postgres
+    // keeps the original posted (a_reversal_nets_to_zero), so the target is
+    // the corrected ledger, in which each pair nets to zero. The entries this
+    // adds are listed, because they are exactly where the MongoDB reports and
+    // this reconciliation disagree.
     const entries = await db
       .collection("journalentries")
-      .find({ companyId: sourceCompanyId, status: "posted" })
+      .find({ companyId: sourceCompanyId, status: { $in: ["posted", "reversed"] } })
       .toArray()
       .catch(() => []);
+
+    const reversed = entries.filter((e) => e.status === "reversed");
+    if (reversed.length) {
+      log(`  ℹ ${reversed.length} reversed original(s) counted, which the MongoDB reports omitted:`);
+      for (const e of reversed) {
+        const total = (e.lines ?? []).reduce((n, l) => n + toScaled(l.debit), 0);
+        log(`      ${e.entryNumber}  ${fmt(total)}  ${String(e.description ?? "").slice(0, 60)}`);
+        findings.push({ company: company.name, kind: "mongo_report_omitted_reversed", entry: e.entryNumber });
+      }
+    }
 
     if (entries.length === 0) {
       log(
@@ -180,7 +197,14 @@ export async function reconcile({
     `;
     if (rejects.n > 0) {
       findings.push({ company: company.name, kind: "quarantined", count: rejects.n });
-      log(`  ⚠ ${rejects.n} document(s) were quarantined during backfill.`);
+      log(`  ⚠ ${rejects.n} row(s) in _migration_rejects, each to be explained before cutover:`);
+      // `variance:` rows were migrated and differ from the source; the rest
+      // were not migrated. Both need a person to accept them.
+      const byReason = await sql`
+        SELECT collection, reason, count(*)::int AS n
+          FROM _migration_rejects GROUP BY collection, reason ORDER BY collection, reason
+      `;
+      for (const r of byReason) log(`      ${String(r.n).padStart(4)}  ${r.collection} — ${r.reason}`);
       companyFailures++;
     }
 

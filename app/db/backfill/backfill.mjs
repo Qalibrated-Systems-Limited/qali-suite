@@ -71,6 +71,7 @@ import { MongoClient } from "mongodb";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
+import { backfillDocuments } from "./documents.mjs";
 
 // ── exact money helpers ──────────────────────────────────────────────────────
 /**
@@ -817,15 +818,23 @@ async function run({ mongo, sql, stats, onlyCompany, log }) {
               INSERT INTO journal_entries (
                 id, company_id, entry_number, entry_date, entry_type,
                 description, reference, notes, party_type, party_id, due_date,
-                status, posted_at, is_fully_paid, amount_paid, amount_outstanding
+                status, posted_at, reversed_at, reversed_by_id,
+                is_fully_paid, amount_paid, amount_outstanding
               ) VALUES (
                 ${id}, ${companyUuid}, ${e.entryNumber}, ${toDate(e.entryDate)},
                 ${e.entryType}, ${e.description}, ${e.reference ?? null},
                 ${e.notes ?? null},
                 ${partyType},
                 ${partyId},
-                ${toDate(e.dueDate)}, ${e.status ?? "draft"},
+                ${toDate(e.dueDate)},
+                -- Reversed is a flag on a POSTED original, not a status, so the
+                -- original and its reversal both count and net to zero. Mongo
+                -- marked it reversed and its reports dropped it, leaving only
+                -- the swapped copy: an inverted ledger, not a corrected one.
+                ${e.status === "reversed" ? "posted" : (e.status ?? "draft")},
                 ${e.postedAt ? new Date(e.postedAt) : null},
+                ${e.status === "reversed" ? new Date(e.reversedAt ?? e.updatedAt ?? Date.now()) : null},
+                ${e.status === "reversed" ? (e.reversedBy?.id ?? null) : null},
                 ${e.isFullyPaid ?? false},
                 ${toMoney(toScaled(e.amountPaid))},
                 ${toMoney(toScaled(e.amountOutstanding))}
@@ -1088,6 +1097,12 @@ async function run({ mongo, sql, stats, onlyCompany, log }) {
           });
         }
       }
+
+      // ── invoices, bills, payments, tax, expenses, HR ─────────────────────
+      await backfillDocuments({
+        db, tx, oldCompanyId, companyUuid, stats,
+        h: { mapId, reject, resolvePartyId, toScaled, toMoney, toDate },
+      });
     });
 
     log(`  ✓ company ${String(oldCompanyId)} migrated`);
