@@ -204,8 +204,10 @@ suite("postgres tax transactions", () => {
     });
 
     it("computes the effective VAT rate exactly, not to a whole number", async () => {
-      // 333.33 at 16% = 53.3328. Mongo rounds (53.3328/333.33)*100 to 16 with
-      // Math.round after a float division; the rate here keeps two places.
+      // 333.33 at 16% = 53.3328, which a bill line rounds to the cent (53.33)
+      // since bill_lines_are_in_cents, as the MongoDB app and its entries did.
+      // The effective rate is still computed, to two places, from the
+      // rounded VAT: 53.33 / 333.33 = 15.999..., which is 16.00.
       const { taxes } = await approvedBill({
         whtApplicable: false,
         whtRate: "0",
@@ -221,7 +223,7 @@ suite("postgres tax transactions", () => {
       });
       const vat = taxes.find((t) => t.taxType === "vat_input");
       expect(vat.baseAmount).toBe("333.3300");
-      expect(vat.taxAmount).toBe("53.3328");
+      expect(vat.taxAmount).toBe("53.3300");
       expect(vat.taxRate).toBe("16.00");
     });
 
