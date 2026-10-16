@@ -35,7 +35,7 @@ HEALTH_URL="http://localhost:3000/api/health"
 # the two fail for different reasons: localhost says the app came back, and
 # this says DNS, Caddy and the certificate are also doing their jobs. An app
 # that is healthy on :3000 and unreachable on the domain is still an outage.
-PUBLIC_HEALTH_URL="https://erp.qalisuite.com/api/health"
+PUBLIC_HEALTH_URL="https://qalisuite.com/api/health"
 PM2_NAME="qalisuite"
 BACKUP_DIR="/var/backups/qalisuite"
 

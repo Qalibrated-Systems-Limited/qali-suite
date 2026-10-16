@@ -24,7 +24,8 @@
 #   /var/www/qalisuite            a checkout from February running the MONGO
 #                                 app, with no DATABASE_URL in its .env. The
 #                                 live application is /opt/qalisuite.
-#   https://qalisuite.com         the site is erp.qalisuite.com.
+#   https://qalisuite.com         the site was erp.qalisuite.com; since
+#                                 2026-10-16 it is qalisuite.com again.
 #
 # Its own header already said the container path was broken and to use
 # deploy/deploy.sh. This makes that the actual behaviour rather than a comment.
@@ -33,7 +34,7 @@ set -euo pipefail
 
 SERVER="${QALISUITE_SERVER:-deploy@164.68.116.82}"
 APP_DIR="/opt/qalisuite"
-PUBLIC_HEALTH="https://erp.qalisuite.com/api/health"
+PUBLIC_HEALTH="https://qalisuite.com/api/health"
 
 echo "==> Deploying to $SERVER:$APP_DIR"
 echo ""
@@ -55,7 +56,7 @@ echo "==> Verifying the public endpoint..."
 if curl -fsS -m 20 "$PUBLIC_HEALTH" >/dev/null 2>&1; then
   echo "    $PUBLIC_HEALTH -> $(curl -fsS -m 20 "$PUBLIC_HEALTH")"
   echo ""
-  echo "    https://erp.qalisuite.com is up."
+  echo "    https://qalisuite.com is up."
 else
   echo "    WARNING: $PUBLIC_HEALTH did not answer." >&2
   echo "    The app passed its own health check on the server, so this is"      >&2
