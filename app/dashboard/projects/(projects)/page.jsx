@@ -12,6 +12,7 @@ import ProjectStats, {
   ProjectStatsSkeleton,
 } from "../components/ProjectStats";
 import ProjectListServerComp from "../components/ProjectListServerComp";
+import ProjectsOverview, { ProjectsOverviewSkeleton } from "../components/ProjectsOverview";
 import { ProjectListSkeleton } from "../components/ProjectListWithFilters";
 
 export const metadata = {
@@ -71,36 +72,36 @@ export default async function ProjectsPage({ searchParams }) {
 
   return (
     <div className="flex flex-col gap-4 p-4 sm:p-5 lg:p-6">
-      {/* Header */}
-      <div className="flex items-center justify-between gap-3">
-        <div className="space-y-1 sm:space-y-2 min-w-0">
-          <h1 className="text-xl sm:text-2xl font-semibold text-foreground">
-            Projects
-          </h1>
-          <p className="text-sm sm:text-base text-muted-foreground hidden sm:block">
-            Track project budgets, costs, and profitability
+      {/* Header. Starting a project is the module's first action, so it is
+          a full, labelled button at every width — on a phone it used to
+          shrink to a bare "+". */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0 space-y-1">
+          <h1 className="text-xl font-semibold text-foreground sm:text-2xl">Projects</h1>
+          <p className="text-sm text-muted-foreground">
+            What is happening across every project, and what is waiting on someone.
           </p>
         </div>
-        {/* New Project is the one primary action here. This page is the
-            projects register — list, search and paging — not a dashboard; the
-            portfolio analytics and cross-department shortcuts live on the one
-            overall dashboard (/dashboard), not duplicated per module. */}
-        <div className="shrink-0">
-          <Button asChild size="sm" className="bg-yellow-500 hover:bg-yellow-600 text-black font-semibold sm:size-default">
-            <Link href="/dashboard/projects/create">
-              <Plus className="h-4 w-4 sm:mr-2" />
-              <span className="hidden sm:inline">New Project</span>
-            </Link>
-          </Button>
-        </div>
+        <Button asChild size="lg" className="w-full bg-yellow-500 font-semibold text-black hover:bg-yellow-600 sm:w-auto">
+          <Link href="/dashboard/projects/create">
+            <Plus className="mr-2 h-5 w-5" />
+            Start a new project
+          </Link>
+        </Button>
       </div>
 
-      {/* A light figure strip for the register below — count, value, status
-          mix. Not a dashboard: the portfolio charts and analytics shortcuts
-          live on the one overall dashboard. */}
       <Suspense fallback={<ProjectStatsSkeleton />}>
         <ProjectStats />
       </Suspense>
+
+      {/* The overview is the module's first page: every section's pending
+          work and the latest movement, each a link into that section. */}
+      <Suspense fallback={<ProjectsOverviewSkeleton />}>
+        <ProjectsOverview />
+      </Suspense>
+
+      {/* The register — every project, searchable — below the overview. */}
+      <h2 id="all-projects" className="pt-2 text-base font-semibold text-foreground">All projects</h2>
 
       {/*
         SEARCH — the box that was never rendered.

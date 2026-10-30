@@ -51,6 +51,7 @@ import {
   Wallet,
   Ruler,
   Scale,
+  Plus,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -470,10 +471,22 @@ export const getNavigationGroups = (user) => {
     id: "projects",
     defaultOpen: false,
     hidden: !canSeeProjectsNav(user?.role) || !hasMod("projects"),
-    // No "Overview" item: the department's "Dashboard" link (prepended by the
-    // renderer) already points at /dashboard/projects via DEPARTMENTS.homeHref,
-    // so the portfolio home is one entry, not a Dashboard/Overview pair.
+    // Overview first: the department "Dashboard" link that used to lead here
+    // went with the IA cleanup, which left the module's own home with no
+    // entry at all. Starting a project sits right under it.
     items: [
+      {
+        icon: LayoutDashboard,
+        label: "Overview",
+        id: "projects-overview",
+        href: "/dashboard/projects",
+      },
+      {
+        icon: Plus,
+        label: "New project",
+        id: "projects-new",
+        href: "/dashboard/projects/create",
+      },
       {
         icon: Ruler,
         label: "Bill of Quantities",
