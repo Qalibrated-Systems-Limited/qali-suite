@@ -901,6 +901,15 @@ export const getNavigationGroups = (user) => {
         hidden: user?.role === "SuperAdmin",
       },
       {
+        icon: LogOut,
+        label: "Exits & Final Dues",
+        id: "hr-exits",
+        href: "/dashboard/hr/exits",
+        hidden:
+          user?.role === "SuperAdmin" ||
+          !(can(user?.role, "exit.manage") || can(user?.role, "exit.approve") || can(user?.role, "exit.pay")),
+      },
+      {
         icon: Users,
         label: "User Accounts",
         id: "hr-users",

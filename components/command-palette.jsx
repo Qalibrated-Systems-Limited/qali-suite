@@ -45,6 +45,7 @@ import {
   ShieldAlert,
   Archive,
   Tags,
+  LogOut,
 } from "lucide-react";
 import { useDebouncedCallback } from "use-debounce";
 import { globalSearch } from "@/app/db/actions/search-actions";
@@ -125,6 +126,7 @@ const PAGES = [
   { label: "Attendance", href: "/dashboard/hr/attendance", icon: Clock, category: "HR", aliases: ["clock-in", "timesheet"], module: "hr" },
   { label: "My Attendance", href: "/dashboard/hr/my-attendance", icon: Clock, category: "HR", module: "hr" },
   { label: "Loans", href: "/dashboard/hr/loans", icon: HandCoins, category: "HR", aliases: ["advance", "salary advance"], module: "hr" },
+  { label: "Exits & Final Dues", href: "/dashboard/hr/exits", icon: LogOut, category: "HR", aliases: ["termination", "resignation", "redundancy", "final dues", "clearance", "certificate of service", "offboarding"], module: "hr" },
 
   // ── Finance / Accounting ───────────────────────────
   { label: "Parties", href: "/dashboard/parties", icon: Briefcase, category: "Finance", aliases: ["contacts", "people", "customer supplier"] },
