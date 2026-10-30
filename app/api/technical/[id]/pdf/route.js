@@ -19,7 +19,7 @@ import { templateByCode } from "@/app/dashboard/technical/lib/templates";
 // theme.
 // ============================================
 
-export async function GET(_req, { params }) {
+export async function GET(req, { params }) {
   try {
     const session = await auth();
     if (!session?.user || !canSeeProjectsNav(session.user.role)) {
@@ -58,7 +58,9 @@ export async function GET(_req, { params }) {
       status: 200,
       headers: {
         "Content-Type": "application/pdf",
-        "Content-Disposition": `attachment; filename="${filename}"`,
+        // Inline so the in-app preview (and a browser tab) can show it;
+        // ?download=1 for the download button.
+        "Content-Disposition": `${new URL(req.url).searchParams.get("download") ? "attachment" : "inline"}; filename="${filename}"`,
       },
     });
   } catch (error) {

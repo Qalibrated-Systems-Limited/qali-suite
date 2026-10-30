@@ -148,18 +148,51 @@ interface Actor {
  * report quotes onto the row, so the report keeps saying what was true on the
  * day it was submitted. Resubmitting after a reopen refreshes the snapshot.
  */
+export interface SignoffAssignment {
+  reviewer: { id: string; name: string };
+  approver: { id: string; name: string };
+}
+
+/**
+ * draft → submitted, naming who signs it off.
+ *
+ * The supervisor cannot be the person submitting, and the approving manager
+ * cannot be the supervisor: two signatures from one pair of hands is one
+ * signature. Who may be named at all (the sign-off group) is the action's
+ * check, which knows the roles.
+ */
 export async function submitReport(
   tx: Tx,
   id: string,
   actor: Actor,
   snapshot: { progress: number | null; revenue: string | null; cost: string | null },
+  assignment: SignoffAssignment,
 ) {
+  const { reviewer, approver } = assignment;
+  if (!reviewer?.id || !approver?.id) {
+    throw new Error("Choose the supervisor and the approving manager.");
+  }
+  if (actor.id && reviewer.id === actor.id) {
+    throw new Error("You cannot be the supervisor of a report you submit.");
+  }
+  if (actor.id && approver.id === actor.id) {
+    throw new Error("You cannot approve a report you submit.");
+  }
+  if (reviewer.id === approver.id) {
+    throw new Error("The supervisor and the approving manager must be different people.");
+  }
+
   const [row] = await tx
     .update(workflowReports)
     .set({
       status: "submitted",
+      submittedById: actor.id,
       submittedByName: actor.name,
       submittedAt: new Date(),
+      assignedReviewerId: reviewer.id,
+      assignedReviewerName: reviewer.name,
+      assignedApproverId: approver.id,
+      assignedApproverName: approver.name,
       snapshotProgress: snapshot.progress,
       snapshotRevenue: snapshot.revenue,
       snapshotCost: snapshot.cost,
@@ -178,8 +211,23 @@ export async function submitReport(
   return row ?? null;
 }
 
-/** submitted → reviewed. */
+async function getRow(tx: Tx, id: string) {
+  if (!isUuid(id)) return null;
+  const [row] = await tx.select().from(workflowReports).where(eq(workflowReports.id, id));
+  return row ?? null;
+}
+
+/**
+ * submitted → reviewed, by the named supervisor. A report submitted before
+ * reviewers were named has none, and stays open to the sign-off group.
+ */
 export async function reviewReport(tx: Tx, id: string, actor: Actor) {
+  const current = await getRow(tx, id);
+  if (current?.assignedReviewerId && current.assignedReviewerId !== actor.id) {
+    throw new Error(
+      `This report is waiting for ${current.assignedReviewerName}'s sign-off. Reassign it if they are away.`,
+    );
+  }
   const [row] = await tx
     .update(workflowReports)
     .set({
@@ -194,8 +242,17 @@ export async function reviewReport(tx: Tx, id: string, actor: Actor) {
   return row ?? null;
 }
 
-/** reviewed → approved. */
+/** reviewed → approved, by the named manager — never the one who reviewed it. */
 export async function approveReport(tx: Tx, id: string, actor: Actor) {
+  const current = await getRow(tx, id);
+  if (current?.assignedApproverId && current.assignedApproverId !== actor.id) {
+    throw new Error(
+      `This report is waiting for ${current.assignedApproverName}'s approval. Reassign it if they are away.`,
+    );
+  }
+  if (current?.reviewedById && actor.id && current.reviewedById === actor.id) {
+    throw new Error("The supervisor who signed this report cannot also approve it.");
+  }
   const [row] = await tx
     .update(workflowReports)
     .set({
@@ -211,6 +268,58 @@ export async function approveReport(tx: Tx, id: string, actor: Actor) {
 }
 
 /**
+ * Hands the waiting step to somebody else — the supervisor while the report is
+ * submitted, the manager once it is reviewed. The same separation holds.
+ */
+export async function reassignSignoff(
+  tx: Tx,
+  id: string,
+  to: { id: string; name: string },
+) {
+  const current = await getRow(tx, id);
+  if (!current) throw new Error("Report not found");
+  if (current.status === "submitted") {
+    if (to.id === current.submittedById) throw new Error("The submitter cannot supervise their own report.");
+    if (to.id === current.assignedApproverId) {
+      throw new Error("The supervisor and the approving manager must be different people.");
+    }
+    const [row] = await tx
+      .update(workflowReports)
+      .set({ assignedReviewerId: to.id, assignedReviewerName: to.name, updatedAt: new Date() })
+      .where(eq(workflowReports.id, id))
+      .returning();
+    return { row, step: "supervisor" as const };
+  }
+  if (current.status === "reviewed") {
+    if (to.id === current.submittedById) throw new Error("The submitter cannot approve their own report.");
+    if (to.id === current.reviewedById) throw new Error("The supervisor who signed cannot also approve.");
+    const [row] = await tx
+      .update(workflowReports)
+      .set({ assignedApproverId: to.id, assignedApproverName: to.name, updatedAt: new Date() })
+      .where(eq(workflowReports.id, id))
+      .returning();
+    return { row, step: "manager" as const };
+  }
+  throw new Error("Only a report waiting for a sign-off can be reassigned.");
+}
+
+/** People in this company holding one of `roles` — who can be named to sign. */
+export async function listSignoffUsers(tx: Tx, roles: readonly string[]) {
+  const rows = (await tx.execute(sql`
+    SELECT u.id, u.name, COALESCE(a.role, u.role) AS role
+      FROM users u
+      LEFT JOIN user_company_access a
+             ON a.user_id = u.id
+            AND a.status = 'active'
+            AND a.company_id = NULLIF(current_setting('app.company_id', true), '')::uuid
+     WHERE COALESCE(u.status, 'active') NOT IN ('inactive', 'Inactive')
+       AND COALESCE(a.role, u.role) IN (${sql.join(roles.map((r) => sql`${r}`), sql`, `)})
+     ORDER BY u.name
+  `)) as unknown as Array<{ id: string; name: string; role: string }>;
+  return rows.map((r) => ({ id: String(r.id), name: String(r.name), role: String(r.role) }));
+}
+
+/**
  * Anything → draft. Clears every sign-off so the report starts its journey
  * again; the snapshot is left as-is until the next submit overwrites it.
  */
@@ -219,6 +328,11 @@ export async function reopenReport(tx: Tx, id: string, actor: Actor) {
     .update(workflowReports)
     .set({
       status: "draft",
+      // Named again at the next submission.
+      assignedReviewerId: null,
+      assignedReviewerName: null,
+      assignedApproverId: null,
+      assignedApproverName: null,
       reviewedById: null,
       reviewedByName: null,
       reviewedAt: null,

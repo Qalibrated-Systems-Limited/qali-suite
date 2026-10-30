@@ -91,8 +91,10 @@ const s = StyleSheet.create({
 
   // Checklist rows
   checkRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 4, borderBottomWidth: 0.5, borderBottomColor: colors.grayLight },
-  checkLabel: { fontSize: 9, color: colors.dark, flex: 1, paddingRight: 8 },
-  checkRemark: { fontSize: 8, color: colors.gray },
+  // No `flex: 1` here: inside the column that holds the label and its remark
+  // it collapses the label's height, and the remark printed on top of it.
+  checkLabel: { fontSize: 9, color: colors.dark },
+  checkRemark: { fontSize: 8, color: colors.gray, marginTop: 2 },
   statePill: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 8, color: colors.white, fontSize: 7, fontFamily: "Helvetica-Bold" },
   dash: { fontSize: 9, color: colors.gray },
 
@@ -110,8 +112,10 @@ const s = StyleSheet.create({
   barFill: { height: 7, backgroundColor: colors.primary, borderRadius: 6 },
 
   // Sign-off boxes
-  signoffRow: { flexDirection: "row", flexWrap: "wrap", gap: 10, marginTop: 14 },
-  signoffBox: { width: "47%", borderWidth: 1, borderColor: colors.grayLight, borderRadius: 4, padding: 10, minHeight: 58 },
+  // Two to a row, edge to edge with the content above: 49% + 49% and the 2%
+  // between them, rather than 47% boxes and a gap that left a ragged right edge.
+  signoffRow: { flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between", marginTop: 4 },
+  signoffBox: { width: "49%", borderWidth: 1, borderColor: colors.grayLight, borderRadius: 4, padding: 10, minHeight: 58, marginBottom: 8 },
   signoffLabel: { fontSize: 7, fontFamily: "Helvetica-Bold", color: colors.gray, textTransform: "uppercase", letterSpacing: 0.3, marginBottom: 4 },
   signoffName: { fontSize: 10, fontFamily: "Helvetica-Bold", color: colors.dark },
   signoffDate: { fontSize: 8, color: colors.gray, marginTop: 2 },
@@ -218,7 +222,7 @@ function SheetBody({ template, data }) {
                   <View key={ii} style={s.checkRow} wrap={false}>
                     <View style={{ flex: 1, paddingRight: 8 }}>
                       <Text style={s.checkLabel}>{it}</Text>
-                      {cur.remark ? <Text style={s.checkRemark}>↳ {cur.remark}</Text> : null}
+                      {cur.remark ? <Text style={s.checkRemark}>Note: {cur.remark}</Text> : null}
                     </View>
                     {cur.state ? (
                       <Text style={[s.statePill, { backgroundColor: col }]}>{byKey[cur.state] || cur.state}</Text>
@@ -315,7 +319,7 @@ function Narrative({ report }) {
   );
 }
 
-function SignoffBox({ label, name, when }) {
+function SignoffBox({ label, name, when, waiting }) {
   return (
     <View style={s.signoffBox}>
       <Text style={s.signoffLabel}>{label}</Text>
@@ -325,7 +329,7 @@ function SignoffBox({ label, name, when }) {
           <Text style={s.signoffDate}>{when ? formatDate(when) : ""}</Text>
         </>
       ) : (
-        <Text style={s.signoffPending}>Pending</Text>
+        <Text style={s.signoffPending}>{waiting ? `Awaiting ${waiting}` : "Pending"}</Text>
       )}
     </View>
   );
@@ -350,12 +354,14 @@ export function TechnicalReportPDF({ report, project, company = {}, template, sh
             ) : company?.logo?.url ? (
               <Image style={s.logo} src={company.logo.url} />
             ) : (
-              <Text style={s.infoTextBold}>{company?.name || "Qalibrated Systems Ltd"}</Text>
+              <Text style={[s.infoTextBold, { fontSize: 12 }]}>{company?.name || ""}</Text>
             )}
-            {/* Address may be a string or a structured object — flatten it. */}
+            {/* Address may be a string or a structured object — flatten it.
+                The name is printed here only under a logo; without one it is
+                the heading above, and printing it twice read as a typo. */}
             <Text style={s.companyDetails}>
-              {company?.name || "Qalibrated Systems Ltd"}
-              {formatAddress(company?.address) ? `\n${formatAddress(company.address)}` : ""}
+              {(company?.logo ? company?.name : "") || ""}
+              {formatAddress(company?.address) ? `${company?.logo ? "\n" : ""}${formatAddress(company.address)}` : ""}
               {company?.phone || company?.email ? `\n${[company.phone, company.email].filter(Boolean).join(" | ")}` : ""}
               {company?.taxPin ? `\nPIN: ${company.taxPin}` : ""}
             </Text>
@@ -422,13 +428,14 @@ export function TechnicalReportPDF({ report, project, company = {}, template, sh
         <View style={s.signoffRow}>
           <SignoffBox label="Created" name={report.createdByName} when={report.createdAt} />
           <SignoffBox label="Submitted" name={report.submittedByName} when={report.submittedAt} />
-          <SignoffBox label="Supervisor sign-off" name={report.reviewedByName} when={report.reviewedAt} />
-          <SignoffBox label="Manager approval" name={report.approvedByName} when={report.approvedAt} />
+          <SignoffBox label="Supervisor sign-off" name={report.reviewedByName} when={report.reviewedAt} waiting={report.assignedReviewerName} />
+          <SignoffBox label="Manager approval" name={report.approvedByName} when={report.approvedAt} waiting={report.assignedApproverName} />
         </View>
 
         {/* Footer */}
         <View style={s.footer} fixed>
-          <Text style={s.footerMotto}>{company.tagline || "Qalibrated Systems"}</Text>
+          {/* The company's own name — this was "Qalibrated Systems" on every tenant's report. */}
+          <Text style={s.footerMotto}>{company?.tagline || company?.name || ""}</Text>
           <Text
             style={s.footerText}
             render={({ pageNumber, totalPages }) => `${serial}  ·  Page ${pageNumber} of ${totalPages}`}

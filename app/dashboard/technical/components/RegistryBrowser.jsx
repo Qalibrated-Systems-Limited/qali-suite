@@ -147,7 +147,7 @@ export default function RegistryBrowser({ reports = [], projectId }) {
                     />
                     <a
                       className="tech-card-pdf"
-                      href={`/api/technical/${r.id}/pdf`}
+                      href={`/api/technical/${r.id}/pdf?download=1`}
                       target="_blank"
                       rel="noopener noreferrer"
                       title="Download PDF"

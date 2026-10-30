@@ -17,8 +17,11 @@ $DOMAIN {
 
     encode gzip zstd
 
+    # SAMEORIGIN, not DENY: the app shows its own PDFs (technical reports,
+    # certificates) in an in-page viewer, which is a frame of itself. Other
+    # sites still cannot frame it, which is what the header is for.
     header {
-        X-Frame-Options DENY
+        X-Frame-Options SAMEORIGIN
         X-Content-Type-Options nosniff
         Referrer-Policy strict-origin-when-cross-origin
     }

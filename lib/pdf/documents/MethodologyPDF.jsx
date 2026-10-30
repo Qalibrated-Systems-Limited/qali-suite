@@ -69,10 +69,10 @@ export function MethodologyPDF({ methodology, project, company, links = {} }) {
             ) : company?.logo?.url ? (
               <Image style={s.logo} src={company.logo.url} />
             ) : (
-              <Text style={s.planValue}>{company?.name || "Qalibrated Systems Ltd"}</Text>
+              <Text style={s.planValue}>{company?.name || ""}</Text>
             )}
             <Text style={s.companyDetails}>
-              {company?.name || "Qalibrated Systems Ltd"}
+              {company?.name || ""}
               {formatAddress(company?.address) ? `\n${formatAddress(company.address)}` : ""}
               {company?.phone || company?.email ? `\n${[company.phone, company.email].filter(Boolean).join(" | ")}` : ""}
             </Text>
@@ -122,7 +122,7 @@ export function MethodologyPDF({ methodology, project, company, links = {} }) {
         ))}
 
         <View style={s.footer} fixed>
-          <Text style={s.footerMotto}>{company?.tagline || "Qalibrated Systems"}</Text>
+          <Text style={s.footerMotto}>{company?.tagline || company?.name || ""}</Text>
           <Text
             style={s.footerText}
             render={({ pageNumber, totalPages }) => `Method Statement · Page ${pageNumber} of ${totalPages}`}

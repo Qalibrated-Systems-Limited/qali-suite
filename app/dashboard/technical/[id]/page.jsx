@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { auth } from "@/auth";
 import AccessDenied from "../../projects/components/AccessDenied";
 import TechnicalReportActions from "../components/TechnicalReportActions";
-import { getWorkflowReport } from "@/app/db/actions/workflow-report-actions";
+import { getWorkflowReport, listReportSignoffUsers } from "@/app/db/actions/workflow-report-actions";
 import { getProjectById } from "@/app/db/actions/project-actions";
 import { canSeeProjectsNav } from "@/lib/permissions";
 import {
@@ -15,6 +15,7 @@ import { ArrowLeft, ArrowUpRight, Check, Clock, Download } from "lucide-react";
 import { STATUS_CONFIG, sheetName, displaySerial, fmtDate, fmtMoney } from "../lib/meta";
 import { templateByCode } from "../lib/templates";
 import SheetDataView from "../components/SheetDataView";
+import PdfPreviewButton from "@/components/pdf/PdfPreviewButton";
 
 export const metadata = { title: "Report | Technical" };
 
@@ -30,7 +31,7 @@ function Section({ title, body }) {
   );
 }
 
-function TL({ done, label, who, when }) {
+function TL({ done, label, who, when, waiting }) {
   return (
     <div className="tech-timeline-row" style={{ marginBottom: 14 }}>
       <div className={`tech-timeline-dot ${done ? "done" : ""}`}>
@@ -39,7 +40,7 @@ function TL({ done, label, who, when }) {
       <div>
         <p style={{ fontSize: 13, fontWeight: 700, margin: 0, opacity: done ? 1 : 0.7 }}>{label}</p>
         <p className="tech-muted" style={{ fontSize: 11.5, margin: 0 }}>
-          {done ? `${who || "—"} · ${fmtDate(when)}` : "Pending"}
+          {done ? `${who || "—"} · ${fmtDate(when)}` : waiting ? `Awaiting ${waiting}` : "Pending"}
         </p>
       </div>
     </div>
@@ -59,6 +60,7 @@ export default async function ReportDetailPage({ params }) {
   const template = templateByCode(report.type);
   const canManage = hasRole(session.user, WORKFLOW_REPORT_WRITE_ROLES);
   const canSignOff = hasRole(session.user, WORKFLOW_REPORT_SIGNOFF_ROLES);
+  const signoffUsers = canManage || canSignOff ? await listReportSignoffUsers().catch(() => []) : [];
   const hasSnapshot =
     report.snapshotProgress != null || report.snapshotRevenue != null || report.snapshotCost != null;
 
@@ -77,12 +79,13 @@ export default async function ReportDetailPage({ params }) {
           {st.label}
         </span>
         <span className="tech-bar-spacer" />
-        <a
+        <PdfPreviewButton
           href={`/api/technical/${report._id}/pdf`}
-          className="tech-btn-gold"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
+          title={`${displaySerial(report.reportNumber)} — ${report.title}`}
+          className="tech-btn-ghost"
+          label="Preview PDF"
+        />
+        <a href={`/api/technical/${report._id}/pdf?download=1`} className="tech-btn-gold">
           <Download size={14} />
           Download PDF
         </a>
@@ -109,6 +112,8 @@ export default async function ReportDetailPage({ params }) {
           authorName={session.user?.name || ""}
           canManage={canManage}
           canSignOff={canSignOff}
+          currentUserId={session.user.id}
+          signoffUsers={signoffUsers}
         />
 
         <div className="tech-detail-grid" style={{ marginTop: 16 }}>
@@ -179,8 +184,8 @@ export default async function ReportDetailPage({ params }) {
               <h3 style={{ fontSize: 13, fontWeight: 800, margin: "0 0 12px" }}>Review trail</h3>
               <TL done label="Created" who={report.createdByName} when={report.createdAt} />
               <TL done={Boolean(report.submittedAt)} label="Submitted" who={report.submittedByName} when={report.submittedAt} />
-              <TL done={Boolean(report.reviewedAt)} label="Supervisor sign-off" who={report.reviewedByName} when={report.reviewedAt} />
-              <TL done={Boolean(report.approvedAt)} label="Manager approval" who={report.approvedByName} when={report.approvedAt} />
+              <TL done={Boolean(report.reviewedAt)} label="Supervisor sign-off" who={report.reviewedByName} when={report.reviewedAt} waiting={report.assignedReviewerName} />
+              <TL done={Boolean(report.approvedAt)} label="Manager approval" who={report.approvedByName} when={report.approvedAt} waiting={report.assignedApproverName} />
             </div>
           </div>
         </div>

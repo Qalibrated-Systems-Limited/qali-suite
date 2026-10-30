@@ -9,6 +9,7 @@ import {
   WORKFLOW_REPORT_SIGNOFF_ROLES,
 } from "@/lib/utils/role-gates";
 import * as repo from "../repositories/workflowReports";
+import * as notifications from "../repositories/notifications";
 import {
   getProjectProgress,
   getProjectFinancialSummary,
@@ -226,7 +227,44 @@ export async function updateWorkflowReport(
  * the write, so a project with no figures yet simply snapshots nulls rather
  * than failing the submission.
  */
-export async function submitWorkflowReport(id: string, projectId: string) {
+const SIGNOFF = WORKFLOW_REPORT_SIGNOFF_ROLES as unknown as string[];
+
+/** Who can be named to sign a report off: the sign-off group in this company. */
+export async function listReportSignoffUsers() {
+  return withAuthorizedTenant([], (tx) => repo.listSignoffUsers(tx, SIGNOFF));
+}
+
+/** Tell the person a report is now waiting for. */
+async function notifySignoff(
+  tx: Parameters<Parameters<typeof withAuthorizedTenant>[1]>[0],
+  companyId: string,
+  row: { id: string; reportNumber: string; title: string },
+  to: { id: string | null; name?: string | null },
+  step: "supervisor" | "manager",
+) {
+  if (!to.id) return;
+  await notifications.createMany(tx, [
+    {
+      companyId,
+      userId: to.id,
+      type: "approval_request",
+      title: `${row.reportNumber} needs your ${step === "supervisor" ? "supervisor sign-off" : "approval"}`,
+      body: row.title,
+      href: `/dashboard/technical/${row.id}`,
+    },
+  ]);
+}
+
+/**
+ * Submits a draft, naming the supervisor and the approving manager. Both must
+ * hold sign-off authority in this company; the repository refuses the
+ * combinations that would let one person sign twice.
+ */
+export async function submitWorkflowReport(
+  id: string,
+  projectId: string,
+  assignment: { reviewerId: string; approverId: string },
+) {
   try {
     const [progress, financials] = await Promise.all([
       getProjectProgress(projectId).catch(() => null),
@@ -242,14 +280,27 @@ export async function submitWorkflowReport(id: string, projectId: string) {
 
     const row = await withAuthorizedTenant(
       WORKFLOW_REPORT_WRITE_ROLES as unknown as string[],
-      async (tx, { user }) => {
-        const updated = await repo.submitReport(tx, id, actorFrom(user), snapshot);
+      async (tx, { user, companyId }) => {
+        const eligible = await repo.listSignoffUsers(tx, SIGNOFF);
+        const reviewer = eligible.find((u) => u.id === assignment?.reviewerId);
+        const approver = eligible.find((u) => u.id === assignment?.approverId);
+        if (!reviewer || !approver) {
+          throw new Error("Choose a supervisor and an approving manager from the sign-off group.");
+        }
+        const updated = await repo.submitReport(tx, id, actorFrom(user), snapshot, {
+          reviewer: { id: reviewer.id, name: reviewer.name },
+          approver: { id: approver.id, name: approver.name },
+        });
         if (!updated) throw new Error("Only a draft report can be submitted.");
+        await notifySignoff(tx, companyId, updated, reviewer, "supervisor");
         return updated;
       },
     );
     revalidateReports(projectId, id);
-    return { success: true, message: `${row.reportNumber} submitted for review` };
+    return {
+      success: true,
+      message: `${row.reportNumber} submitted — waiting for ${row.assignedReviewerName}'s sign-off`,
+    };
   } catch (error) {
     return { success: false, error: userMessage(error) };
   }
@@ -257,16 +308,25 @@ export async function submitWorkflowReport(id: string, projectId: string) {
 
 export async function reviewWorkflowReport(id: string, projectId: string) {
   try {
-    const row = await withAuthorizedTenant(
-      WORKFLOW_REPORT_SIGNOFF_ROLES as unknown as string[],
-      async (tx, { user }) => {
-        const updated = await repo.reviewReport(tx, id, actorFrom(user));
-        if (!updated) throw new Error("Only a submitted report can be reviewed.");
-        return updated;
-      },
-    );
+    const row = await withAuthorizedTenant(SIGNOFF, async (tx, { user, companyId }) => {
+      const updated = await repo.reviewReport(tx, id, actorFrom(user));
+      if (!updated) throw new Error("Only a submitted report can be reviewed.");
+      await notifySignoff(
+        tx,
+        companyId,
+        updated,
+        { id: updated.assignedApproverId, name: updated.assignedApproverName },
+        "manager",
+      );
+      return updated;
+    });
     revalidateReports(projectId, id);
-    return { success: true, message: `${row.reportNumber} marked reviewed` };
+    return {
+      success: true,
+      message: row.assignedApproverName
+        ? `${row.reportNumber} signed off — now with ${row.assignedApproverName} for approval`
+        : `${row.reportNumber} marked reviewed`,
+    };
   } catch (error) {
     return { success: false, error: userMessage(error) };
   }
@@ -274,16 +334,31 @@ export async function reviewWorkflowReport(id: string, projectId: string) {
 
 export async function approveWorkflowReport(id: string, projectId: string) {
   try {
-    const row = await withAuthorizedTenant(
-      WORKFLOW_REPORT_SIGNOFF_ROLES as unknown as string[],
-      async (tx, { user }) => {
-        const updated = await repo.approveReport(tx, id, actorFrom(user));
-        if (!updated) throw new Error("Only a reviewed report can be approved.");
-        return updated;
-      },
-    );
+    const row = await withAuthorizedTenant(SIGNOFF, async (tx, { user }) => {
+      const updated = await repo.approveReport(tx, id, actorFrom(user));
+      if (!updated) throw new Error("Only a reviewed report can be approved.");
+      return updated;
+    });
     revalidateReports(projectId, id);
     return { success: true, message: `${row.reportNumber} approved` };
+  } catch (error) {
+    return { success: false, error: userMessage(error) };
+  }
+}
+
+/** Hands the waiting sign-off to someone else in the sign-off group. */
+export async function reassignWorkflowReport(id: string, projectId: string, userId: string) {
+  try {
+    const result = await withAuthorizedTenant(SIGNOFF, async (tx, { companyId }) => {
+      const eligible = await repo.listSignoffUsers(tx, SIGNOFF);
+      const to = eligible.find((u) => u.id === userId);
+      if (!to) throw new Error("Choose someone from the sign-off group.");
+      const done = await repo.reassignSignoff(tx, id, { id: to.id, name: to.name });
+      await notifySignoff(tx, companyId, done.row, to, done.step);
+      return { ...done, name: to.name };
+    });
+    revalidateReports(projectId, id);
+    return { success: true, message: `${result.row.reportNumber} reassigned to ${result.name}` };
   } catch (error) {
     return { success: false, error: userMessage(error) };
   }
