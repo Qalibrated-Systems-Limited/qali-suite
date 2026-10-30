@@ -49,6 +49,11 @@ export function SidebarClockWidget({ collapsed }) {
       setInitial("ready");
       setRecord(data.today?.record || null);
       setConfig(data.today || null);
+    }).catch(() => {
+      // The widget sits in the layout, so it also renders on the company
+      // chooser — where there is no company yet and the action refuses. There
+      // is nothing to clock into until one is chosen; show nothing.
+      setInitial("noProfile");
     });
   }, []);
 
