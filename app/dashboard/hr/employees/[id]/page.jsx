@@ -4,6 +4,7 @@ import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
 import {
   ChevronLeft, Edit, User, Briefcase, Calendar, Banknote, FileText, History,
+  LogOut, ScrollText,
 } from "lucide-react";
 import {
   getEmployeeForPage,
@@ -14,6 +15,7 @@ import { getEmployeePayslips as listPayslips } from "@/app/db/actions/hr-payroll
 import { HR_VIEW_ROLES, HR_COMPENSATION_ROLES, HR_ADMIN_ROLES } from "@/lib/utils/role-gates";
 import { roleAllowed } from "@/lib/permissions";
 import { EmployeeActions } from "../../components/EmployeeActions";
+import { getEmployeeExit } from "@/app/db/actions/hr-exit-actions";
 import EmployeePhotoUpload from "../../components/EmployeePhotoUpload";
 import EmployeeDocuments from "../../components/EmployeeDocuments";
 
@@ -352,6 +354,9 @@ export default async function EmployeeDetailPage({ params, searchParams }) {
   if (!data) notFound();
 
   const { employee, documents, events, salary } = data;
+  // The exit in progress or done, if any. Degrades to none for a role that
+  // cannot see exits.
+  const { exit: liveExit, canManage: canManageExits } = await getEmployeeExit(employee.id);
 
   /**
    * Only fetched when there is a decision to make.
@@ -423,6 +428,36 @@ export default async function EmployeeDetailPage({ params, searchParams }) {
                none, which is what hides the button. */
             unlinkedUsers={unlinkedUsers}
           />
+          {liveExit ? (
+            <Link
+              href={`/dashboard/hr/exits/${liveExit.id}`}
+              className="inline-flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm text-foreground hover:bg-accent hover:text-accent-foreground"
+            >
+              <LogOut className="h-4 w-4" />
+              <span className="hidden sm:inline">Exit {liveExit.exitNumber}</span>
+            </Link>
+          ) : (
+            canManageExits && (
+              <Link
+                href={`/dashboard/hr/exits/create?employeeId=${employee.id}`}
+                className="inline-flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm text-foreground hover:bg-accent hover:text-accent-foreground"
+              >
+                <LogOut className="h-4 w-4" />
+                <span className="hidden sm:inline">
+                  {employee.status === "terminated" ? "Settle final dues" : "Start exit"}
+                </span>
+              </Link>
+            )
+          )}
+          {employee.status === "terminated" && (
+            <a
+              href={`/api/hr/employees/${employee.id}/certificate-of-service`}
+              className="inline-flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm text-foreground hover:bg-accent hover:text-accent-foreground"
+            >
+              <ScrollText className="h-4 w-4" />
+              <span className="hidden sm:inline">Certificate of service</span>
+            </a>
+          )}
           {canSeePay && (
             <Link
               href={`/dashboard/hr/employees/${employee.id}/compensation`}

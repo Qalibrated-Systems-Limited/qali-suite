@@ -10,6 +10,7 @@ import {
   Banknote,
   LayoutDashboard,
   Clock,
+  LogOut,
 } from "lucide-react";
 
 const ADMIN_NAV = [
@@ -19,6 +20,7 @@ const ADMIN_NAV = [
   { label: "Leave", href: "/dashboard/hr/leave", icon: Calendar },
   { label: "Attendance", href: "/dashboard/hr/attendance", icon: Clock },
   { label: "Payroll", href: "/dashboard/hr/payroll", icon: Banknote },
+  { label: "Exits", href: "/dashboard/hr/exits", icon: LogOut, capability: "exit.manage" },
 ];
 
 const EMPLOYEE_NAV = [
@@ -30,7 +32,9 @@ const EMPLOYEE_NAV = [
 export default function HRNav({ role }) {
   const pathname = usePathname();
   const isAdmin = can(role, "hr.write");
-  const navItems = isAdmin ? ADMIN_NAV : EMPLOYEE_NAV;
+  const navItems = (isAdmin ? ADMIN_NAV : EMPLOYEE_NAV).filter(
+    (item) => !item.capability || can(role, item.capability),
+  );
 
   return (
     <nav className="sticky top-14 z-10 border-b border-border bg-card">

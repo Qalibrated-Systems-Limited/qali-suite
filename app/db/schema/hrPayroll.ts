@@ -375,6 +375,8 @@ export const loanInstallments = pgTable(
 
     status: text("status").notNull().default("pending"),
     payrollRunId: uuid("payroll_run_id"),
+    /** Set instead of payrollRunId when final dues recovered the instalment. */
+    exitId: uuid("exit_id"),
     paidAt: timestamp("paid_at", { withTimezone: true }),
 
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
