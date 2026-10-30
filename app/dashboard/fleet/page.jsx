@@ -2,7 +2,6 @@ import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import FleetBoard from "./FleetBoard";
 import { getFleetData } from "@/app/db/actions/fleet-actions";
-import { hasRole, FLEET_WRITE_ROLES } from "@/lib/utils/role-gates";
 
 export const metadata = {
   title: "Fleet | QaliSuite",
@@ -16,7 +15,6 @@ export default async function FleetPage() {
   if (!session?.user) redirect("/login");
 
   const data = await getFleetData();
-  const canManage = hasRole(session.user, FLEET_WRITE_ROLES);
 
   return (
     <div style={{ padding: "clamp(16px, 2.4vw, 26px)" }}>
@@ -26,7 +24,9 @@ export default async function FleetPage() {
         maintenance={data.maintenance}
         stats={data.stats}
         users={data.users}
-        canManage={canManage}
+        expenseAccounts={data.expenseAccounts}
+        assets={data.assets}
+        canManage={data.canManage}
       />
     </div>
   );

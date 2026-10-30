@@ -10,6 +10,7 @@ import {
   MoreHorizontal,
   Check,
   ChevronsUpDown,
+  Send,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -52,6 +53,7 @@ import {
 import {
   recordExpensePaymentPg,
   deleteExpensePg,
+  postDraftExpensePg,
   voidExpensePg,
 } from "@/app/db/actions/expense-actions";
 
@@ -89,6 +91,23 @@ export default function ExpenseActions({ expense, paymentAccounts = [] }) {
         setShowPayDialog(false);
         router.refresh();
       }
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handlePost = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await postDraftExpensePg(expense._id);
+      if (result?.success) {
+        router.refresh();
+        return;
+      }
+      setError(result?.error || "Failed to post");
     } catch (err) {
       setError(err.message);
     } finally {
@@ -147,14 +166,13 @@ export default function ExpenseActions({ expense, paymentAccounts = [] }) {
 
   // Which actions to show.
   //
-  // No "Post Now": the legacy statuses are gone, and the draft it also
-  // rescued cannot be stranded any more — create-and-post is one transaction.
+  // An expense entered here is created and posted in one transaction, so a
+  // draft only comes from elsewhere — a fleet trip's fuel or a vehicle's
+  // service, recorded by someone who does not post to the books. Finance posts
+  // it from here, or deletes it.
   const isUnpaid =
     expense.paymentStatus === "unpaid" && expense.status === "posted";
-  // Draft is the only deletable state, and nothing produces one — so this is
-  // effectively never true. It stays because the repository enforces the same
-  // rule, and a button that lies about what it will do is worse than one that
-  // never appears.
+  const canPost = expense.status === "draft";
   const canDelete = expense.status === "draft";
   const canVoid = expense.status !== "void" && !!expense.journalEntryId;
 
@@ -167,6 +185,13 @@ export default function ExpenseActions({ expense, paymentAccounts = [] }) {
       )}
 
       <div className="flex items-center gap-2">
+        {canPost && (
+          <Button size="sm" onClick={handlePost} disabled={loading}>
+            <Send className="w-4 h-4 mr-2" />
+            Post to the books
+          </Button>
+        )}
+
         {/* Record Payment — only for unpaid posted expenses */}
         {isUnpaid && (
           <Button

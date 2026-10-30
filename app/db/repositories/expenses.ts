@@ -155,10 +155,16 @@ export interface CreateExpenseInput {
  * it would change what a company's P&L says without being asked to.
  */
 export async function createAndPostExpense(tx: Tx, input: CreateExpenseInput) {
+  const draft = await createExpenseDraft(tx, input);
+  return postExpense(tx, draft.id, input.createdById ?? null);
+}
+
+/** The expense account an expense debits: it must be a live, postable expense account. */
+async function expenseAccountOrThrow(tx: Tx, accountId: string) {
   const [account] = await tx
     .select()
     .from(accounts)
-    .where(eq(accounts.id, input.accountId));
+    .where(eq(accounts.id, accountId));
   if (!account) throw new Error("Expense account not found");
   if (account.accountType !== "expense") {
     throw new Error(
@@ -171,55 +177,36 @@ export async function createAndPostExpense(tx: Tx, input: CreateExpenseInput) {
   if (account.isActive === false) {
     throw new Error(`Account ${account.accountName} is inactive`);
   }
+  return account;
+}
 
+/**
+ * Writes the expense as a DRAFT — no journal entry, nothing in the books.
+ *
+ * `createAndPostExpense` calls this and posts in the same transaction, which
+ * is how every expense entered on the Expenses screen is made. A draft that
+ * is left as one is for a cost recorded by somebody who is not posting it —
+ * a fleet trip's fuel, a vehicle's service — for finance to check and post
+ * with `postExpense`.
+ */
+export async function createExpenseDraft(tx: Tx, input: CreateExpenseInput) {
+  const account = await expenseAccountOrThrow(tx, input.accountId);
   const isPaid = Boolean(input.paidFromAccountId && input.paymentMethod);
-
-  // Only the id is needed downstream; holding the whole row would union two
-  // differently-shaped selects for no gain.
-  let creditAccountId: string;
-  if (isPaid) {
-    const [payFrom] = await tx
-      .select()
-      .from(accounts)
-      .where(eq(accounts.id, input.paidFromAccountId!));
-    if (!payFrom) throw new Error("Payment account not found");
-    if (payFrom.isActive === false) {
-      throw new Error(`Payment account ${payFrom.accountName} is inactive`);
-    }
-    if (!["cash", "bank", "mpesa"].includes(payFrom.subType ?? "")) {
-      throw new Error(
-        `Invalid payment account type. Must be cash, bank, or mpesa. Got: ${payFrom.subType}`,
-      );
-    }
-    creditAccountId = payFrom.id;
-  } else {
-    const accrued = await systemAccountOrThrow(
-      tx,
-      "accrued_expenses",
-      "Accrued Expenses",
-    );
-    creditAccountId = accrued.id;
-  }
-
-  const amount = money(input.amount);
-  const taxAmount = money(input.taxAmount ?? "0");
-  const withholdingTax = money(input.withholdingTax ?? "0");
-  const expenseNumber = await nextExpenseNumber(tx, input.companyId);
 
   const [row] = await tx
     .insert(expenses)
     .values({
       companyId: input.companyId,
-      expenseNumber,
+      expenseNumber: await nextExpenseNumber(tx, input.companyId),
       expenseDate: input.expenseDate,
       category: input.category,
       accountId: account.id,
       accountCodeAtExpense: account.accountCode,
       accountNameAtExpense: account.accountName,
-      amount,
-      taxAmount,
+      amount: money(input.amount),
+      taxAmount: money(input.taxAmount ?? "0"),
       taxRate: money(input.taxRate ?? "0"),
-      withholdingTax,
+      withholdingTax: money(input.withholdingTax ?? "0"),
       currency: input.currency ?? "KES",
       paymentMethod: isPaid ? input.paymentMethod! : null,
       paidFromAccountId: isPaid ? input.paidFromAccountId! : null,
@@ -245,9 +232,8 @@ export async function createAndPostExpense(tx: Tx, input: CreateExpenseInput) {
       isReimbursable: input.isReimbursable ?? false,
       employeePartyId: input.employeePartyId ?? null,
       employeeNameAtExpense: input.employeeName ?? null,
-      // 'draft' for one statement only: the entry is created below and the row
-      // updated to its real status inside the same transaction. The
-      // `expenses_posted_has_entry` check is what forces that ordering.
+      // The `expenses_posted_has_entry` check keeps a draft without an entry
+      // and a posted expense with one; `postExpense` moves it across.
       status: "draft",
       createdById: input.createdById ?? null,
     })
@@ -261,17 +247,76 @@ export async function createAndPostExpense(tx: Tx, input: CreateExpenseInput) {
       uploadedById: input.createdById ?? null,
     });
   }
+  return row;
+}
 
-  const totalRow = await tx
-    .select({ total: expenses.total })
-    .from(expenses)
-    .where(eq(expenses.id, row.id));
-  const totalValue = totalRow[0].total as string;
+/**
+ * Posts a draft expense: its journal entry, its status, its tax records.
+ *
+ *   paid    DR Expense [/ DR VAT Input]  CR Cash|Bank|Mpesa [/ CR WHT Payable]
+ *   unpaid  DR Expense [/ DR VAT Input]  CR Accrued Expenses [/ CR WHT Payable]
+ *
+ * Withholding tax is a liability to KRA, not a discount on the cost. Both apps
+ * debited the expense with `amount - withholding` and recorded no WHT Payable,
+ * so the expense was understated and the WHT owed never reached the books. In
+ * the MongoDB app an expense with both VAT and WHT did not balance and failed
+ * to post at all.
+ *
+ * The VAT split is Mongo's, kept: when there is tax and a `vat_input` account
+ * exists, the expense line is debited NET and the tax goes to VAT Input. When
+ * no such account exists, Mongo silently debits the GROSS to the expense
+ * account and claims no input VAT — the same behaviour here, because changing
+ * it would change what a company's P&L says without being asked to.
+ *
+ * Everything is read from the stored row, so a draft posts exactly as an
+ * expense entered and posted in one go would.
+ */
+export async function postExpense(tx: Tx, expenseId: string, postedById: string | null) {
+  const [row] = await tx.select().from(expenses).where(eq(expenses.id, expenseId));
+  if (!row) throw new Error("Expense not found");
+  if (row.status !== "draft") {
+    throw new Error(`Expense ${row.expenseNumber} is already ${row.status}.`);
+  }
+  // Re-checked: the account may have been deactivated since the draft.
+  await expenseAccountOrThrow(tx, row.accountId);
+
+  const isPaid = Boolean(row.paidFromAccountId && row.paymentMethod);
+
+  let creditAccountId: string;
+  if (isPaid) {
+    const [payFrom] = await tx
+      .select()
+      .from(accounts)
+      .where(eq(accounts.id, row.paidFromAccountId!));
+    if (!payFrom) throw new Error("Payment account not found");
+    if (payFrom.isActive === false) {
+      throw new Error(`Payment account ${payFrom.accountName} is inactive`);
+    }
+    if (!["cash", "bank", "mpesa"].includes(payFrom.subType ?? "")) {
+      throw new Error(
+        `Invalid payment account type. Must be cash, bank, or mpesa. Got: ${payFrom.subType}`,
+      );
+    }
+    creditAccountId = payFrom.id;
+  } else {
+    const accrued = await systemAccountOrThrow(
+      tx,
+      "accrued_expenses",
+      "Accrued Expenses",
+    );
+    creditAccountId = accrued.id;
+  }
+
+  const amount = money(row.amount);
+  const taxAmount = money(row.taxAmount);
+  const withholdingTax = money(row.withholdingTax);
+  const totalValue = row.total as string;
+  const description = row.description;
+  const payeeType = (row.payeeType ?? "supplier") as "supplier" | "employee";
 
   // ── Journal lines ────────────────────────────────────────────────────────
   const vatAccount =
     Number(taxAmount) > 0 ? await getSystemAccount(tx, "vat_input") : null;
-
   const whtAccount =
     Number(withholdingTax) > 0
       ? await systemAccountOrThrow(tx, "wht_payable", "WHT Payable")
@@ -279,57 +324,54 @@ export async function createAndPostExpense(tx: Tx, input: CreateExpenseInput) {
 
   const lines: JournalLineInput[] = [
     {
-      accountId: account.id,
+      accountId: row.accountId,
       // Net of VAT when the input VAT is claimable, gross when it is not.
       // Never net of withholding: that is owed to KRA, not saved.
       debit: vatAccount ? amount : addMoney(amount, taxAmount),
-      description: input.description,
+      description,
     },
   ];
-
   if (vatAccount) {
     lines.push({
       accountId: vatAccount.id,
       debit: taxAmount,
-      description: `VAT on expense — ${input.description}`,
+      description: `VAT on expense — ${description}`,
     });
   }
-
   lines.push({
     accountId: creditAccountId,
     credit: totalValue,
     description: isPaid
-      ? `Payment for ${input.description}`
-      : `Accrued — ${input.description}`,
+      ? `Payment for ${description}`
+      : `Accrued — ${description}`,
   });
-
   if (whtAccount) {
     lines.push({
       accountId: whtAccount.id,
       credit: withholdingTax,
-      description: `WHT withheld — ${input.description}`,
+      description: `WHT withheld — ${description}`,
     });
   }
 
   const entry = await createJournalEntry(tx, {
-    companyId: input.companyId,
-    entryDate: input.expenseDate,
+    companyId: row.companyId,
+    entryDate: row.expenseDate,
     entryType: "expense",
-    description: `Expense: ${input.description}`,
-    reference: input.reference ?? expenseNumber,
+    description: `Expense: ${description}`,
+    reference: row.reference ?? row.expenseNumber,
     // Both or neither — `journal_entries_party_pair`. The payee NAME is
     // required on an expense but the party is not (Mongo's `vendor.name` is
     // required, `vendor.id` is not), so a cash purchase from someone who is
     // not on file has a name and no party, and tagging the entry
     // 'supplier' with nothing to point at would fail the check.
-    partyType: input.payeePartyId ? (input.payeeType ?? "supplier") : null,
-    partyId: input.payeePartyId ?? null,
+    partyType: row.payeePartyId ? payeeType : null,
+    partyId: row.payeePartyId ?? null,
     sourceType: "expense",
     sourceId: row.id,
     projectId: row.projectId ?? null,
     costCodeId: row.costCodeId ?? null,
     lines,
-    createdById: input.createdById ?? null,
+    createdById: postedById,
     postImmediately: true,
   });
 
@@ -340,7 +382,7 @@ export async function createAndPostExpense(tx: Tx, input: CreateExpenseInput) {
       // "paid" = money already left the account; "posted" = accrual only.
       status: isPaid ? "paid" : "posted",
       postedAt: new Date(),
-      postedById: input.createdById ?? null,
+      postedById,
       updatedAt: new Date(),
     })
     .where(eq(expenses.id, row.id))
@@ -349,33 +391,33 @@ export async function createAndPostExpense(tx: Tx, input: CreateExpenseInput) {
   // The returns read tax records, not the GL, so an expense's VAT and WHT
   // reached neither return. A record needs a party, and KRA allows input VAT
   // only against a supplier PIN, so a payee who is not on file raises none.
-  if (input.payeePartyId && (input.payeeType ?? "supplier") === "supplier") {
+  if (row.payeePartyId && payeeType === "supplier") {
     const base = {
-      companyId: input.companyId,
-      transactionDate: input.expenseDate,
+      companyId: row.companyId,
+      transactionDate: row.expenseDate,
       baseAmount: amount,
       totalAmount: totalValue,
-      currency: input.currency ?? "KES",
-      partyId: input.payeePartyId,
+      currency: row.currency ?? "KES",
+      partyId: row.payeePartyId,
       partyType: "supplier" as const,
       sourceDocumentType: "journal_entry" as const,
       sourceDocumentId: entry.id,
-      sourceDocumentNumber: expenseNumber,
-      sourceDocumentDate: input.expenseDate,
+      sourceDocumentNumber: row.expenseNumber,
+      sourceDocumentDate: row.expenseDate,
       journalEntryId: entry.id,
-      createdById: input.createdById ?? null,
+      createdById: postedById,
     };
     if (vatAccount) {
-      const rate = input.taxRate ?? "16";
+      const rate = Number(row.taxRate) > 0 ? money(row.taxRate) : "16";
       await recordTaxTransaction(tx, {
         ...base,
-        transactionNumber: `VAT-IN-${expenseNumber}`,
+        transactionNumber: `VAT-IN-${row.expenseNumber}`,
         taxType: "vat_input",
         taxCode: `VAT-${rate}`,
         taxRate: rate,
         taxAmount,
         accountId: vatAccount.id,
-        description: `VAT Input on expense — ${input.description}`,
+        description: `VAT Input on expense — ${description}`,
       });
     }
     if (whtAccount) {
@@ -385,13 +427,13 @@ export async function createAndPostExpense(tx: Tx, input: CreateExpenseInput) {
           : "0";
       await recordTaxTransaction(tx, {
         ...base,
-        transactionNumber: `WHT-${expenseNumber}`,
+        transactionNumber: `WHT-${row.expenseNumber}`,
         taxType: "wht",
         taxCode: `WHT-${rate}`,
         taxRate: rate,
         taxAmount: withholdingTax,
         accountId: whtAccount.id,
-        description: `WHT withheld on payment to ${input.payeeName}`,
+        description: `WHT withheld on payment to ${row.payeeNameAtExpense}`,
       });
     }
   }
