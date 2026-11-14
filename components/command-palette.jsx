@@ -111,7 +111,10 @@ const PAGES = [
   { label: "Companies", href: "/dashboard/admin/companies", icon: Building2, category: "Admin", aliases: ["tenants"] },
   { label: "Company Settings", href: "/dashboard/company", icon: Building2, category: "Admin" },
   { label: "Integrations", href: "/dashboard/integrations", icon: Settings, category: "Admin", module: "integration" },
-  { label: "Settings", href: "/dashboard/settings", icon: Settings, category: "Admin" },
+  { label: "System Settings", href: "/dashboard/settings", icon: Settings, category: "Admin", aliases: ["settings", "configuration"] },
+  { label: "Roles & Permissions", href: "/dashboard/settings/roles", icon: ShieldCheck, category: "Admin", aliases: ["permissions", "access"] },
+  { label: "Finance Settings", href: "/dashboard/accounts/settings", icon: Settings, category: "Finance", aliases: ["account setup", "accounting settings"] },
+  { label: "HR Settings", href: "/dashboard/hr/settings", icon: Settings, category: "HR", module: "hr", aliases: ["payroll config", "public holidays", "attendance config", "paye rates"] },
 
   // ── HR ─────────────────────────────────────────────
   { label: "HR Overview", href: "/dashboard/hr", icon: Briefcase, category: "HR", module: "hr" },

@@ -8,7 +8,7 @@ import { HR_ADMIN_ROLES } from "@/lib/utils/role-gates";
 import { roleAllowed } from "@/lib/permissions";
 import HolidayClient from "./HolidayClient";
 
-export const metadata = { title: "Public Holidays | Settings" };
+export const metadata = { title: "Public Holidays | HR Settings" };
 
 async function HolidayLoader({ canEdit }) {
   const holidays = await listHolidaysForPage();
@@ -18,7 +18,7 @@ async function HolidayLoader({ canEdit }) {
 export default async function PublicHolidaysPage() {
   const session = await auth();
   if (!session?.user) redirect("/login");
-  if (!roleAllowed(session.user.role, HR_ADMIN_ROLES)) redirect("/dashboard/settings");
+  if (!roleAllowed(session.user.role, HR_ADMIN_ROLES)) redirect("/dashboard/hr");
 
   // Whoever may open this page may edit it. The source let HR see the calendar
   // and then told them to ask an Admin, while the ACTION has always accepted
@@ -28,8 +28,8 @@ export default async function PublicHolidaysPage() {
   return (
     <div className="space-y-6 p-4 sm:p-6 lg:p-8 max-w-3xl">
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
-        <Link href="/dashboard/settings" className="flex items-center gap-1 hover:text-foreground">
-          <ChevronLeft className="h-4 w-4" /> Settings
+        <Link href="/dashboard/hr/settings" className="flex items-center gap-1 hover:text-foreground">
+          <ChevronLeft className="h-4 w-4" /> HR Settings
         </Link>
         <span>/</span>
         <span className="text-foreground">Public Holidays</span>

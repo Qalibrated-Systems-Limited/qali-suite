@@ -200,7 +200,7 @@ export async function saveAttendancePolicy(
     return { success: false, error: userMessage(err, "Could not save the attendance policy.") };
   }
 
-  revalidatePath("/dashboard/settings/attendance-config");
+  revalidatePath("/dashboard/hr/settings/attendance-config");
   revalidatePath("/dashboard/hr/attendance");
   return { success: true, message: "Attendance policy saved." };
 }

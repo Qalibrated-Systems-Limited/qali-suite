@@ -11,6 +11,7 @@ import {
   LayoutDashboard,
   Clock,
   LogOut,
+  Settings,
 } from "lucide-react";
 
 const ADMIN_NAV = [
@@ -21,6 +22,7 @@ const ADMIN_NAV = [
   { label: "Attendance", href: "/dashboard/hr/attendance", icon: Clock },
   { label: "Payroll", href: "/dashboard/hr/payroll", icon: Banknote },
   { label: "Exits", href: "/dashboard/hr/exits", icon: LogOut, capability: "exit.manage" },
+  { label: "Settings", href: "/dashboard/hr/settings", icon: Settings, capability: "hr.admin" },
 ];
 
 const EMPLOYEE_NAV = [

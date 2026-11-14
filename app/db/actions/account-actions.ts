@@ -395,7 +395,7 @@ export async function syncChartOfAccountsPg(): Promise<
     );
 
     revalidatePath("/dashboard/accounts");
-    revalidatePath("/dashboard/settings");
+    revalidatePath("/dashboard/accounts/settings");
 
     const parts: string[] = [];
     if (result.created.length)
@@ -454,7 +454,7 @@ export async function ensureAdvanceAccountsExistPg(): Promise<
 
     revalidatePath("/dashboard/accounts");
     revalidatePath("/dashboard/banking");
-    revalidatePath("/dashboard/settings");
+    revalidatePath("/dashboard/accounts/settings");
 
     return {
       success: true,

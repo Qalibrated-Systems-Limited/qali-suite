@@ -61,8 +61,8 @@ import {
   canSeeReportsNav,
   canSeeProjectsNav,
   canSeeHRNav,
-  canSeeSettingsNav,
 } from "@/lib/permissions";
+import { can } from "@/lib/capabilities";
 
 // ============================================
 // MOBILE BOTTOM NAV
@@ -254,11 +254,11 @@ const MORE_GROUPS: NavGroup[] = [
   },
   {
     label: "Admin",
-    visible: (r) => canSeeSettingsNav(r),
+    visible: (r) => can(r, "system.settings"),
     items: [
       { label: "Users", href: "/dashboard/users", icon: Users },
       { label: "Company", href: "/dashboard/company", icon: Building2 },
-      { label: "Settings", href: "/dashboard/settings", icon: Settings },
+      { label: "System Settings", href: "/dashboard/settings", icon: Settings },
       { label: "Integrations", href: "/dashboard/integrations", icon: Plug },
     ],
   },

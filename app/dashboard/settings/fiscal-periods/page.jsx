@@ -409,7 +409,7 @@ export default async function FiscalPeriodsPage() {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-4">
           <Button variant="ghost" size="icon" asChild>
-            <Link href="/dashboard/settings">
+            <Link href="/dashboard/accounts/settings">
               <ChevronLeft className="h-5 w-5" />
             </Link>
           </Button>

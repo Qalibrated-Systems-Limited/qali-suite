@@ -90,7 +90,7 @@ suite("payroll configuration", () => {
   /**
    * THE PAGE AND THE ACTIONS HAVE TO AGREE ABOUT WHO MAY DO WHAT.
    *
-   * app/dashboard/settings/payroll-config/page.jsx admits HR Manager and sets
+   * app/dashboard/hr/settings/payroll-config/page.jsx admits HR Manager and sets
    * `canEdit = true`, over a comment saying the previous version "showed the
    * page to HR and then disabled every control, while the actions accepted
    * them". It had drifted into the mirror image: the action list never gained

@@ -423,7 +423,7 @@ export async function savePayrollRates(
     return { success: false, error: userMessage(err, "Could not save the payroll rates.") };
   }
 
-  revalidatePath("/dashboard/settings/payroll-config");
+  revalidatePath("/dashboard/hr/settings/payroll-config");
   return { success: true, message: "Payroll rates saved." };
 }
 
@@ -455,7 +455,7 @@ export async function savePayrollGlMapping(
     return { success: false, error: userMessage(err, "Could not save the account mapping.") };
   }
 
-  revalidatePath("/dashboard/settings/payroll-config");
+  revalidatePath("/dashboard/hr/settings/payroll-config");
   return { success: true, message: "Account mapping saved." };
 }
 
@@ -513,7 +513,7 @@ export async function autoMapPayrollAccounts(configId: string) {
       },
     );
 
-    revalidatePath("/dashboard/settings/payroll-config");
+    revalidatePath("/dashboard/hr/settings/payroll-config");
     return {
       success: true as const,
       ...result,

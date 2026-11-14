@@ -168,7 +168,7 @@
 - ✅ **`app/models/payrollRun.js`** — `totalSHIF`, `totalHousingLevy`, `totalEmployerNSSF`, `totalEmployerAHL` in totals.
 - ✅ **`app/mongodb/actions/hr-payroll-actions.js`** — config-driven `calculatePAYE()`, `calculateNSSF()`, `calculateSHIF()`, `calculateAHL()`; `syncRunTotals()` helper; `generatePayrollEntries` errors if no active config found.
 - ✅ **`app/mongodb/actions/hr-settings-actions.js`** — `createPayrollConfig`, `activatePayrollConfig`.
-- ✅ **`app/dashboard/settings/payroll-config/page.jsx`** — Payroll Config UI in central Settings (not a separate HR settings page). Admin can create configs with dynamic PAYE bracket editor; HR can view. Pre-filled with Kenya defaults.
+- ✅ **`app/dashboard/hr/settings/payroll-config/page.jsx`** — Payroll Config UI in central Settings (not a separate HR settings page). Admin can create configs with dynamic PAYE bracket editor; HR can view. Pre-filled with Kenya defaults.
 
 ### 5C — Payroll Outputs ✅
 - ✅ **Payslip PDF** — `@react-pdf/renderer`; per-employee on demand via `GET /api/hr/payroll/[id]/payslip/[entryId]`. Includes company header, employee snapshot, earnings table, deductions table (PAYE/NSSF/SHIF/AHL), employer contributions, net pay, masked bank/M-Pesa details. Opens inline in browser (print to PDF).

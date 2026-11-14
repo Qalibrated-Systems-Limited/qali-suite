@@ -22,6 +22,15 @@ const nextConfig = {
       },
     ],
   },
+  // HR's settings moved from System Settings into the HR module. Old links and
+  // bookmarks still land on the page.
+  async redirects() {
+    return ["payroll-config", "public-holidays", "attendance-config"].map((page) => ({
+      source: `/dashboard/settings/${page}`,
+      destination: `/dashboard/hr/settings/${page}`,
+      permanent: true,
+    }));
+  },
 };
 
 module.exports = nextConfig;
