@@ -5,14 +5,21 @@ import AccessDenied from "../../projects/components/AccessDenied";
 import NoProjectsCard from "../../projects/components/NoProjectsCard";
 import ProjectSwitcher from "../../projects/components/ProjectSwitcher";
 import { hasRole, WORKFLOW_REPORT_WRITE_ROLES } from "@/lib/utils/role-gates";
-import { workCategories, resolveCategory, sheetsInCategory, CATEGORY_META } from "../lib/meta";
-import { ChevronLeft } from "lucide-react";
+import { sheetsByCategory, resolveCategory, CATEGORY_META } from "../lib/meta";
+import { SectionBar, COAL, GOLD, INK, WAIT } from "../components/ui";
 
 export const metadata = {
   title: "Choose the sheet | Technical",
-  description: "Pick a type of work, then the report sheet to start a new report",
+  description: "Pick the report sheet to start a new report",
 };
 
+/**
+ * "Choose the sheet", as the Workflow Reports app shows it: each sheet a card
+ * with a hazard-striped edge, its name in heavy capitals, the coal code chip,
+ * what it is for and who fills it. The app has eight sheets on one page; this
+ * module has them for every kind of project, so the same cards sit under a
+ * heading per kind of work, with the kinds as filter chips across the top.
+ */
 export default async function ChooseSheetPage({ searchParams }) {
   const sp = await searchParams;
   const ctx = await getWorkspaceContext(sp);
@@ -21,87 +28,78 @@ export default async function ChooseSheetPage({ searchParams }) {
   const { projects, project, user } = ctx;
   const canManage = hasRole(user, WORKFLOW_REPORT_WRITE_ROLES);
   const projectQ = project ? `&project=${project.id}` : "";
-  const projectHomeQ = project ? `?project=${project.id}` : "";
-
-  // Step 2 when a valid discipline is chosen via ?work=, else step 1 (cards).
-  const activeCategory = resolveCategory(sp?.work);
-  const sheets = activeCategory ? sheetsInCategory(activeCategory) : [];
+  const active = resolveCategory(sp?.work);
+  const groups = sheetsByCategory().filter((g) => !active || g.category === active);
+  const chipHref = (work) =>
+    `/dashboard/technical/new?${work ? `work=${encodeURIComponent(work)}` : ""}${projectQ}`.replace("?&", "?");
 
   return (
-    <>
-      <div className="tech-bar">
-        <span className="tech-bar-title">
-          {activeCategory ? activeCategory : "Start a new report"}
-          {project ? <span className="count">{project.name}</span> : null}
-        </span>
-        <span className="tech-bar-spacer" />
+    <div className="app-content">
+      <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", alignItems: "flex-end", gap: 8, marginTop: 12 }}>
+        <div>
+          <p className="eyebrow">Start a new report</p>
+          <h1 className="h1">Choose the sheet</h1>
+          <p className="muted" style={{ margin: "4px 0 0" }}>
+            Pick what you are doing today.
+          </p>
+        </div>
         <Suspense fallback={null}>
           <ProjectSwitcher projects={projects} selectedId={project?.id} />
         </Suspense>
       </div>
 
-      <div className="tech-wrap">
-        {!project && <NoProjectsCard />}
+      {!project && <NoProjectsCard />}
+      {project && !canManage && <AccessDenied />}
 
-        {project && !canManage && <AccessDenied />}
-
-        {/* STEP 1 — pick the type of work */}
-        {project && canManage && !activeCategory && (
-          <>
-            <p className="tech-section-label">Choose the type of work</p>
-            <p className="tech-lead">Pick the kind of job you are on — then choose the exact report.</p>
-            <div className="tech-work-cards">
-              {workCategories().map((c) => (
+      {project && canManage && (
+        <>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, margin: "12px 0 4px" }}>
+            {[null, ...sheetsByCategory().map((g) => g.category)].map((c) => {
+              const on = (c || null) === (active || null);
+              return (
                 <Link
-                  key={c.category}
-                  href={`/dashboard/technical/new?work=${encodeURIComponent(c.category)}${projectQ}`}
-                  className="tech-work-card"
+                  key={c || "all"}
+                  href={chipHref(c)}
+                  className="btn"
+                  style={on ? { background: COAL, color: GOLD, borderColor: COAL, fontSize: 12 } : { fontSize: 12 }}
                 >
-                  <span className="tech-work-icon" aria-hidden>{c.icon}</span>
-                  <span className="tech-work-body">
-                    <span className="tech-work-name">{c.category}</span>
-                    <span className="tech-work-blurb">{c.blurb}</span>
-                  </span>
-                  <span className="tech-work-count">
-                    {c.count} report{c.count === 1 ? "" : "s"}
-                  </span>
+                  {c ? `${CATEGORY_META[c]?.icon || ""} ${c}`.trim() : "All sheets"}
                 </Link>
-              ))}
-            </div>
-          </>
-        )}
+              );
+            })}
+          </div>
 
-        {/* STEP 2 — pick the sheet within the chosen work type */}
-        {project && canManage && activeCategory && (
-          <>
-            <Link href={`/dashboard/technical/new${projectHomeQ}`} className="tech-back-link">
-              <ChevronLeft size={15} strokeWidth={2.5} />
-              All types of work
-            </Link>
-            <p className="tech-section-label" style={{ marginTop: 10 }}>
-              <span style={{ marginRight: 8 }} aria-hidden>{CATEGORY_META[activeCategory]?.icon || "📄"}</span>
-              {activeCategory}
-            </p>
-            <p className="tech-lead">Pick the report that matches what you are doing today.</p>
-            <div className="tech-sheets">
-              {sheets.map((s) => (
-                <Link
-                  key={s.code}
-                  href={`/dashboard/technical/create?sheet=${s.code}${projectQ}`}
-                  className="tech-sheet"
-                >
-                  <div className="tech-sheet-head">
-                    <span className="tech-sheet-name">{s.name}</span>
-                    <span className="tech-sheet-code">{s.code}</span>
-                  </div>
-                  <p className="tech-sheet-blurb">{s.blurb}</p>
-                  <span className="tech-sheet-by">Filled by: {s.filledBy}</span>
-                </Link>
-              ))}
+          {groups.map((g) => (
+            <div key={g.category}>
+              <SectionBar>{g.category}</SectionBar>
+              <div className="grid md-2">
+                {g.sheets.map((t) => (
+                  <Link
+                    key={t.code}
+                    href={`/dashboard/technical/create?sheet=${t.code}${projectQ}`}
+                    className="card"
+                    style={{ textAlign: "left", display: "flex", padding: 0, textDecoration: "none" }}
+                  >
+                    <div style={{ width: 6, flexShrink: 0, backgroundImage: `repeating-linear-gradient(45deg, ${GOLD} 0 6px, ${COAL} 6px 12px)` }} />
+                    <div style={{ padding: 14, flex: 1 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
+                        <span style={{ fontWeight: 900, textTransform: "uppercase", fontSize: 14, color: INK }}>{t.name}</span>
+                        <span className="mono" style={{ fontSize: 11, color: GOLD, background: COAL, padding: "2px 6px" }}>
+                          {t.code}
+                        </span>
+                      </div>
+                      <div className="muted" style={{ marginTop: 4 }}>
+                        {t.blurb}
+                      </div>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: WAIT, marginTop: 4 }}>Filled by: {t.filledBy}</div>
+                    </div>
+                  </Link>
+                ))}
+              </div>
             </div>
-          </>
-        )}
-      </div>
-    </>
+          ))}
+        </>
+      )}
+    </div>
   );
 }

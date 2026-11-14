@@ -1,167 +1,135 @@
 // NOTE: no "use client" — this is rendered server-side inside the
-// /api/technical/[id]/pdf route via renderToBuffer, the same pattern as
-// GoodsReceiptPDF / PayslipDocument, so it must be a plain server module.
+// /api/technical/[id]/pdf route via renderToBuffer.
 import React from "react";
-import { Document, Page, Text, View, StyleSheet, Image } from "@react-pdf/renderer";
-import { formatDate, formatAddress } from "../utils";
+import { Document, Page, Text, View, StyleSheet, Svg, Path } from "@react-pdf/renderer";
+import { R, TopBar, RefinedHeader, TitlePill, RefinedFooter, VerifyQr, SectionHead, fmtEat } from "../refined";
 
 // ============================================
 // TECHNICAL REPORT PDF
 // ============================================
-// One printable QSL field-service / inspection report. Shares the house PDF
-// theme used by Invoice / GRN / Delivery Note: gold primary, dark text, a logo
-// header, a gold rule under the title, info cards, a state-coloured body and a
-// sign-off / review trail at the foot.
+// A port of the QSL Workflow Reports app's ReportDocument, so every sheet —
+// the original weighbridge forms and the sheets added here for construction,
+// civil, mechanical, electrical, QA/QC and HSE work — prints exactly as that
+// app prints a report: refined letterhead, coal title pill with status, the
+// continuous key/value info panel, the topic → response narrative table,
+// checklists with one column per result state and a drawn tick, the load-cell
+// and measurement grids, the approval trail, document control and printed
+// sign-off where a sheet declares them, and the ISO footer with the
+// "scan to verify" code.
 //
-// Renders the saved sheet body (data.header / values / checks / runs / grids)
-// through the same section grammar as SheetDataView, so the PDF and the on-
-// screen report cannot disagree about what the sheet says.
+// Mapped onto this module's record: the client / site / weighbridge come from
+// the sheet header, the routed supervisor and manager from the named sign-off,
+// and the trail from the report's own timestamps.
 // ============================================
 
-const colors = {
-  primary: "#eab308",
-  primaryLight: "#fef3c7",
-  dark: "#18181b",
-  gray: "#71717a",
-  grayLight: "#d4d4d8",
-  grayLightest: "#f4f4f5",
-  white: "#ffffff",
-  green: "#16a34a",
-  amber: "#d97706",
-  slate: "#64748b",
-  red: "#dc2626",
-};
+const { GOLD, COAL, INK, MUTE, PASS, FAIL } = R;
 
-// Result-state pill colours (mirror templates.js STATE_COLOR, in hex).
-const STATE_HEX = {
-  ok: colors.green,
-  pass: colors.green,
-  attn: colors.amber,
-  adj: colors.amber,
-  na: colors.slate,
-  problem: colors.red,
-  fail: colors.red,
-};
-
-// Status badge palette by workflow state.
-const STATUS_BADGE = {
-  draft: { bg: colors.grayLightest, fg: colors.gray },
-  submitted: { bg: colors.primaryLight, fg: colors.amber },
-  reviewed: { bg: colors.primaryLight, fg: colors.amber },
-  approved: { bg: "#dcfce7", fg: colors.green },
+const STATUS = {
+  draft: { label: "DRAFT", bg: MUTE, color: "#fff" },
+  submitted: { label: "SUPERVISOR REVIEW", bg: GOLD, color: COAL },
+  reviewed: { label: "MANAGER APPROVAL", bg: GOLD, color: COAL },
+  approved: { label: "APPROVED", bg: PASS, color: "#fff" },
 };
 
 const s = StyleSheet.create({
-  page: { fontFamily: "Helvetica", fontSize: 9, padding: 40, backgroundColor: colors.white, color: colors.dark },
-
-  header: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 18 },
-  logoSection: { flex: 1 },
-  logo: { width: 140, height: 45, objectFit: "contain", marginBottom: 6 },
-  companyDetails: { fontSize: 8, color: colors.gray, lineHeight: 1.4 },
-  companyTagline: { fontSize: 8, fontFamily: "Helvetica-Oblique", color: colors.primary, marginTop: 4 },
-  docHead: { alignItems: "flex-end" },
-  docTitle: { fontSize: 22, fontFamily: "Helvetica-Bold", color: colors.primary },
-  docNumber: { fontSize: 10, fontFamily: "Helvetica-Bold", color: colors.dark, marginTop: 4 },
-  statusBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 3, marginTop: 6 },
-  statusText: { fontSize: 7, fontFamily: "Helvetica-Bold", textTransform: "uppercase" },
-
-  divider: { height: 2, backgroundColor: colors.primary, marginBottom: 16 },
-
-  reportTitle: { fontSize: 15, fontFamily: "Helvetica-Bold", color: colors.dark, marginBottom: 10 },
-
-  infoRow: { flexDirection: "row", gap: 10, marginBottom: 16 },
-  infoCard: { flex: 1, backgroundColor: colors.grayLightest, padding: 10, borderRadius: 4 },
-  infoLabel: { fontSize: 7, fontFamily: "Helvetica-Bold", color: colors.gray, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 4 },
-  infoText: { fontSize: 9, color: colors.dark, lineHeight: 1.4 },
-  infoTextBold: { fontSize: 9, fontFamily: "Helvetica-Bold", color: colors.dark },
-
-  // Section bar (gold-accented heading)
-  sectionBar: {
-    fontSize: 9, fontFamily: "Helvetica-Bold", color: colors.dark, textTransform: "uppercase", letterSpacing: 0.4,
-    borderLeftWidth: 3, borderLeftColor: colors.primary, paddingLeft: 6, marginTop: 14, marginBottom: 8,
+  page: { paddingTop: 26, paddingBottom: 84, paddingHorizontal: 32, fontSize: 9, color: INK, fontFamily: "Helvetica" },
+  table: { marginBottom: 6, borderTopWidth: 0.5, borderTopColor: "#E4DCCB" },
+  row: { flexDirection: "row" },
+  // The panel's rows carry the rule, and each label sits in a View so its
+  // cream fill runs the full height of the row — a Text cell only stretches
+  // to its own text, which left gaps in the rules where a value wrapped.
+  panelRow: { flexDirection: "row", borderBottomWidth: 0.5, borderBottomColor: "#E4DCCB" },
+  keyBox: { backgroundColor: "#F7F4EC", paddingVertical: 4, paddingHorizontal: 7, width: "17%" },
+  key: { fontFamily: "Helvetica-Bold", fontSize: 7, color: MUTE, letterSpacing: 0.3, textTransform: "uppercase" },
+  val: { paddingVertical: 4, paddingHorizontal: 8, width: "33%", fontSize: 8.4, color: INK },
+  fillCell: { width: "50%" },
+  th: { backgroundColor: COAL, color: "#fff", fontSize: 7.5, padding: 2.5, fontFamily: "Helvetica-Bold" },
+  td: { fontSize: 8, padding: 2.5, borderBottomWidth: 0.5, borderBottomColor: "#DDD" },
+  tdCell: { fontSize: 8, padding: 2.5, borderWidth: 0.5, borderColor: "#DDD" },
+  narrTable: { marginTop: 3, borderWidth: 0.5, borderColor: "#E4DCCB" },
+  narrRow: { flexDirection: "row", alignItems: "stretch" },
+  narrRowDiv: { borderTopWidth: 0.5, borderTopColor: "#E4DCCB" },
+  narrKey: {
+    width: "23%",
+    backgroundColor: "#F5EEDD",
+    padding: 4,
+    fontSize: 8,
+    fontFamily: "Helvetica-Bold",
+    color: COAL,
+    textTransform: "uppercase",
+    letterSpacing: 0.3,
+    borderRightWidth: 0.5,
+    borderRightColor: "#E4DCCB",
   },
-
-  // Key/value grid
-  kvWrap: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  kvItem: { width: "48%", marginBottom: 6 },
-  kvKey: { fontSize: 7, color: colors.gray, textTransform: "uppercase", letterSpacing: 0.3, marginBottom: 2 },
-  kvVal: { fontSize: 9.5, color: colors.dark },
-
-  para: { fontSize: 9.5, color: colors.dark, lineHeight: 1.5 },
-
-  // Checklist rows
-  checkRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 4, borderBottomWidth: 0.5, borderBottomColor: colors.grayLight },
-  // No `flex: 1` here: inside the column that holds the label and its remark
-  // it collapses the label's height, and the remark printed on top of it.
-  checkLabel: { fontSize: 9, color: colors.dark },
-  checkRemark: { fontSize: 8, color: colors.gray, marginTop: 2 },
-  statePill: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 8, color: colors.white, fontSize: 7, fontFamily: "Helvetica-Bold" },
-  dash: { fontSize: 9, color: colors.gray },
-
-  // Table (rows / loadcells)
-  thRow: { flexDirection: "row", backgroundColor: colors.dark, paddingVertical: 5, paddingHorizontal: 2 },
-  th: { color: colors.white, fontSize: 7.5, fontFamily: "Helvetica-Bold", textTransform: "uppercase", paddingHorizontal: 3 },
-  tdRow: { flexDirection: "row", paddingVertical: 4, paddingHorizontal: 2, borderBottomWidth: 0.5, borderBottomColor: colors.grayLight },
-  td: { fontSize: 8.5, color: colors.dark, paddingHorizontal: 3 },
-
-  // Snapshot
-  snapRow: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 3 },
-  snapLabel: { fontSize: 9, color: colors.gray },
-  snapValue: { fontSize: 9, fontFamily: "Helvetica-Bold", color: colors.dark },
-  barTrack: { height: 7, backgroundColor: colors.grayLightest, borderRadius: 6, marginTop: 4, overflow: "hidden" },
-  barFill: { height: 7, backgroundColor: colors.primary, borderRadius: 6 },
-
-  // Sign-off boxes
-  // Two to a row, edge to edge with the content above: 49% + 49% and the 2%
-  // between them, rather than 47% boxes and a gap that left a ragged right edge.
-  signoffRow: { flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between", marginTop: 4 },
-  signoffBox: { width: "49%", borderWidth: 1, borderColor: colors.grayLight, borderRadius: 4, padding: 10, minHeight: 58, marginBottom: 8 },
-  signoffLabel: { fontSize: 7, fontFamily: "Helvetica-Bold", color: colors.gray, textTransform: "uppercase", letterSpacing: 0.3, marginBottom: 4 },
-  signoffName: { fontSize: 10, fontFamily: "Helvetica-Bold", color: colors.dark },
-  signoffDate: { fontSize: 8, color: colors.gray, marginTop: 2 },
-  signoffPending: { fontSize: 9, color: colors.gray, fontFamily: "Helvetica-Oblique" },
-
-  footer: { position: "absolute", bottom: 24, left: 40, right: 40, borderTopWidth: 1, borderTopColor: colors.grayLight, paddingTop: 8, flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  footerMotto: { fontSize: 8, color: colors.primary, fontFamily: "Helvetica-Bold" },
-  footerText: { fontSize: 7, color: colors.gray },
+  narrVal: { width: "77%", padding: 4 },
+  narrText: { fontSize: 8.5, lineHeight: 1.35, color: INK },
+  bulletRow: { flexDirection: "row", marginTop: 1 },
+  bulletDot: { fontSize: 8.5, color: GOLD, width: 9, fontFamily: "Helvetica-Bold" },
+  bulletText: { fontSize: 8.5, flex: 1, lineHeight: 1.3, color: INK },
+  weekly: { marginTop: 8, padding: 6, borderWidth: 1, borderColor: "#111" },
+  docCtrl: { marginTop: 10, borderWidth: 0.6, borderColor: "#C9C1B0", borderRadius: 3 },
+  docCtrlHead: { backgroundColor: "#22201C", paddingVertical: 3, paddingHorizontal: 6 },
+  docCtrlHeadText: { fontSize: 6.8, color: GOLD, fontFamily: "Helvetica-Bold", letterSpacing: 0.5, textTransform: "uppercase" },
+  docCtrlBody: { flexDirection: "row", flexWrap: "wrap", paddingHorizontal: 6, paddingTop: 6 },
+  docCtrlItem: { width: "50%", flexDirection: "row", marginBottom: 3, paddingRight: 6 },
+  docCtrlK: { fontSize: 6.8, fontFamily: "Helvetica-Bold", color: MUTE, width: 56, textTransform: "uppercase", letterSpacing: 0.3 },
+  docCtrlV: { fontSize: 7.2, color: INK, flex: 1 },
+  docCtrlNotice: { fontSize: 6.8, color: FAIL, fontFamily: "Helvetica-Bold", paddingHorizontal: 6, paddingBottom: 6, letterSpacing: 0.3 },
+  signWrap: { marginTop: 12 },
+  signStatement: { fontSize: 8, color: INK, lineHeight: 1.35, marginBottom: 8 },
+  signCol: { flex: 1 },
+  signColGap: { width: 14 },
+  signTitle: {
+    fontSize: 8,
+    fontFamily: "Helvetica-Bold",
+    color: COAL,
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
+    backgroundColor: "#F5EEDD",
+    paddingVertical: 3,
+    paddingHorizontal: 6,
+    borderWidth: 0.5,
+    borderColor: "#E4DCCB",
+  },
+  signBody: { borderWidth: 0.5, borderTopWidth: 0, borderColor: "#E4DCCB", paddingTop: 4, paddingHorizontal: 6, paddingBottom: 6 },
+  signField: { flexDirection: "row", alignItems: "flex-end", marginTop: 8 },
+  signFieldK: { fontSize: 7.5, fontFamily: "Helvetica-Bold", color: MUTE, width: 58, textTransform: "uppercase", letterSpacing: 0.3 },
+  signFieldLine: { flex: 1, borderBottomWidth: 0.7, borderBottomColor: "#8a8171", height: 11 },
 });
 
-function KV({ items }) {
-  const shown = items.filter((i) => i.value != null && String(i.value).trim() !== "");
-  if (!shown.length) return null;
+// Right-aligned figures with a thousands separator; text is returned unchanged.
+function fmtNum(v) {
+  const str = String(v == null ? "" : v).trim();
+  if (str === "") return "";
+  const n = Number(str.replace(/,/g, ""));
+  return Number.isNaN(n) ? str : n.toLocaleString("en-US");
+}
+
+// A grid column is right-aligned when everything recorded in it is a number —
+// the app keyed this on the column name, which only knew the weighbridge grids.
+const isNum = (v) => String(v ?? "").trim() !== "" && !Number.isNaN(Number(String(v).replace(/,/g, "")));
+function numericColumns(sec, grids) {
+  return sec.cols.map((_, ci) => {
+    const cells = Array.from({ length: sec.rows })
+      .map((__, ri) => grids[`${sec.key}:${ri}:${ci}`])
+      .filter((v) => String(v ?? "").trim() !== "");
+    return cells.length > 0 && cells.every(isNum);
+  });
+}
+
+function Cell({ children, style }) {
+  return <Text style={[s.td, style]}>{children}</Text>;
+}
+
+// Helvetica has no check-mark glyph, so the tick is drawn.
+function Tick() {
   return (
-    <View style={s.kvWrap}>
-      {shown.map((i, idx) => (
-        <View key={idx} style={s.kvItem}>
-          <Text style={s.kvKey}>{i.label}</Text>
-          <Text style={s.kvVal}>{String(i.value)}</Text>
-        </View>
-      ))}
-    </View>
+    <Svg width={9} height={9} viewBox="0 0 12 12">
+      <Path d="M1.5 6.5 L4.5 9.5 L10.5 2.5" stroke={PASS} strokeWidth={2} fill="none" />
+    </Svg>
   );
 }
 
-function Table({ cols, rows }) {
-  const w = `${100 / cols.length}%`;
-  return (
-    <View>
-      <View style={s.thRow}>
-        {cols.map((c, i) => (
-          <Text key={i} style={[s.th, { width: w }]}>{c}</Text>
-        ))}
-      </View>
-      {rows.map((r, ri) => (
-        <View key={ri} style={s.tdRow}>
-          {r.map((c, ci) => (
-            <Text key={ci} style={[s.td, { width: w }]}>{String(c).trim() || "—"}</Text>
-          ))}
-        </View>
-      ))}
-    </View>
-  );
-}
-
-// Default OK/problem states when a checklist doesn't declare its own.
 function defaultStates(yes = "OK", no = "NO") {
   return [
     { key: "ok", label: yes },
@@ -169,279 +137,405 @@ function defaultStates(yes = "OK", no = "NO") {
   ];
 }
 
-function SheetBody({ template, data }) {
-  if (!template) return null;
-  const d = {
-    header: data?.header || {},
-    values: data?.values || {},
-    checks: data?.checks || {},
-    runs: data?.runs || {},
-    grids: data?.grids || {},
-  };
+const humanize = (k) =>
+  String(k)
+    .replace(/_/g, " ")
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/^./, (c) => c.toUpperCase());
+
+/** The trail the app keeps as events, rebuilt from this record's timestamps. */
+function trailOf(report) {
+  return [
+    ["Created", report.createdByName, report.createdAt],
+    ["Submitted for review", report.submittedByName, report.submittedAt],
+    ["Supervisor signed off", report.reviewedByName, report.reviewedAt],
+    ["Approved", report.approvedByName, report.approvedAt],
+  ]
+    .concat(
+      report.data?.returned
+        ? [[`Returned to author — "${report.data.returned.comment}"`, report.data.returned.byName, report.data.returned.at]]
+        : [],
+    )
+    .filter(([, , at]) => at)
+    .sort((a, b) => new Date(a[2]) - new Date(b[2]))
+    .map(([action, byName, at]) => ({ action, byName: byName || "—", at }));
+}
+
+export function TechnicalReportPDF({ report, project, company = {}, template, sheetLabel, serial, qrSrc }) {
+  const tpl = template;
+  const data = report.data || {};
+  const header = data.header || {};
+  const values = data.values || {};
+  const grids = data.grids || {};
+  const runs = data.runs || {};
+  const st = STATUS[report.status] || STATUS.draft;
+  const serviceDate = report.periodStart || report.submittedAt || report.createdAt;
+
+  // What the info panel's second row says depends on the kind of work: a
+  // weighbridge sheet names the weighbridge, a field-service report the
+  // vehicle, everything else the project it was filed against.
+  const isWeighing = tpl?.category === "Weighing & Metrology";
+  const isTechReport = report.type === "TR01";
+  const reportTypeVal = `${tpl?.category || "Report"} (${report.type})`;
+  const projectVal = project ? `${project.projectNumber} · ${project.name}` : "—";
+  const meta = [
+    ["Client", header.client || "—", "Site", header.site || "—"],
+    isTechReport
+      ? ["Vehicle no.", values.vehicleNo || "—", "Report type", reportTypeVal]
+      : isWeighing
+        ? ["Weighbridge", header.weighbridge || "—", "Report type", reportTypeVal]
+        : ["Project", projectVal, "Report type", reportTypeVal],
+    ["Completed by", report.createdByName || "—", "Date", fmtEat(serviceDate)],
+    ["Supervisor", report.assignedReviewerName || report.reviewedByName || "—", "Manager", report.assignedApproverName || report.approvedByName || "—"],
+  ];
+  if (isTechReport || isWeighing) meta.push(["Project", projectVal, "", ""]);
+
+  const sections = tpl?.sections || [];
+  const fieldLabels = {};
+  const longKeys = new Set();
+  const fieldOrder = {};
+  let oi = 0;
+  sections.forEach((sec) => {
+    if (sec.type === "fields") sec.fields.forEach((f) => { fieldLabels[f.k] = f.label; fieldOrder[f.k] = oi++; });
+    else if (sec.type === "choices") { fieldLabels[sec.k] = sec.title; fieldOrder[sec.k] = oi++; }
+    else if (sec.type === "textarea") { fieldLabels[sec.k] = sec.label; longKeys.add(sec.k); fieldOrder[sec.k] = oi++; }
+  });
+  const labelFor = (k) => fieldLabels[k] || humanize(k);
+
+  const show = (v) => (Array.isArray(v) ? v.join(", ") : v);
+  let freeFields = Object.entries(values)
+    .filter(([k, v]) => k !== "weighbridgeId" && !(isTechReport && k === "vehicleNo") && v != null && String(show(v)).trim() !== "")
+    .sort((a, b) => (fieldOrder[a[0]] ?? 999) - (fieldOrder[b[0]] ?? 999));
+  // A report filed without a sheet (the older free-text form) prints its
+  // narrative through the same table.
+  if (!tpl) {
+    freeFields = [
+      ["summary", report.summary],
+      ["workCompleted", report.workCompleted],
+      ["issues", report.issues],
+      ["nextSteps", report.nextSteps],
+    ].filter(([, v]) => v && String(v).trim());
+    Object.assign(fieldLabels, {
+      summary: "Summary",
+      workCompleted: "Work completed / findings",
+      issues: "Issues & faults",
+      nextSteps: "Next steps / parts",
+    });
+    freeFields.forEach(([k]) => longKeys.add(k));
+  }
+  const detailFields = freeFields.filter(([k]) => !longKeys.has(k));
+  const narrativeFields = freeFields.filter(([k]) => longKeys.has(k));
+  const detailRows = [];
+  for (let i = 0; i < detailFields.length; i += 2) detailRows.push(detailFields.slice(i, i + 2));
+
+  const checklistSections = sections.map((sec, idx) => ({ sec, idx })).filter(({ sec }) => sec.type === "checklist");
+  const rowSections = sections.filter((sec) => sec.type === "rows");
+  const hasLoadcells = sections.some((sec) => sec.type === "loadcells");
+  const hasWeekly = sections.some((sec) => sec.type === "weekly") && [1, 2].some((r) => ["a", "m", "b"].some((p) => runs[`${r}${p}`]));
+  // Helvetica has no omega, so spell out "Ohm".
+  const lcRows = [
+    { key: "lc", label: grids.lcUnit === "ohm" ? "Impedance (Ohm)" : "Output (mV)" },
+    { key: "corner", label: "Corner (kg)" },
+  ];
+  const trail = trailOf(report);
+  // The verdict as the form works it out: the biggest spread across a run
+  // against the site's limit — computed here too for reports saved before the
+  // form stored it.
+  const weekly = (() => {
+    if (data.weekly?.pass != null) return data.weekly;
+    const diffs = [1, 2].map((r) => {
+      const nums = ["a", "m", "b"].map((p) => parseFloat(runs[`${r}${p}`]));
+      return nums.some((n) => Number.isNaN(n)) ? null : Math.max(...nums) - Math.min(...nums);
+    });
+    const limit = parseFloat(values.limit);
+    const worst = Math.max(...diffs.map((d) => (d == null ? 0 : d)));
+    return {
+      pass: diffs.every((d) => d == null) || Number.isNaN(limit) ? null : worst <= limit,
+      limit: Number.isNaN(limit) ? null : limit,
+    };
+  })();
 
   return (
-    <View>
-      <KV
-        items={[
-          { label: "Client (company)", value: d.header.client },
-          { label: "Site / branch", value: d.header.site },
-          { label: "Weighbridge", value: d.header.weighbridge },
-        ]}
-      />
+    <Document title={`${sheetLabel || "Report"} ${serial}`}>
+      <Page size="A4" style={s.page} wrap>
+        <TopBar kind="report" />
+        <RefinedHeader
+          company={company}
+          meta={[
+            { k: "Date", v: fmtEat(serviceDate) },
+            { k: "No.", v: serial, mono: true },
+          ]}
+        />
 
-      {(template.sections || []).map((sec, si) => {
-        if (sec.type === "fields") {
-          return (
-            <View key={si} style={{ marginTop: 8 }} wrap={false}>
-              <KV items={sec.fields.map((f) => ({ label: f.label, value: d.values[f.k] }))} />
+        <TitlePill title={sheetLabel || report.title} status={st} />
+
+        {/* Info panel — meta and short fields in one continuous key/value table. */}
+        <View style={s.table}>
+          {meta.map((r, i) => (
+            <View style={s.panelRow} key={`m${i}`} wrap={false}>
+              <View style={s.keyBox}>
+                <Text style={s.key}>{r[0]}</Text>
+              </View>
+              <Text style={s.val}>{r[1]}</Text>
+              {r[2] ? (
+                <>
+                  <View style={s.keyBox}>
+                    <Text style={s.key}>{r[2]}</Text>
+                  </View>
+                  <Text style={s.val}>{r[3]}</Text>
+                </>
+              ) : (
+                <View style={s.fillCell} />
+              )}
             </View>
-          );
-        }
-
-        if (sec.type === "textarea") {
-          const v = d.values[sec.k];
-          if (!v || !String(v).trim()) return null;
-          return (
-            <View key={si} wrap={false}>
-              <Text style={s.sectionBar}>{sec.label}</Text>
-              <Text style={s.para}>{String(v)}</Text>
-            </View>
-          );
-        }
-
-        if (sec.type === "checklist") {
-          const states = sec.states || defaultStates(sec.yes, sec.no);
-          const byKey = Object.fromEntries(states.map((st) => [st.key, st.label]));
-          return (
-            <View key={si}>
-              <Text style={s.sectionBar}>{sec.title}</Text>
-              {sec.items.map((it, ii) => {
-                const cur = d.checks[`${si}:${ii}`] || {};
-                const col = STATE_HEX[cur.state] || colors.slate;
+          ))}
+          {detailRows.map((pair, ri) => (
+            <View style={s.panelRow} key={`d${ri}`} wrap={false}>
+              {[0, 1].map((ci) => {
+                const cell = pair[ci];
+                if (!cell) return <View key={ci} style={s.fillCell} />;
                 return (
-                  <View key={ii} style={s.checkRow} wrap={false}>
-                    <View style={{ flex: 1, paddingRight: 8 }}>
-                      <Text style={s.checkLabel}>{it}</Text>
-                      {cur.remark ? <Text style={s.checkRemark}>Note: {cur.remark}</Text> : null}
+                  <React.Fragment key={ci}>
+                    <View style={s.keyBox}>
+                      <Text style={s.key}>{labelFor(cell[0])}</Text>
                     </View>
-                    {cur.state ? (
-                      <Text style={[s.statePill, { backgroundColor: col }]}>{byKey[cur.state] || cur.state}</Text>
-                    ) : (
-                      <Text style={s.dash}>—</Text>
-                    )}
+                    <Text style={s.val}>{String(show(cell[1]))}</Text>
+                  </React.Fragment>
+                );
+              })}
+            </View>
+          ))}
+        </View>
+
+        {/* Narrative — topic on the left, response on the right; dash lines become bullets. */}
+        {narrativeFields.length > 0 && (
+          <View>
+            <SectionHead>{isTechReport ? "Job details" : "Details"}</SectionHead>
+            <View style={s.narrTable}>
+              {narrativeFields.map(([k, v], ri) => {
+                const lines = String(v).split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+                const bulleted = lines.length > 1 && lines.every((l) => /^[-•*]/.test(l));
+                return (
+                  <View style={[s.narrRow, ri > 0 && s.narrRowDiv]} key={k} wrap={false}>
+                    <Text style={s.narrKey}>{labelFor(k)}</Text>
+                    <View style={s.narrVal}>
+                      {bulleted ? (
+                        lines.map((l, i) => (
+                          <View style={s.bulletRow} key={i}>
+                            <Text style={s.bulletDot}>•</Text>
+                            <Text style={s.bulletText}>{l.replace(/^[-•*]\s*/, "")}</Text>
+                          </View>
+                        ))
+                      ) : (
+                        <Text style={s.narrText}>{String(v)}</Text>
+                      )}
+                    </View>
                   </View>
                 );
               })}
             </View>
-          );
-        }
-
-        if (sec.type === "choices") {
-          const v = d.values[sec.k];
-          if (!v) return null;
-          return (
-            <View key={si} style={{ marginTop: 10 }} wrap={false}>
-              <KV items={[{ label: sec.title, value: v }]} />
-            </View>
-          );
-        }
-
-        if (sec.type === "weekly") {
-          const has = [1, 2].some((r) => ["a", "m", "b"].some((p) => d.runs[`${r}${p}`]));
-          if (!has) return null;
-          return (
-            <View key={si} wrap={false}>
-              <Text style={s.sectionBar}>End — Middle — End test</Text>
-              <Table
-                cols={["Run", "End A (kg)", "Middle (kg)", "End B (kg)"]}
-                rows={[1, 2].map((r) => [`Run ${r}`, d.runs[`${r}a`] || "—", d.runs[`${r}m`] || "—", d.runs[`${r}b`] || "—"])}
-              />
-            </View>
-          );
-        }
-
-        if (sec.type === "loadcells") {
-          const unit = d.grids.lcUnit === "ohm" ? "Ω" : "mV";
-          const has = Array.from({ length: 8 }).some((_, i) => d.grids[`lc:${i}`] || d.grids[`corner:${i}`]);
-          if (!has) return null;
-          const rows = Array.from({ length: 8 })
-            .map((_, i) => [`#${i + 1}`, d.grids[`lc:${i}`] || "—", d.grids[`corner:${i}`] || "—"])
-            .filter((r) => r[1] !== "—" || r[2] !== "—");
-          return (
-            <View key={si} wrap={false}>
-              <Text style={s.sectionBar}>Load cell readings</Text>
-              <Table cols={["Cell", `Output (${unit})`, "Corner (kg)"]} rows={rows} />
-            </View>
-          );
-        }
-
-        if (sec.type === "rows") {
-          const rows = Array.from({ length: sec.rows }).map((_, ri) =>
-            sec.cols.map((_c, ci) => d.grids[`${sec.key}:${ri}:${ci}`] ?? (sec.prefill?.[ri]?.[ci] || "")),
-          );
-          const has = rows.some((r) => r.some((c) => String(c).trim()));
-          if (!has) return null;
-          return (
-            <View key={si} wrap={false}>
-              <Text style={s.sectionBar}>{sec.title}</Text>
-              <Table cols={sec.cols} rows={rows.filter((r) => r.some((c) => String(c).trim()))} />
-            </View>
-          );
-        }
-
-        return null;
-      })}
-    </View>
-  );
-}
-
-function Narrative({ report }) {
-  const blocks = [
-    ["Summary", report.summary],
-    ["Work completed / findings", report.workCompleted],
-    ["Issues & faults", report.issues],
-    ["Next steps / parts", report.nextSteps],
-  ].filter(([, v]) => v && String(v).trim());
-  return (
-    <View>
-      {report.periodStart || report.periodEnd ? (
-        <Text style={[s.para, { marginBottom: 8 }]}>
-          Reporting period: {formatDate(report.periodStart)} – {formatDate(report.periodEnd)}
-        </Text>
-      ) : null}
-      {blocks.map(([label, v]) => (
-        <View key={label} wrap={false}>
-          <Text style={s.sectionBar}>{label}</Text>
-          <Text style={s.para}>{String(v)}</Text>
-        </View>
-      ))}
-    </View>
-  );
-}
-
-function SignoffBox({ label, name, when, waiting }) {
-  return (
-    <View style={s.signoffBox}>
-      <Text style={s.signoffLabel}>{label}</Text>
-      {name || when ? (
-        <>
-          <Text style={s.signoffName}>{name || "—"}</Text>
-          <Text style={s.signoffDate}>{when ? formatDate(when) : ""}</Text>
-        </>
-      ) : (
-        <Text style={s.signoffPending}>{waiting ? `Awaiting ${waiting}` : "Pending"}</Text>
-      )}
-    </View>
-  );
-}
-
-export function TechnicalReportPDF({ report, project, company = {}, template, sheetLabel, serial, statusLabel }) {
-  const badge = STATUS_BADGE[report.status] || STATUS_BADGE.draft;
-  const hasSnapshot =
-    report.snapshotProgress != null || report.snapshotRevenue != null || report.snapshotCost != null;
-  const money = (n) =>
-    n == null ? "—" : `KES ${new Intl.NumberFormat("en-KE", { maximumFractionDigits: 0 }).format(Number(n) || 0)}`;
-
-  return (
-    <Document>
-      <Page size="A4" style={s.page}>
-        {/* Header */}
-        <View style={s.header}>
-          <View style={s.logoSection}>
-            {/* Logo may be a string, an object ({url,publicId}) or absent. */}
-            {typeof company?.logo === "string" && company.logo ? (
-              <Image style={s.logo} src={company.logo} />
-            ) : company?.logo?.url ? (
-              <Image style={s.logo} src={company.logo.url} />
-            ) : (
-              <Text style={[s.infoTextBold, { fontSize: 12 }]}>{company?.name || ""}</Text>
-            )}
-            {/* Address may be a string or a structured object — flatten it.
-                The name is printed here only under a logo; without one it is
-                the heading above, and printing it twice read as a typo. */}
-            <Text style={s.companyDetails}>
-              {(company?.logo ? company?.name : "") || ""}
-              {formatAddress(company?.address) ? `${company?.logo ? "\n" : ""}${formatAddress(company.address)}` : ""}
-              {company?.phone || company?.email ? `\n${[company.phone, company.email].filter(Boolean).join(" | ")}` : ""}
-              {company?.taxPin ? `\nPIN: ${company.taxPin}` : ""}
-            </Text>
-            {company?.tagline ? <Text style={s.companyTagline}>{company.tagline}</Text> : null}
           </View>
-          <View style={s.docHead}>
-            <Text style={s.docTitle}>TECHNICAL REPORT</Text>
-            <Text style={s.docNumber}>{serial}</Text>
-            <View style={[s.statusBadge, { backgroundColor: badge.bg }]}>
-              <Text style={[s.statusText, { color: badge.fg }]}>{statusLabel}</Text>
-            </View>
-          </View>
-        </View>
+        )}
 
-        <View style={s.divider} />
-
-        <Text style={s.reportTitle}>{report.title}</Text>
-
-        {/* Info cards */}
-        <View style={s.infoRow}>
-          <View style={s.infoCard}>
-            <Text style={s.infoLabel}>Report</Text>
-            <Text style={s.infoTextBold}>{sheetLabel}</Text>
-            <Text style={s.infoText}>Sheet {report.type}</Text>
-          </View>
-          <View style={s.infoCard}>
-            <Text style={s.infoLabel}>Project</Text>
-            {project ? (
-              <>
-                <Text style={s.infoTextBold}>{project.name}</Text>
-                <Text style={s.infoText}>{project.projectNumber}</Text>
-              </>
-            ) : (
-              <Text style={s.infoText}>—</Text>
-            )}
-          </View>
-        </View>
-
-        {/* Body */}
-        {template ? <SheetBody template={template} data={report.data} /> : <Narrative report={report} />}
-
-        {/* Project snapshot */}
-        {hasSnapshot ? (
-          <View wrap={false}>
-            <Text style={s.sectionBar}>Project snapshot (at submission)</Text>
-            {report.snapshotProgress != null ? (
-              <View>
-                <View style={s.snapRow}>
-                  <Text style={s.snapLabel}>Schedule progress</Text>
-                  <Text style={s.snapValue}>{report.snapshotProgress}%</Text>
+        {/* Checklists — one result column per state, a drawn tick for the good one. */}
+        {checklistSections.map(({ sec, idx }) => {
+          const states = sec.states || defaultStates(sec.yes, sec.no);
+          const stateW = `${(12 / states.length).toFixed(2)}%`;
+          const itemW = "44%";
+          const remarksW = "44%";
+          const tickKeys = new Set(["ok", "pass"]);
+          const vline = { borderRightWidth: 0.5, borderColor: "#AFAFAF" };
+          return (
+            <View key={idx} wrap={false}>
+              <SectionHead>{sec.title}</SectionHead>
+              <View style={{ borderTopWidth: 0.5, borderLeftWidth: 0.5, borderColor: "#AFAFAF" }}>
+                <View style={s.row}>
+                  <Text style={[s.th, vline, { width: itemW }]}>ITEM</Text>
+                  {states.map((x) => (
+                    <Text key={x.key} style={[s.th, vline, { width: stateW, textAlign: "center" }]}>{x.label}</Text>
+                  ))}
+                  <Text style={[s.th, vline, { width: remarksW }]}>REMARKS</Text>
                 </View>
-                <View style={s.barTrack}>
-                  <View style={[s.barFill, { width: `${Math.max(0, Math.min(100, report.snapshotProgress))}%` }]} />
-                </View>
+                {sec.items.map((it, ii) => {
+                  const v = data.checks?.[`${idx}:${ii}`];
+                  return (
+                    <View style={s.row} key={ii}>
+                      <Cell style={[vline, { fontSize: 7.5, width: itemW }]}>{it}</Cell>
+                      {states.map((x) => (
+                        <View key={x.key} style={[s.td, vline, { width: stateW, alignItems: "center", justifyContent: "center" }]}>
+                          {v?.state === x.key ? tickKeys.has(x.key) ? <Tick /> : <Text>X</Text> : null}
+                        </View>
+                      ))}
+                      <Cell style={[vline, { width: remarksW, color: FAIL }]}>{v?.remark || ""}</Cell>
+                    </View>
+                  );
+                })}
               </View>
-            ) : null}
-            <View style={s.snapRow}><Text style={s.snapLabel}>Invoiced</Text><Text style={s.snapValue}>{money(report.snapshotRevenue)}</Text></View>
-            <View style={s.snapRow}><Text style={s.snapLabel}>Supplier cost</Text><Text style={s.snapValue}>{money(report.snapshotCost)}</Text></View>
+            </View>
+          );
+        })}
+
+        {/* Weekly End-Middle-End verdict. */}
+        {hasWeekly && (
+          <View style={s.weekly} wrap={false}>
+            <Text style={{ fontSize: 8.5, fontFamily: "Helvetica-Bold" }}>
+              WEEKLY END-MIDDLE-END TEST:{" "}
+              {weekly.pass == null ? "not completed" : weekly.pass ? "WITHIN LIMIT" : "OVER LIMIT - QSL ATTENTION REQUIRED"} (limit{" "}
+              {fmtNum(weekly.limit) || "-"} kg)
+            </Text>
+            <Text style={{ fontSize: 8, marginTop: 2, fontFamily: "Courier" }}>
+              Runs:{" "}
+              {["1", "2"]
+                .map((r) => `[${fmtNum(runs[r + "a"]) || "-"} / ${fmtNum(runs[r + "m"]) || "-"} / ${fmtNum(runs[r + "b"]) || "-"}]`)
+                .join("   ")}
+            </Text>
+          </View>
+        )}
+
+        {/* Load cell readings. */}
+        {hasLoadcells && (
+          <View wrap={false} style={{ marginTop: 4 }}>
+            <SectionHead>Load cell readings</SectionHead>
+            {lcRows.map((row) => (
+              <View style={s.row} key={row.key}>
+                <Text style={[s.tdCell, { width: "20%", fontFamily: "Helvetica-Bold", backgroundColor: "#F5EEDD" }]}>{row.label}</Text>
+                {Array.from({ length: 8 }).map((_, i) => (
+                  <Text style={[s.tdCell, { width: "10%", textAlign: "right" }]} key={i}>
+                    {fmtNum(grids[`${row.key}:${i}`])}
+                  </Text>
+                ))}
+              </View>
+            ))}
+          </View>
+        )}
+
+        {/* Measurement / record grids. */}
+        {rowSections.map((sec, si) => {
+          const w = `${(100 / sec.cols.length).toFixed(2)}%`;
+          const numeric = numericColumns(sec, grids);
+          return (
+            <View key={si} wrap={false} style={{ marginTop: 4 }}>
+              <SectionHead>{sec.title}</SectionHead>
+              <View style={s.row}>
+                {sec.cols.map((c, ci) => (
+                  <Text style={[s.th, { width: w, textAlign: numeric[ci] ? "right" : "left" }]} key={c}>{c}</Text>
+                ))}
+              </View>
+              {Array.from({ length: sec.rows }).map((_, ri) => (
+                <View style={s.row} key={ri}>
+                  {sec.cols.map((_c, ci) => {
+                    const raw = grids[`${sec.key}:${ri}:${ci}`] ?? (sec.prefill?.[ri]?.[ci] || "");
+                    return (
+                      <Text style={[s.tdCell, { width: w, textAlign: numeric[ci] ? "right" : "left" }]} key={ci}>
+                        {numeric[ci] ? fmtNum(raw) : String(raw)}
+                      </Text>
+                    );
+                  })}
+                </View>
+              ))}
+            </View>
+          );
+        })}
+
+        {/* Approval trail. */}
+        <View wrap={false}>
+          <SectionHead>Approval trail</SectionHead>
+          <View style={s.row}>
+            <Text style={[s.th, { width: "50%" }]}>ACTION</Text>
+            <Text style={[s.th, { width: "28%" }]}>BY</Text>
+            <Text style={[s.th, { width: "22%" }]}>DATE / TIME</Text>
+          </View>
+          {trail.map((t, i) => (
+            <View style={s.row} key={i}>
+              <Cell style={{ width: "50%" }}>{t.action}</Cell>
+              <Cell style={{ width: "28%" }}>{t.byName}</Cell>
+              <Cell style={{ width: "22%" }}>{fmtEat(t.at)}</Cell>
+            </View>
+          ))}
+          {report.status === "submitted" && report.assignedReviewerName ? (
+            <View style={s.row}>
+              <Cell style={{ width: "50%", color: MUTE }}>Awaiting supervisor sign-off</Cell>
+              <Cell style={{ width: "28%", color: MUTE }}>{report.assignedReviewerName}</Cell>
+              <Cell style={{ width: "22%" }}> </Cell>
+            </View>
+          ) : null}
+          {(report.status === "submitted" || report.status === "reviewed") && report.assignedApproverName ? (
+            <View style={s.row}>
+              <Cell style={{ width: "50%", color: MUTE }}>Awaiting manager approval</Cell>
+              <Cell style={{ width: "28%", color: MUTE }}>{report.assignedApproverName}</Cell>
+              <Cell style={{ width: "22%" }}> </Cell>
+            </View>
+          ) : null}
+        </View>
+
+        {/* ISO document control, where the sheet declares it. */}
+        {tpl?.docControl ? (
+          <View style={s.docCtrl} wrap={false}>
+            <View style={s.docCtrlHead}>
+              <Text style={s.docCtrlHeadText}>Document control</Text>
+            </View>
+            <View style={s.docCtrlBody}>
+              <View style={[s.docCtrlItem, { width: "100%" }]}>
+                <Text style={s.docCtrlK}>Reference</Text>
+                <Text style={s.docCtrlV}>{tpl.docControl.reference}</Text>
+              </View>
+              <View style={s.docCtrlItem}>
+                <Text style={s.docCtrlK}>Doc no.</Text>
+                <Text style={s.docCtrlV}>{tpl.docControl.docNo}</Text>
+              </View>
+              <View style={s.docCtrlItem}>
+                <Text style={s.docCtrlK}>{tpl.docControl.serialLabel || "Serial no."}</Text>
+                <Text style={s.docCtrlV}>{serial}</Text>
+              </View>
+              <View style={s.docCtrlItem}>
+                <Text style={s.docCtrlK}>Revision</Text>
+                <Text style={s.docCtrlV}>{tpl.docControl.revision}</Text>
+              </View>
+              <View style={s.docCtrlItem}>
+                <Text style={s.docCtrlK}>Issue date</Text>
+                <Text style={s.docCtrlV}>{tpl.docControl.issueDate}</Text>
+              </View>
+            </View>
+            {tpl.docControl.notice ? <Text style={s.docCtrlNotice}>{tpl.docControl.notice}</Text> : null}
           </View>
         ) : null}
 
-        {/* Sign-off / review trail */}
-        <Text style={s.sectionBar}>Review &amp; sign-off</Text>
-        <View style={s.signoffRow}>
-          <SignoffBox label="Created" name={report.createdByName} when={report.createdAt} />
-          <SignoffBox label="Submitted" name={report.submittedByName} when={report.submittedAt} />
-          <SignoffBox label="Supervisor sign-off" name={report.reviewedByName} when={report.reviewedAt} waiting={report.assignedReviewerName} />
-          <SignoffBox label="Manager approval" name={report.approvedByName} when={report.approvedAt} waiting={report.assignedApproverName} />
-        </View>
+        {/* Printed wet-signature sign-off, where the sheet declares it. */}
+        {tpl?.signOff ? (
+          <View style={s.signWrap} wrap={false}>
+            <SectionHead>{tpl.signOff.title || "Sign-off"}</SectionHead>
+            {tpl.signOff.statement ? <Text style={s.signStatement}>{tpl.signOff.statement}</Text> : null}
+            <View style={s.row}>
+              {(tpl.signOff.parties || []).map((party, pi) => (
+                <React.Fragment key={pi}>
+                  {pi > 0 ? <View style={s.signColGap} /> : null}
+                  <View style={s.signCol}>
+                    <Text style={s.signTitle}>{party}</Text>
+                    <View style={s.signBody}>
+                      {(tpl.signOff.lines || ["Name", "Signature", "Date"]).map((ln, li) => (
+                        <View style={s.signField} key={li}>
+                          <Text style={s.signFieldK}>{ln}</Text>
+                          <View style={s.signFieldLine} />
+                        </View>
+                      ))}
+                    </View>
+                  </View>
+                </React.Fragment>
+              ))}
+            </View>
+          </View>
+        ) : null}
 
-        {/* Footer */}
-        <View style={s.footer} fixed>
-          {/* The company's own name — this was "Qalibrated Systems" on every tenant's report. */}
-          <Text style={s.footerMotto}>{company?.tagline || company?.name || ""}</Text>
-          <Text
-            style={s.footerText}
-            render={({ pageNumber, totalPages }) => `${serial}  ·  Page ${pageNumber} of ${totalPages}`}
-            fixed
-          />
-        </View>
+        <VerifyQr qrSrc={qrSrc} />
+        <RefinedFooter
+          company={company}
+          serial={serial}
+          note={
+            tpl?.signOff
+              ? null
+              : "System-generated document — no physical signature required. Approvals are captured electronically and recorded in the approval trail."
+          }
+        />
       </Page>
     </Document>
   );

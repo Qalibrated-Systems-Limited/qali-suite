@@ -186,6 +186,9 @@ export async function submitReport(
     .update(workflowReports)
     .set({
       status: "submitted",
+      // A report returned to its author is fixed and sent again: the return
+      // note has been dealt with.
+      data: sql`${workflowReports.data} - 'returned'`,
       submittedById: actor.id,
       submittedByName: actor.name,
       submittedAt: new Date(),
@@ -323,11 +326,21 @@ export async function listSignoffUsers(tx: Tx, roles: readonly string[]) {
  * Anything → draft. Clears every sign-off so the report starts its journey
  * again; the snapshot is left as-is until the next submit overwrites it.
  */
-export async function reopenReport(tx: Tx, id: string, actor: Actor) {
+/**
+ * Back to draft. With a comment it is the Workflow Reports app's "Return to
+ * author": the comment, who returned it and when are kept on the report
+ * (`data.returned`) so the author sees why on the report page; the next
+ * submission clears it.
+ */
+export async function reopenReport(tx: Tx, id: string, actor: Actor, comment = "") {
+  const note = comment.trim()
+    ? { returned: { comment: comment.trim(), byName: actor.name, at: new Date().toISOString() } }
+    : {};
   const [row] = await tx
     .update(workflowReports)
     .set({
       status: "draft",
+      data: sql`${workflowReports.data} || ${JSON.stringify(note)}::jsonb`,
       // Named again at the next submission.
       assignedReviewerId: null,
       assignedReviewerName: null,

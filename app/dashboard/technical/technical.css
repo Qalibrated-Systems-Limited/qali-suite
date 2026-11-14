@@ -635,3 +635,66 @@ table.tech-table { width: 100%; border-collapse: collapse; font-size: 13.5px; mi
 .tech-dialog h3 { margin: 0 0 2px; font-size: 18px; font-weight: 900; }
 .tech-dialog .dsub { font-size: 12.5px; color: var(--muted-foreground); margin: 0 0 14px; }
 .tech-empty2 { text-align: center; padding: 40px 20px; color: var(--muted-foreground); border: 1px dashed var(--border); border-radius: 12px; }
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * THE WORKFLOW REPORTS APP KIT
+ *
+ * The standalone QSL app's own utility classes (its src/app/globals.css),
+ * scoped under `.tech` so the registry, report and form screens here are
+ * built from the same pieces as there and read the same: paper cards between
+ * hazard stripes, square-cornered inputs, coal/gold buttons, solid status
+ * pills, uppercase heavy headings. The app is light-only, so these surfaces
+ * keep its paper colours in the ERP's dark theme too.
+ * ══════════════════════════════════════════════════════════════════════════ */
+.tech {
+  --gold: #f5a800;
+  --coal: #161310;
+  --paper: #f7f5f0;
+  --ink: #26221c;
+  --line: #ddd6c8;
+  --mute: #6b6355;
+  --pass: #2e7d46;
+  --fail: #b03a2e;
+  --wait: #946b00;
+  --mono: ui-monospace, "SF Mono", "Roboto Mono", Menlo, Consolas, monospace;
+}
+.tech .app-content { max-width: 1120px; margin: 0 auto; padding: 12px 16px 40px; color: var(--ink); }
+.tech .app-content.wide { max-width: 1280px; }
+.tech .stripe { height: 6px; background-image: repeating-linear-gradient(45deg, var(--gold) 0 12px, var(--coal) 12px 24px); }
+.tech .card { background: #fff; border: 1px solid var(--line); border-radius: 2px; color: var(--ink); }
+.tech .paper { background: var(--paper); }
+.tech .mono { font-family: var(--mono); }
+.tech .eyebrow { font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--mute); margin: 0; }
+.tech .h1 { font-size: 22px; font-weight: 900; letter-spacing: -0.01em; text-transform: uppercase; margin: 0; color: var(--ink); }
+.tech .btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  border: 1px solid var(--line); background: #fff; color: var(--ink);
+  font-weight: 700; padding: 10px 14px; border-radius: 2px; font-size: 13px;
+  text-decoration: none; cursor: pointer; white-space: nowrap;
+}
+.tech .btn:hover { background: #f8f5ee; }
+.tech .btn-primary { background: var(--gold); color: var(--coal); border-color: var(--gold); text-transform: uppercase; letter-spacing: 0.04em; font-weight: 900; }
+.tech .btn-primary:hover { background: #e59d00; }
+.tech .btn-dark { background: var(--coal); color: var(--gold); border-color: var(--coal); font-weight: 800; }
+.tech .btn-dark:hover { background: #2a251f; }
+.tech .btn:disabled { opacity: 0.55; cursor: not-allowed; }
+.tech .input { width: 100%; border: 1px solid #cfc8ba; border-radius: 2px; padding: 10px 12px; font-size: 14px; background: #fff; color: var(--ink); }
+.tech .input:focus { outline: 2px solid var(--gold); outline-offset: 1px; }
+.tech .label { display: block; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--mute); margin-bottom: 4px; }
+.tech .field { display: block; margin-bottom: 12px; }
+.tech .pill { font-size: 11px; font-weight: 800; padding: 4px 8px; border-radius: 2px; color: #fff; letter-spacing: 0.04em; white-space: nowrap; display: inline-block; }
+.tech .err { color: var(--fail); font-weight: 700; font-size: 13px; }
+.tech .muted { color: var(--mute); font-size: 13px; }
+.tech .grid { display: grid; gap: 12px; }
+@media (min-width: 780px) {
+  .tech .md-2 { grid-template-columns: 1fr 1fr; }
+  .tech .md-3 { grid-template-columns: 1fr 1fr 1fr; }
+}
+.tech .reg-row { transition: background 0.1s; }
+.tech .reg-row:hover { background: #f1ead9 !important; }
+.tech .modal-card { max-height: 88dvh; overflow-y: auto; overscroll-behavior: contain; }
+@media (max-width: 480px) {
+  .tech .input { font-size: 16px; }
+  .tech .h1 { font-size: 20px; }
+  .tech .app-content { padding-left: 12px; padding-right: 12px; }
+}

@@ -365,18 +365,40 @@ export async function reassignWorkflowReport(id: string, projectId: string, user
 }
 
 /** Send a report back to draft — available to the sign-off group. */
-export async function reopenWorkflowReport(id: string, projectId: string) {
+/**
+ * Back to draft. With a comment it is "Return to author": the comment is kept
+ * on the report and whoever submitted it is told.
+ */
+export async function reopenWorkflowReport(id: string, projectId: string, comment = "") {
   try {
     const row = await withAuthorizedTenant(
       WORKFLOW_REPORT_SIGNOFF_ROLES as unknown as string[],
-      async (tx, { user }) => {
-        const updated = await repo.reopenReport(tx, id, actorFrom(user));
+      async (tx, { user, companyId }) => {
+        const updated = await repo.reopenReport(tx, id, actorFrom(user), String(comment || ""));
         if (!updated) throw new Error("Report not found");
+        const author = updated.submittedById || updated.createdById;
+        if (String(comment || "").trim() && author && author !== user.id) {
+          await notifications.createMany(tx, [
+            {
+              companyId,
+              userId: author,
+              type: "approval_request",
+              title: `${updated.reportNumber} was returned to you`,
+              body: String(comment).trim(),
+              href: `/dashboard/technical/${updated.id}`,
+            },
+          ]);
+        }
         return updated;
       },
     );
     revalidateReports(projectId, id);
-    return { success: true, message: `${row.reportNumber} reopened for editing` };
+    return {
+      success: true,
+      message: String(comment || "").trim()
+        ? `${row.reportNumber} returned to its author`
+        : `${row.reportNumber} reopened for editing`,
+    };
   } catch (error) {
     return { success: false, error: userMessage(error) };
   }

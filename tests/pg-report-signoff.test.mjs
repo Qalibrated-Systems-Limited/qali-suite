@@ -125,6 +125,22 @@ suite("report sign-off", () => {
     expect(back.assignedApproverId).toBeNull();
   });
 
+  it("returns a report to its author with the reason, and clears it on resubmission", async () => {
+    const r = await draft();
+    await submit(r);
+    const back = await inA((tx) => repo.reopenReport(tx, r.id, people.sup, "  Add the truck registration.  "));
+    expect(back.status).toBe("draft");
+    expect(back.data.returned).toMatchObject({ comment: "Add the truck registration.", byName: "sup" });
+
+    const again = await submit(r);
+    expect(again.status).toBe("submitted");
+    expect(again.data.returned).toBeUndefined();
+
+    // Reopening without a comment is a plain reopen: nothing is recorded.
+    const plain = await inA((tx) => repo.reopenReport(tx, r.id, people.sup));
+    expect(plain.data.returned).toBeUndefined();
+  });
+
   it("leaves a report submitted before names were given open to the group", async () => {
     const r = await draft();
     await inA((tx) => tx.execute(sql`

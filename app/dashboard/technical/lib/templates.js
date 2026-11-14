@@ -542,6 +542,23 @@ export const TEMPLATES = [
     category: "Construction",
     who: "Consultant / Site Engineer",
     desc: "Formal construction site instruction: contract details, the instruction itself, cost code and approvals.",
+    // ISO document control and the printed wet-signature sign-off, as the
+    // Workflow Reports app prints them on a Site Instruction (QSL SOPs).
+    docControl: {
+      reference: "QSL-PM-SOP-004 (Project Management SOP) — Issuance & Control of Site Instructions",
+      docNo: "QSL-PD-FRM-001",
+      serialLabel: "SI no.",
+      revision: "00",
+      issueDate: "August 2026",
+      notice: "CONTROLLED DOCUMENT — Uncontrolled if printed or downloaded",
+    },
+    signOff: {
+      title: "Sign-off / Approval",
+      statement:
+        "This Site Instruction is issued for action in accordance with the Contract. The Main Contractor shall acknowledge receipt and confirm understanding by signing below. Any cost or time implication arising from this instruction shall be notified in writing in accordance with the Contract, prior to implementation, unless stated otherwise above.",
+      lines: ["Name", "Designation", "Signature", "Date"],
+      parties: ["For: Consultant", "For: Main Contractor"],
+    },
     sections: [
       {
         type: "fields",

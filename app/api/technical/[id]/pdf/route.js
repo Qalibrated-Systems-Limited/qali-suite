@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { renderToBuffer } from "@react-pdf/renderer";
+import QRCode from "qrcode";
 import { auth } from "@/auth";
 import { safeErrorMessage } from "@/lib/safe-error";
 import { getTenantContext } from "@/lib/utils/tenant-utils";
@@ -41,6 +42,26 @@ export async function GET(req, { params }) {
     const { getCompanyForDocuments } = await import("@/app/db/platform");
     const company = await getCompanyForDocuments(String(companyId));
 
+    // The "scan to verify" code carries a short description of the document,
+    // ending with the link to it, as the Workflow Reports app's does. It is
+    // read on any phone without an account; the link needs a login.
+    const serial = displaySerial(report.reportNumber);
+    const header = report.data?.header || {};
+    const origin = new URL(req.url).origin;
+    const qrText = [
+      `${company?.name || ""} ${sheetName(report.type)}`.trim(),
+      `${serial}${header.client ? ` · ${header.client}` : ""}${header.site ? ` - ${header.site}` : ""}`,
+      `Status: ${(STATUS_CONFIG[report.status] || STATUS_CONFIG.draft).label.toLowerCase()}`,
+      `Filed by ${report.createdByName || "—"}`,
+      `${origin}/dashboard/technical/${report.id}`,
+    ].join("\n");
+    const qrSrc = await QRCode.toDataURL(qrText, {
+      margin: 1,
+      width: 240,
+      errorCorrectionLevel: "M",
+      color: { dark: "#161310", light: "#ffffff" },
+    }).catch(() => null);
+
     const buffer = await renderToBuffer(
       TechnicalReportPDF({
         report,
@@ -48,8 +69,8 @@ export async function GET(req, { params }) {
         company,
         template: templateByCode(report.type),
         sheetLabel: sheetName(report.type),
-        serial: displaySerial(report.reportNumber),
-        statusLabel: (STATUS_CONFIG[report.status] || STATUS_CONFIG.draft).label,
+        serial,
+        qrSrc,
       }),
     );
 

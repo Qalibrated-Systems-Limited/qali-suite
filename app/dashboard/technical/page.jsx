@@ -4,7 +4,7 @@ import { getWorkspaceContext } from "../projects/lib/workspace";
 import AccessDenied from "../projects/components/AccessDenied";
 import NoProjectsCard from "../projects/components/NoProjectsCard";
 import ProjectSwitcher from "../projects/components/ProjectSwitcher";
-import RegistryBrowser from "./components/RegistryBrowser";
+import Registry from "./components/Registry";
 import { getWorkflowReports } from "@/app/db/actions/workflow-report-actions";
 import { Plus } from "lucide-react";
 
@@ -18,19 +18,12 @@ export default async function TechnicalRegistryPage({ searchParams }) {
   const ctx = await getWorkspaceContext(sp);
   if (ctx.denied) return <AccessDenied />;
 
-  const { projects, project } = ctx;
+  const { projects, project, user } = ctx;
   const reports = project ? await getWorkflowReports(project.id) : [];
 
   return (
     <>
       <div className="tech-bar">
-        <span className="tech-bar-title">
-          Report registry
-          <span className="count">
-            {reports.length} report{reports.length === 1 ? "" : "s"}
-            {project ? ` · ${project.name}` : ""}
-          </span>
-        </span>
         <span className="tech-bar-spacer" />
         <Suspense fallback={null}>
           <ProjectSwitcher projects={projects} selectedId={project?.id} />
@@ -44,9 +37,9 @@ export default async function TechnicalRegistryPage({ searchParams }) {
         </Link>
       </div>
 
-      <div className="tech-wrap">
+      <div className="app-content wide">
         {!project && <NoProjectsCard />}
-        {project && <RegistryBrowser reports={reports} projectId={project.id} />}
+        {project && <Registry reports={reports} role={user?.role || ""} />}
       </div>
     </>
   );

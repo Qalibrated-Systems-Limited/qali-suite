@@ -3,108 +3,73 @@
 // ============================================
 // The documents the Calibration (ISO/IEC 17025) and Inspection (ISO/IEC 17020)
 // screens issue. Both carry what the record holds — there is no measurement
-// table in the data — and the same house look as the technical report.
+// table in the data — on the same refined letterhead as the technical report
+// (lib/pdf/refined.jsx): accent bar, boxed logo, coal title pill with the
+// result as its badge, the key/value panel, gold-square section heads and the
+// ISO footer.
 // ============================================
 
 import React from "react";
-import { Document, Page, Text, View, StyleSheet, Image } from "@react-pdf/renderer";
-import { formatDate, formatAddress } from "../utils";
+import { Document, Page, Text, View, StyleSheet } from "@react-pdf/renderer";
+import { formatDate } from "../utils";
+import { R, TopBar, RefinedHeader, TitlePill, RefinedFooter, SectionHead } from "../refined";
 
 const colors = {
-  primary: "#eab308",
-  dark: "#18181b",
-  gray: "#71717a",
-  grayLight: "#d4d4d8",
-  grayLightest: "#f4f4f5",
+  dark: R.COAL,
+  gray: R.MUTE,
+  grayLight: "#E4DCCB",
   white: "#ffffff",
-  green: "#16a34a",
-  amber: "#d97706",
-  red: "#dc2626",
-  slate: "#64748b",
+  green: R.PASS,
+  amber: R.WAIT,
+  red: R.FAIL,
+  slate: R.MUTE,
 };
 
 const s = StyleSheet.create({
-  page: { fontFamily: "Helvetica", fontSize: 9, padding: 40, color: colors.dark, backgroundColor: colors.white },
-  header: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 18 },
-  logo: { width: 140, height: 45, objectFit: "contain", marginBottom: 6 },
-  companyName: { fontSize: 12, fontFamily: "Helvetica-Bold" },
-  companyDetails: { fontSize: 8, color: colors.gray, lineHeight: 1.4, marginTop: 2 },
-  docHead: { alignItems: "flex-end" },
-  docTitle: { fontSize: 18, fontFamily: "Helvetica-Bold", color: colors.primary },
-  docSub: { fontSize: 8, color: colors.gray, marginTop: 2 },
-  docNumber: { fontSize: 10, fontFamily: "Helvetica-Bold", marginTop: 4 },
-  divider: { height: 2, backgroundColor: colors.primary, marginBottom: 16 },
-  sectionBar: {
-    fontSize: 9, fontFamily: "Helvetica-Bold", textTransform: "uppercase", letterSpacing: 0.4,
-    borderLeftWidth: 3, borderLeftColor: colors.primary, paddingLeft: 6, marginTop: 14, marginBottom: 8,
-  },
-  row: { flexDirection: "row", borderBottomWidth: 0.5, borderBottomColor: colors.grayLight, paddingVertical: 5 },
-  key: { width: "34%", color: colors.gray },
-  val: { width: "66%", fontFamily: "Helvetica-Bold" },
-  resultBox: { marginTop: 14, padding: 12, borderRadius: 4, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  resultLabel: { fontSize: 8, color: colors.white, textTransform: "uppercase", letterSpacing: 0.5 },
-  resultValue: { fontSize: 16, fontFamily: "Helvetica-Bold", color: colors.white },
-  thRow: { flexDirection: "row", backgroundColor: colors.dark, paddingVertical: 5, paddingHorizontal: 2 },
-  th: { color: colors.white, fontSize: 7.5, fontFamily: "Helvetica-Bold", textTransform: "uppercase", paddingHorizontal: 3 },
-  tdRow: { flexDirection: "row", paddingVertical: 4, paddingHorizontal: 2, borderBottomWidth: 0.5, borderBottomColor: colors.grayLight },
-  td: { fontSize: 8.5, paddingHorizontal: 3 },
-  para: { fontSize: 9.5, lineHeight: 1.5 },
-  statement: { fontSize: 8, color: colors.gray, lineHeight: 1.5, marginTop: 14 },
-  signRow: { flexDirection: "row", justifyContent: "space-between", marginTop: 40 },
-  sign: { width: "45%", borderTopWidth: 0.75, borderTopColor: colors.dark, paddingTop: 4 },
-  signLabel: { fontSize: 8, color: colors.gray },
+  page: { paddingTop: 26, paddingBottom: 84, paddingHorizontal: 32, fontSize: 9, color: R.INK, fontFamily: "Helvetica" },
+  table: { borderTopWidth: 0.5, borderTopColor: colors.grayLight, marginBottom: 6 },
+  row: { flexDirection: "row" },
+  panelRow: { flexDirection: "row", borderBottomWidth: 0.5, borderBottomColor: colors.grayLight },
+  keyBox: { width: "30%", backgroundColor: "#F7F4EC", paddingVertical: 4, paddingHorizontal: 7 },
+  key: { fontFamily: "Helvetica-Bold", fontSize: 7, color: R.MUTE, letterSpacing: 0.3, textTransform: "uppercase" },
+  val: { width: "70%", paddingVertical: 4, paddingHorizontal: 8, fontSize: 8.6, color: R.INK },
+  th: { backgroundColor: R.COAL, color: colors.white, fontSize: 7.5, padding: 3, fontFamily: "Helvetica-Bold" },
+  td: { fontSize: 8, padding: 3, borderBottomWidth: 0.5, borderBottomColor: "#DDD" },
+  para: { fontSize: 8.6, lineHeight: 1.4 },
+  statement: { fontSize: 7.6, color: R.MUTE, lineHeight: 1.45, marginTop: 14 },
+  signRow: { flexDirection: "row", justifyContent: "space-between", marginTop: 34 },
+  sign: { width: "45%", borderTopWidth: 0.75, borderTopColor: R.COAL, paddingTop: 4 },
+  signLabel: { fontSize: 7.5, color: R.MUTE, textTransform: "uppercase", letterSpacing: 0.4 },
   signName: { fontSize: 9, fontFamily: "Helvetica-Bold", marginBottom: 2 },
-  footer: {
-    position: "absolute", bottom: 24, left: 40, right: 40, borderTopWidth: 1, borderTopColor: colors.grayLight,
-    paddingTop: 8, flexDirection: "row", justifyContent: "space-between",
-  },
-  footerMotto: { fontSize: 8, color: colors.primary, fontFamily: "Helvetica-Bold" },
-  footerText: { fontSize: 7, color: colors.gray },
 });
 
-function Letterhead({ company, title, sub, number }) {
-  const logo = typeof company?.logo === "string" ? company.logo : company?.logo?.url;
-  const address = formatAddress(company?.address);
+function Letterhead({ company, kind, title, number, date, status }) {
   return (
     <>
-      <View style={s.header}>
-        <View style={{ flex: 1 }}>
-          {logo ? <Image style={s.logo} src={logo} /> : null}
-          <Text style={s.companyName}>{company?.name || ""}</Text>
-          <Text style={s.companyDetails}>
-            {address || ""}
-            {company?.phone || company?.email ? `\n${[company.phone, company.email].filter(Boolean).join(" | ")}` : ""}
-          </Text>
-        </View>
-        <View style={s.docHead}>
-          <Text style={s.docTitle}>{title}</Text>
-          <Text style={s.docSub}>{sub}</Text>
-          <Text style={s.docNumber}>{number}</Text>
-        </View>
-      </View>
-      <View style={s.divider} />
+      <TopBar kind={kind} />
+      <RefinedHeader
+        company={company}
+        meta={[
+          { k: "Date", v: date },
+          { k: "No.", v: number, mono: true },
+        ]}
+      />
+      <TitlePill title={title} status={status} />
     </>
   );
 }
 
-function Row({ k, v }) {
+function Panel({ rows }) {
   return (
-    <View style={s.row}>
-      <Text style={s.key}>{k}</Text>
-      <Text style={s.val}>{v || "—"}</Text>
-    </View>
-  );
-}
-
-function Footer({ company, number }) {
-  return (
-    <View style={s.footer} fixed>
-      <Text style={s.footerMotto}>{company?.tagline || company?.name || ""}</Text>
-      <Text
-        style={s.footerText}
-        render={({ pageNumber, totalPages }) => `${number}  ·  Page ${pageNumber} of ${totalPages}`}
-        fixed
-      />
+    <View style={s.table}>
+      {rows.map(([k, v]) => (
+        <View key={k} style={s.panelRow} wrap={false}>
+          <View style={s.keyBox}>
+            <Text style={s.key}>{k}</Text>
+          </View>
+          <Text style={s.val}>{v || "—"}</Text>
+        </View>
+      ))}
     </View>
   );
 }
@@ -126,33 +91,40 @@ export function CalibrationCertificatePDF({ company, job, standards = [], issued
   return (
     <Document title={`Calibration certificate ${number}`}>
       <Page size="A4" style={s.page}>
-        <Letterhead company={company} title="CALIBRATION CERTIFICATE" sub="ISO/IEC 17025" number={number} />
+        <Letterhead
+          company={company}
+          kind="calibration"
+          title="Calibration Certificate"
+          number={number}
+          date={formatDate(issuedOn)}
+          status={{ label: result.label, bg: result.bg, color: colors.white }}
+        />
 
-        <Text style={s.sectionBar}>Customer and item</Text>
-        <Row k="Customer" v={job.clientName} />
-        <Row k="Location / site" v={job.site} />
-        <Row k="Calibration service" v={job.serviceType} />
-        <Row k="Job reference" v={job.jobNumber} />
-        <Row k="Date of calibration" v={job.scheduledDate ? formatDate(job.scheduledDate) : null} />
-        <Row k="Date of issue" v={formatDate(issuedOn)} />
-        <Row k="Calibrated by" v={job.technicianName} />
-
-        <View style={[s.resultBox, { backgroundColor: result.bg }]} wrap={false}>
-          <Text style={s.resultLabel}>Result</Text>
-          <Text style={s.resultValue}>{result.label}</Text>
-        </View>
+        <SectionHead>Customer and item · ISO/IEC 17025</SectionHead>
+        <Panel
+          rows={[
+            ["Customer", job.clientName],
+            ["Location / site", job.site],
+            ["Calibration service", job.serviceType],
+            ["Job reference", job.jobNumber],
+            ["Date of calibration", job.scheduledDate ? formatDate(job.scheduledDate) : null],
+            ["Date of issue", formatDate(issuedOn)],
+            ["Calibrated by", job.technicianName],
+            ["Result", result.label],
+          ]}
+        />
 
         {standards.length > 0 && (
           <View wrap={false}>
-            <Text style={s.sectionBar}>Reference standards</Text>
-            <View style={s.thRow}>
+            <SectionHead count={standards.length}>Reference standards</SectionHead>
+            <View style={s.row}>
               <Text style={[s.th, { width: "34%" }]}>Standard</Text>
               <Text style={[s.th, { width: "30%" }]}>Traceability</Text>
               <Text style={[s.th, { width: "18%" }]}>Uncertainty</Text>
               <Text style={[s.th, { width: "18%" }]}>Cal. due</Text>
             </View>
             {standards.map((st) => (
-              <View key={st.id} style={s.tdRow}>
+              <View key={st.id} style={s.row}>
                 <Text style={[s.td, { width: "34%" }]}>{st.name}</Text>
                 <Text style={[s.td, { width: "30%" }]}>{st.traceability || "—"}</Text>
                 <Text style={[s.td, { width: "18%" }]}>{st.uncertainty || "—"}</Text>
@@ -164,7 +136,7 @@ export function CalibrationCertificatePDF({ company, job, standards = [], issued
 
         {job.notes ? (
           <View wrap={false}>
-            <Text style={s.sectionBar}>Remarks</Text>
+            <SectionHead>Remarks</SectionHead>
             <Text style={s.para}>{job.notes}</Text>
           </View>
         ) : null}
@@ -185,7 +157,7 @@ export function CalibrationCertificatePDF({ company, job, standards = [], issued
           </View>
         </View>
 
-        <Footer company={company} number={number} />
+        <RefinedFooter company={company} serial={number} />
       </Page>
     </Document>
   );
@@ -205,26 +177,33 @@ export function InspectionReportPDF({ company, inspection, issuedOn }) {
   return (
     <Document title={`Inspection report ${number}`}>
       <Page size="A4" style={s.page}>
-        <Letterhead company={company} title="INSPECTION REPORT" sub="ISO/IEC 17020" number={number} />
+        <Letterhead
+          company={company}
+          kind="report"
+          title="Inspection Report"
+          number={number}
+          date={formatDate(issuedOn)}
+          status={{ label: ruling.label, bg: ruling.bg, color: colors.white }}
+        />
 
-        <Text style={s.sectionBar}>Inspection</Text>
-        <Row k="Client" v={inspection.clientName} />
-        <Row k="Type of inspection" v={inspection.type} />
-        <Row k="Equipment serial no." v={inspection.equipmentSerial} />
-        <Row k="Date of inspection" v={inspection.scheduledDate ? formatDate(inspection.scheduledDate) : null} />
-        <Row k="Inspector" v={inspection.inspectorName} />
-        <Row k="Authority valid until" v={inspection.authorityExpiry ? formatDate(inspection.authorityExpiry) : null} />
-        <Row k="Appeal" v={APPEAL[inspection.appealStatus] || inspection.appealStatus} />
-        <Row k="Date of report" v={formatDate(issuedOn)} />
-
-        <View style={[s.resultBox, { backgroundColor: ruling.bg }]} wrap={false}>
-          <Text style={s.resultLabel}>Ruling</Text>
-          <Text style={s.resultValue}>{ruling.label}</Text>
-        </View>
+        <SectionHead>Inspection · ISO/IEC 17020</SectionHead>
+        <Panel
+          rows={[
+            ["Client", inspection.clientName],
+            ["Type of inspection", inspection.type],
+            ["Equipment serial no.", inspection.equipmentSerial],
+            ["Date of inspection", inspection.scheduledDate ? formatDate(inspection.scheduledDate) : null],
+            ["Inspector", inspection.inspectorName],
+            ["Authority valid until", inspection.authorityExpiry ? formatDate(inspection.authorityExpiry) : null],
+            ["Appeal", APPEAL[inspection.appealStatus] || inspection.appealStatus],
+            ["Date of report", formatDate(issuedOn)],
+            ["Ruling", ruling.label],
+          ]}
+        />
 
         {inspection.notes ? (
           <View wrap={false}>
-            <Text style={s.sectionBar}>Findings and remarks</Text>
+            <SectionHead>Findings and remarks</SectionHead>
             <Text style={s.para}>{inspection.notes}</Text>
           </View>
         ) : null}
@@ -245,7 +224,7 @@ export function InspectionReportPDF({ company, inspection, issuedOn }) {
           </View>
         </View>
 
-        <Footer company={company} number={number} />
+        <RefinedFooter company={company} serial={number} />
       </Page>
     </Document>
   );
