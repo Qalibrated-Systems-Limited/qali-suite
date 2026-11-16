@@ -65,6 +65,7 @@ export const TEMPLATES = [
   {
     code: "WB01",
     name: "Daily Site Check",
+    cadence: "Daily report",
     category: "Weighing & Metrology",
     who: "Site Technician",
     desc: "Quick morning walk-around. Mark each line OK or report a problem.",
@@ -91,6 +92,7 @@ export const TEMPLATES = [
   {
     code: "WB02",
     name: "Weekly Accuracy Check",
+    cadence: "Weekly report",
     category: "Weighing & Metrology",
     who: "Site Technician",
     desc: "End-Middle-End test with the same loaded truck.",
@@ -119,6 +121,7 @@ export const TEMPLATES = [
   {
     code: "WB03",
     name: "Monthly Maintenance",
+    cadence: "Monthly report",
     category: "Weighing & Metrology",
     who: "Site Technician",
     desc: "Cleaning and inspection. Never spray water at load cells or the junction box.",
@@ -163,6 +166,7 @@ export const TEMPLATES = [
   {
     code: "WB04",
     name: "Engineer Service Checklist",
+    cadence: "Quarterly / bi-annual service",
     category: "Weighing & Metrology",
     who: "QSL Engineer",
     desc: "Quarterly / bi-annual service inspection (QSL/F/WB-04).",
@@ -210,6 +214,7 @@ export const TEMPLATES = [
   {
     code: "WB05",
     name: "Weighbridge Service Report",
+    cadence: "Breakdown / corrective service",
     category: "Weighing & Metrology",
     who: "QSL Engineer",
     desc: "Corrective / breakdown visit (QSL/F/WB-05): fault, diagnosis, work, parts.",
@@ -256,6 +261,7 @@ export const TEMPLATES = [
   {
     code: "WB06",
     name: "Calibration & Verification Record",
+    cadence: "Annual calibration",
     category: "Weighing & Metrology",
     who: "QSL Engineer",
     desc: "ISO/IEC 17025 calibration with traceable test weights (QSL/F/WB-06).",
@@ -539,6 +545,7 @@ export const TEMPLATES = [
   {
     code: "SI01",
     name: "Site Instruction",
+    cadence: "Site instruction",
     category: "Construction",
     who: "Consultant / Site Engineer",
     desc: "Formal construction site instruction: contract details, the instruction itself, cost code and approvals.",
@@ -1644,6 +1651,7 @@ export const TEMPLATES = [
   {
     code: "TR01",
     name: "Technical Report",
+    cadence: "Field service / calibration visit",
     category: "Field Service & General",
     who: "Technician (approved by Project Manager)",
     desc: "In-house field service report: nature of visit, machine details, fault, findings, correction, result, parts and job time.",

@@ -3,7 +3,6 @@ import { renderToBuffer } from "@react-pdf/renderer";
 import QRCode from "qrcode";
 import { auth } from "@/auth";
 import { safeErrorMessage } from "@/lib/safe-error";
-import { getTenantContext } from "@/lib/utils/tenant-utils";
 import { canSeeProjectsNav } from "@/lib/permissions";
 import { getWorkflowReport } from "@/app/db/actions/workflow-report-actions";
 import { getProjectById } from "@/app/db/actions/project-actions";
@@ -37,10 +36,12 @@ export async function GET(req, { params }) {
 
     const project = report.projectId ? await getProjectById(report.projectId).catch(() => null) : null;
 
-    // Company branding for the PDF header.
-    const { companyId } = await getTenantContext();
+    // Company branding for the letterhead — the company the REPORT belongs to.
+    // This asked getTenantContext(), whose company can be unset for a user
+    // working in a company that is not their home one, and the letterhead
+    // then came out blank: no logo, name, address or accreditation line.
     const { getCompanyForDocuments } = await import("@/app/db/platform");
-    const company = await getCompanyForDocuments(String(companyId));
+    const company = await getCompanyForDocuments(String(report.companyId));
 
     // The "scan to verify" code carries a short description of the document,
     // ending with the link to it, as the Workflow Reports app's does. It is

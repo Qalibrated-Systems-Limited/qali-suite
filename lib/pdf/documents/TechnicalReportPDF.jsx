@@ -176,7 +176,9 @@ export function TechnicalReportPDF({ report, project, company = {}, template, sh
   // vehicle, everything else the project it was filed against.
   const isWeighing = tpl?.category === "Weighing & Metrology";
   const isTechReport = report.type === "TR01";
-  const reportTypeVal = `${tpl?.category || "Report"} (${report.type})`;
+  // "Daily report (WB01)", as the app prints it; sheets added here without a
+  // cadence use their kind of work.
+  const reportTypeVal = `${tpl?.cadence || tpl?.category || "Report"} (${report.type})`;
   const projectVal = project ? `${project.projectNumber} · ${project.name}` : "—";
   const meta = [
     ["Client", header.client || "—", "Site", header.site || "—"],
@@ -188,7 +190,6 @@ export function TechnicalReportPDF({ report, project, company = {}, template, sh
     ["Completed by", report.createdByName || "—", "Date", fmtEat(serviceDate)],
     ["Supervisor", report.assignedReviewerName || report.reviewedByName || "—", "Manager", report.assignedApproverName || report.approvedByName || "—"],
   ];
-  if (isTechReport || isWeighing) meta.push(["Project", projectVal, "", ""]);
 
   const sections = tpl?.sections || [];
   const fieldLabels = {};
