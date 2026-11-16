@@ -1690,6 +1690,61 @@ export const TEMPLATES = [
     ],
   },
   {
+    // Ported from the Workflow Reports app as it has it: a general daily record
+    // so any technician or engineer can log whatever work they did that day —
+    // installations, repairs, inspections, support, deliveries, workshop or
+    // office work. Any report-filing role may file it.
+    code: "GD01",
+    name: "General Daily Activity",
+    cadence: "Daily report",
+    category: "Field Service & General",
+    who: "Technician / Engineer",
+    desc: "Daily record of general field or workshop work beyond weighbridge service — any task a technician or engineer carries out that day.",
+    anyone: true,
+    sections: [
+      {
+        type: "choices",
+        k: "activityTypes",
+        title: "Type of work done today",
+        multi: true,
+        options: [
+          "Installation",
+          "Repair",
+          "Preventive maintenance",
+          "Inspection",
+          "Calibration / verification",
+          "Site survey",
+          "Customer support",
+          "Delivery / collection",
+          "Training",
+          "Travel",
+          "Workshop / office work",
+          "Other",
+        ],
+      },
+      {
+        type: "fields",
+        fields: [
+          { k: "equipment", label: "Equipment / machine worked on" },
+          { k: "contactPerson", label: "Contact person" },
+          { k: "telNo", label: "Tel. no." },
+        ],
+      },
+      { type: "textarea", k: "workDone", label: "Work done today (summary)" },
+      { type: "textarea", k: "issuesFound", label: "Issues or faults found" },
+      { type: "textarea", k: "actionsTaken", label: "Actions taken" },
+      { type: "textarea", k: "partsUsed", label: "Parts / materials used" },
+      { type: "textarea", k: "followUp", label: "Follow-up required" },
+      {
+        type: "rows",
+        key: "timeLog",
+        title: "Time log",
+        cols: ["Activity", "Time in", "Time out"],
+        rows: 3,
+      },
+    ],
+  },
+  {
     code: "GN01",
     name: "Site Visit Report",
     category: "Field Service & General",

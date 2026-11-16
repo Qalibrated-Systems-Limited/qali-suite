@@ -1,6 +1,6 @@
 import { and, desc, eq, sql } from "drizzle-orm";
 import type { Tx } from "../client";
-import { workflowReports } from "../schema";
+import { workflowReports, projects } from "../schema";
 import { isUuid } from "./sqlHelpers";
 
 /**
@@ -30,6 +30,27 @@ export async function listReports(tx: Tx, projectId: string) {
     .from(workflowReports)
     .where(eq(workflowReports.projectId, projectId))
     .orderBy(desc(workflowReports.createdAt));
+}
+
+/**
+ * Every report in the company, newest first, with its project — the
+ * registry's "all projects" view, which is what lets a search find a report
+ * without first knowing which project it was filed against. Capped so a
+ * company with years of daily sheets still loads; the registry says so.
+ */
+export const REGISTRY_LIMIT = 3000;
+export async function listAllReports(tx: Tx, limit = REGISTRY_LIMIT) {
+  const rows = await tx
+    .select({
+      report: workflowReports,
+      projectNumber: projects.projectNumber,
+      projectName: projects.name,
+    })
+    .from(workflowReports)
+    .leftJoin(projects, eq(projects.id, workflowReports.projectId))
+    .orderBy(desc(workflowReports.createdAt))
+    .limit(limit);
+  return rows.map((r) => ({ ...r.report, projectNumber: r.projectNumber, projectName: r.projectName }));
 }
 
 export async function getReportById(tx: Tx, id: string) {

@@ -129,6 +129,14 @@ export async function getWorkflowReports(projectId: string) {
   });
 }
 
+/** Every report in the company with its project, for the registry search. */
+export async function getAllWorkflowReports() {
+  return withAuthorizedTenant([], async (tx) => {
+    const rows = await repo.listAllReports(tx);
+    return rows.map((r) => ({ ...r, _id: String(r.id) }));
+  });
+}
+
 export async function getWorkflowReportsSummary(projectId: string) {
   if (!projectId) return { total: 0, draft: 0, submitted: 0, reviewed: 0, approved: 0 };
   return withAuthorizedTenant([], (tx) => repo.getReportsSummary(tx, projectId));

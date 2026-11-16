@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Pill, COAL, GOLD, INK, MUTE, FAIL, findingsCount } from "./ui";
-import { sheetName, displaySerial } from "../lib/meta";
+import { sheetName, displaySerial, sheetsByCategory, sheetCategory } from "../lib/meta";
 import { templateByCode } from "../lib/templates";
 
 /**
@@ -13,9 +13,29 @@ import { templateByCode } from "../lib/templates";
  * and a NEW tag on anything filed in the last day, findings counted in red.
  * Click a row for the report.
  *
- * The app fetches from its API and polls; here the server hands the
- * project's reports over and the filters run in the browser.
+ * The app fetches from its API and polls; here the server hands over every
+ * report in the company and the filters run in the browser. The search reads
+ * the serial, sheet, client, site, weighbridge, project, author and what was
+ * written on the sheet itself (equipment, findings, work done, remarks), so a
+ * report can be found by what it says.
  */
+
+/** Everything a report says, as one lower-case string for the search. */
+function searchText(r) {
+  const d = r.data || {};
+  const parts = [
+    ...Object.values(d.header || {}),
+    ...Object.values(d.values || {}).map((v) => (Array.isArray(v) ? v.join(" ") : v)),
+    ...Object.values(d.checks || {}).map((c) => c?.remark),
+    ...Object.values(d.grids || {}),
+    r.title,
+    r.summary,
+    r.workCompleted,
+    r.issues,
+    r.nextSteps,
+  ];
+  return parts.filter((v) => v != null && v !== "").join(" ").toLowerCase();
+}
 
 const FILTERS = [
   ["all", "All"],
@@ -42,7 +62,7 @@ const shortDate = (d) => {
 };
 const reportDate = (r) => r.periodStart || r.createdAt;
 
-export default function Registry({ reports = [], role = "" }) {
+export default function Registry({ reports = [], projects = [], initialProjectId = "", role = "" }) {
   const router = useRouter();
   const [filter, setFilter] = useState("all");
   const [q, setQ] = useState("");
@@ -50,7 +70,9 @@ export default function Registry({ reports = [], role = "" }) {
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [template, setTemplate] = useState("");
-  const [showMore, setShowMore] = useState(false);
+  const [kind, setKind] = useState("");
+  const [projectId, setProjectId] = useState(initialProjectId);
+  const [showMore, setShowMore] = useState(Boolean(initialProjectId));
 
   // Filters survive a quick trip into a report and back, then clear after two
   // idle minutes — the app's behaviour.
@@ -87,8 +109,10 @@ export default function Registry({ reports = [], role = "" }) {
     setFrom("");
     setTo("");
     setTemplate("");
+    setKind("");
+    setProjectId("");
   };
-  const anyFilter = filter !== "all" || q || name || from || to || template;
+  const anyFilter = filter !== "all" || q || name || from || to || template || kind || projectId;
 
   useEffect(() => {
     try {
@@ -119,24 +143,27 @@ export default function Registry({ reports = [], role = "" }) {
       })
       .filter((r) => filter === "all" || r.status === filter)
       .filter((r) => !template || r.type === template)
+      .filter((r) => !kind || sheetCategory(r.type) === kind)
+      .filter((r) => !projectId || r.projectId === projectId)
       .filter(
         (r) =>
           !needle ||
-          [r.serial, r.service, r.createdByName, r.client, r.site, r.weighbridge, r.title]
+          [r.serial, r.service, r.type, r.createdByName, r.projectNumber, r.projectName]
             .join(" ")
             .toLowerCase()
-            .includes(needle),
+            .includes(needle) ||
+          searchText(r).includes(needle),
       )
       .filter((r) => !who || [r.createdByName, r.client].join(" ").toLowerCase().includes(who))
       .filter((r) => {
         const d = String(reportDate(r) || "").slice(0, 10);
         return (!from || d >= from) && (!to || d <= to);
       });
-  }, [reports, filter, template, q, name, from, to]);
+  }, [reports, filter, template, kind, projectId, q, name, from, to]);
 
   const exportCsv = () => {
-    const out = [["serial", "template", "author", "client", "site", "weighbridge", "findings", "status", "report_date", "filed_at"]].concat(
-      rows.map((r) => [r.serial, r.service, r.createdByName, r.client, r.site, r.weighbridge, r.findings, r.status, reportDate(r), r.createdAt]),
+    const out = [["serial", "template", "project", "author", "client", "site", "weighbridge", "findings", "status", "report_date", "filed_at"]].concat(
+      rows.map((r) => [r.serial, r.service, r.projectNumber, r.createdByName, r.client, r.site, r.weighbridge, r.findings, r.status, reportDate(r), r.createdAt]),
     );
     const csv = out.map((r) => r.map((c) => `"${String(c ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
     const a = document.createElement("a");
@@ -177,7 +204,7 @@ export default function Registry({ reports = [], role = "" }) {
         ))}
         <input
           className="input"
-          placeholder="Search serial, author, client, site, weighbridge…"
+          placeholder="Search serial, client, site, equipment, findings, author…"
           value={q}
           onChange={(e) => setQ(e.target.value)}
           style={{ flex: "1 1 220px", minWidth: 180, fontSize: 13, width: "auto" }}
@@ -192,7 +219,7 @@ export default function Registry({ reports = [], role = "" }) {
         )}
       </div>
 
-      {(showMore || template) && (
+      {(showMore || template || kind || projectId) && (
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "end", marginBottom: 10 }}>
           <label className="field" style={{ margin: 0, flex: "1 1 180px" }}>
             <span className="label">Filed by (name / client)</span>
@@ -206,11 +233,45 @@ export default function Registry({ reports = [], role = "" }) {
             <span className="label">To date</span>
             <input className="input" type="date" value={to} min={from || undefined} onChange={(e) => setTo(e.target.value)} />
           </label>
-          {template && (
-            <button onClick={() => setTemplate("")} className="btn" style={{ fontSize: 12, background: COAL, color: GOLD, borderColor: COAL, height: 42 }}>
-              Form: {template} ✕
-            </button>
-          )}
+          <label className="field" style={{ margin: 0, flex: "1 1 200px" }}>
+            <span className="label">Project</span>
+            <select className="input" value={projectId} onChange={(e) => setProjectId(e.target.value)}>
+              <option value="">All projects</option>
+              {projects.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.projectNumber} — {p.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field" style={{ margin: 0, flex: "1 1 180px" }}>
+            <span className="label">Kind of work</span>
+            <select className="input" value={kind} onChange={(e) => { setKind(e.target.value); setTemplate(""); }}>
+              <option value="">All kinds</option>
+              {sheetsByCategory().map((g) => (
+                <option key={g.category} value={g.category}>
+                  {g.category}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field" style={{ margin: 0, flex: "1 1 220px" }}>
+            <span className="label">Sheet</span>
+            <select className="input" value={template} onChange={(e) => setTemplate(e.target.value)}>
+              <option value="">All sheets</option>
+              {sheetsByCategory()
+                .filter((g) => !kind || g.category === kind)
+                .map((g) => (
+                  <optgroup key={g.category} label={g.category}>
+                    {g.sheets.map((t) => (
+                      <option key={t.code} value={t.code}>
+                        {t.code} — {t.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+            </select>
+          </label>
         </div>
       )}
 
@@ -235,13 +296,14 @@ export default function Registry({ reports = [], role = "" }) {
       {rows.length > 0 && (
         <div className="card" style={{ padding: 0, overflow: "hidden" }}>
           <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 820 }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 960 }}>
               <thead>
                 <tr style={{ background: COAL, color: "#fff", fontSize: 10.5, textTransform: "uppercase", letterSpacing: ".05em" }}>
                   <Th center>#</Th>
                   <Th>Date</Th>
                   <Th>Serial</Th>
                   <Th>Service</Th>
+                  <Th>Project</Th>
                   <Th>Weighbridge</Th>
                   <Th>Client / Branch</Th>
                   <Th>Filed by</Th>
@@ -279,6 +341,10 @@ export default function Registry({ reports = [], role = "" }) {
                         )}
                       </td>
                       <td style={{ ...td, fontWeight: 600 }}>{r.service}</td>
+                      <td style={{ ...td, fontSize: 12 }}>
+                        <div style={{ fontFamily: "var(--mono)", color: MUTE }}>{r.projectNumber || "—"}</div>
+                        {r.projectName ? <div className="muted" style={{ fontSize: 11 }}>{r.projectName}</div> : null}
+                      </td>
                       <td style={{ ...td, color: r.weighbridge ? INK : "#b8af9e", fontFamily: r.weighbridge ? "var(--mono)" : "inherit", fontSize: 12 }}>
                         {r.weighbridge || "—"}
                       </td>
