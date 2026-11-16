@@ -1,6 +1,7 @@
 import {
   sendOverdueInvoiceDigests,
   sendLowStockDigests,
+  sendHrDigests,
 } from "@/lib/notifications/alert-digests";
 
 // ============================================
@@ -9,6 +10,7 @@ import {
 // Daily alert digests, one email per tenant per topic:
 //   - overdue invoices → finance roles
 //   - low stock        → inventory roles
+//   - HR (probation ending, certificates expiring) → HR
 //
 // Schedule once per day (e.g. 06:00 EAT) — these are digests, not pages;
 // running more often just re-sends the same summary.
@@ -30,11 +32,12 @@ export async function GET(request) {
 
   try {
     // No Mongo connection: both digests read Postgres since 0102.
-    const [overdue, lowStock] = await Promise.all([
+    const [overdue, lowStock, hr] = await Promise.all([
       sendOverdueInvoiceDigests(),
       sendLowStockDigests(),
+      sendHrDigests(),
     ]);
-    return Response.json({ ok: true, overdue, lowStock });
+    return Response.json({ ok: true, overdue, lowStock, hr });
   } catch (err) {
     console.error("[cron/notify-alerts] error:", err);
     return Response.json(

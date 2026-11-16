@@ -3,10 +3,14 @@ import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { getHrOverview } from "@/app/db/actions/hr-employee-actions";
+import { getHrRecordAlerts } from "@/app/db/actions/hr-records-actions";
 import { getAttendanceForPage } from "@/app/db/actions/hr-attendance-actions";
 import { listLeaveForPage } from "@/app/db/actions/hr-leave-actions";
 import { can } from "@/lib/capabilities";
-import { Users, Building2, Calendar, Banknote, Clock, UserCheck, AlertTriangle, Settings } from "lucide-react";
+import {
+  Users, Building2, Calendar, Banknote, Clock, UserCheck, AlertTriangle, Settings,
+  FileText, Gavel, GraduationCap, Star, Briefcase, BarChart3, Network,
+} from "lucide-react";
 
 export const metadata = { title: "HR | Dashboard" };
 
@@ -74,14 +78,21 @@ async function HeadcountByDept() {
   );
 }
 
-function QuickActions() {
+function QuickActions({ role }) {
   const actions = [
     { label: "Add Employee", href: "/dashboard/hr/employees/create", icon: Users },
     { label: "Add Department", href: "/dashboard/hr/departments/create", icon: Building2 },
     { label: "Leave Requests", href: "/dashboard/hr/leave", icon: Calendar },
     { label: "Leave Types", href: "/dashboard/hr/leave-types", icon: Settings },
     { label: "Run Payroll", href: "/dashboard/hr/payroll/create", icon: Banknote },
-  ];
+    { label: "Issue a Letter", href: "/dashboard/hr/letters/new", icon: FileText, cap: "hr.letters" },
+    { label: "Open a Case", href: "/dashboard/hr/cases/new", icon: Gavel, cap: "hr.discipline" },
+    { label: "Record Training", href: "/dashboard/hr/training", icon: GraduationCap, cap: "hr.training" },
+    { label: "Reviews", href: "/dashboard/hr/reviews", icon: Star, cap: "hr.reviews" },
+    { label: "Recruitment", href: "/dashboard/hr/recruitment", icon: Briefcase, cap: "hr.recruit" },
+    { label: "HR Reports", href: "/dashboard/hr/reports", icon: BarChart3, cap: "hr.reports" },
+    { label: "Org Chart", href: "/dashboard/hr/org-chart", icon: Network, cap: "hr.view" },
+  ].filter((a) => !a.cap || can(role, a.cap));
 
   return (
     <div className="rounded-lg border border-border bg-card p-6 shadow-sm">
@@ -176,6 +187,53 @@ async function ContractExpiryAlerts() {
   );
 }
 
+/**
+ * What needs HR's attention beyond contracts: probations ending, certificates
+ * and licences expiring (or expired), open cases, reviews in progress and
+ * open vacancies. Each links to where it is dealt with.
+ */
+async function RecordAlerts({ role }) {
+  const a = await getHrRecordAlerts().catch(() => null);
+  if (!a) return null;
+  const items = [
+    { n: a.probation_due, label: "probation ending within 30 days", href: "/dashboard/hr/employees?status=probation", cap: "hr.admin" },
+    { n: a.certs_expiring, label: "certificates or licences expiring within 60 days", href: "/dashboard/hr/training", cap: "hr.training" },
+    { n: a.open_cases, label: "open disciplinary or grievance cases", href: "/dashboard/hr/cases", cap: "hr.discipline" },
+    { n: a.reviews_open, label: "performance reviews in progress", href: "/dashboard/hr/reviews", cap: "hr.reviews" },
+    { n: a.open_vacancies, label: "open vacancies", href: "/dashboard/hr/recruitment", cap: "hr.recruit" },
+  ].filter((i) => i.n > 0 && can(role, i.cap));
+  if (!items.length && !a.probation.length) return null;
+  return (
+    <div className="rounded-lg border border-amber-200 bg-amber-500/5 p-4 dark:border-amber-800">
+      <div className="mb-2 flex items-center gap-2">
+        <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+        <p className="text-sm font-semibold text-amber-800 dark:text-amber-300">Needs attention</p>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {items.map((i) => (
+          <Link key={i.label} href={i.href} className="rounded-full border border-amber-300 bg-card px-3 py-1 text-xs hover:bg-accent dark:border-amber-800">
+            <b>{i.n}</b> {i.label}
+          </Link>
+        ))}
+      </div>
+      {a.probation.length > 0 && can(role, "hr.admin") && (
+        <div className="mt-3 space-y-1">
+          {a.probation.map((p) => (
+            <div key={p.id} className="flex items-center justify-between gap-2 text-sm">
+              <Link href={`/dashboard/hr/employees/${p.id}`} className="font-medium text-foreground hover:underline">
+                {p.name}{p.department ? <span className="font-normal text-muted-foreground"> · {p.department}</span> : null}
+              </Link>
+              <span className={Number(p.days_remaining) < 0 ? "text-red-600 dark:text-red-400" : "text-amber-700 dark:text-amber-400"}>
+                probation {Number(p.days_remaining) < 0 ? `ended ${-p.days_remaining}d ago — confirm or extend` : `ends in ${p.days_remaining}d`}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function StatsCardsSkeleton() {
   return (
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
@@ -210,6 +268,10 @@ export default async function HRPage() {
         <ContractExpiryAlerts />
       </Suspense>
 
+      <Suspense fallback={null}>
+        <RecordAlerts role={session.user.role} />
+      </Suspense>
+
       <div className="grid gap-6 lg:grid-cols-3">
         <Suspense fallback={<div className="h-48 animate-pulse rounded-lg bg-muted" />}>
           <HeadcountByDept />
@@ -217,7 +279,7 @@ export default async function HRPage() {
         <Suspense fallback={<div className="h-48 animate-pulse rounded-lg bg-muted" />}>
           <TodayAttendanceWidget />
         </Suspense>
-        <QuickActions />
+        <QuickActions role={session.user.role} />
       </div>
     </div>
   );

@@ -929,6 +929,13 @@ export const getNavigationGroups = (user) => {
           user?.role === "SuperAdmin" ||
           !(can(user?.role, "exit.manage") || can(user?.role, "exit.approve") || can(user?.role, "exit.pay")),
       },
+      { icon: FileText, label: "Letters", id: "hr-letters", href: "/dashboard/hr/letters", hidden: !can(user?.role, "hr.letters") },
+      { icon: Gavel, label: "Disciplinary & Grievances", id: "hr-cases", href: "/dashboard/hr/cases", hidden: !can(user?.role, "hr.discipline") },
+      { icon: Award, label: "Training & Certificates", id: "hr-training", href: "/dashboard/hr/training", hidden: !can(user?.role, "hr.training") },
+      { icon: Target, label: "Performance Reviews", id: "hr-reviews", href: "/dashboard/hr/reviews", hidden: !can(user?.role, "hr.reviews") },
+      { icon: Briefcase, label: "Recruitment", id: "hr-recruitment", href: "/dashboard/hr/recruitment", hidden: !can(user?.role, "hr.recruit") },
+      { icon: TrendingUp, label: "HR Reports", id: "hr-reports", href: "/dashboard/hr/reports", hidden: !can(user?.role, "hr.reports") },
+      { icon: Users, label: "Org Chart", id: "hr-org-chart", href: "/dashboard/hr/org-chart", hidden: !can(user?.role, "hr.view") },
       {
         icon: Settings,
         label: "HR Settings",

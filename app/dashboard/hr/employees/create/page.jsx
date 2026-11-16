@@ -7,6 +7,7 @@ import { getEmployeeFormData } from "@/app/db/actions/hr-employee-actions";
 import { HR_WRITE_ROLES } from "@/lib/utils/role-gates";
 import { roleAllowed } from "@/lib/permissions";
 import EmployeeForm from "../../components/EmployeeForm";
+import { getCandidateForHire } from "@/app/db/actions/hr-records-actions";
 
 export const metadata = { title: "Add Employee | HR" };
 
@@ -25,7 +26,20 @@ export default async function CreateEmployeePage({ searchParams }) {
 
   const params = await searchParams;
   const linkedUserId = params.userId || null;
-  const defaults = linkedUserId
+  // Hiring from a vacancy: the candidate's details start the form, and the
+  // new record is linked back to them when it is saved.
+  const candidate = params.candidate ? await getCandidateForHire(params.candidate).catch(() => null) : null;
+  const defaults = candidate
+    ? {
+        candidateId: candidate.id,
+        email: candidate.email || "",
+        phone: candidate.phone || "",
+        firstName: candidate.fullName.split(" ")[0],
+        lastName: candidate.fullName.split(" ").slice(1).join(" "),
+        designation: params.title || "",
+        basicSalary: candidate.expectedSalary ? Number(candidate.expectedSalary) : "",
+      }
+    : linkedUserId
     ? {
         linkedUserId,
         email: params.email || "",
@@ -49,7 +63,11 @@ export default async function CreateEmployeePage({ searchParams }) {
       <div>
         <h1 className="text-2xl font-bold">Add Employee</h1>
         <p className="text-muted-foreground">
-          {defaults ? `Creating profile for ${params.email}` : "Create a new employee record"}
+          {candidate
+            ? `Hiring ${candidate.fullName} — the candidate is marked hired when this is saved`
+            : defaults
+              ? `Creating profile for ${params.email}`
+              : "Create a new employee record"}
         </p>
       </div>
 

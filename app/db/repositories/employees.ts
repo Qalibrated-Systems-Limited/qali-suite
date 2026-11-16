@@ -905,6 +905,7 @@ function mapEmployee(r: Record<string, unknown>) {
     status: String(r.status),
     hireDate: String(r.hire_date),
     confirmationDate: s("confirmation_date"),
+    probationEndDate: s("probation_end_date"),
     terminationDate: s("termination_date"),
     terminationReason: s("termination_reason"),
     contractStart: s("contract_start"),

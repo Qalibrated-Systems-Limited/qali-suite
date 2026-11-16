@@ -123,6 +123,8 @@ export const employees = pgTable(
 
     hireDate: date("hire_date").notNull(),
     confirmationDate: date("confirmation_date"),
+    /** End of probation (Employment Act s.42: up to six months, extendable once). */
+    probationEndDate: date("probation_end_date"),
     terminationDate: date("termination_date"),
     terminationReason: text("termination_reason"),
 

@@ -11,6 +11,9 @@ import {
 } from "@/lib/utils/role-gates";
 import { userMessage } from "../errors";
 import * as employees from "../repositories/employees";
+import * as hrRecords from "../repositories/hrRecords";
+import { roleAllowed } from "@/lib/permissions";
+import { rolesFor } from "@/lib/capabilities";
 import * as departments from "../repositories/departments";
 import * as leave from "../repositories/leave";
 import * as payrollRepo from "../repositories/payroll";
@@ -152,10 +155,11 @@ export async function createEmployee(
 
   let id: string;
   try {
+    const candidateId = orNull(formData, "candidateId");
     const created = await withAuthorizedTenant(
       [...HR_WRITE_ROLES],
-      (tx, { user, companyId }) =>
-        employees.createEmployee(tx, {
+      async (tx, { user, companyId }) => {
+        const row = await employees.createEmployee(tx, {
           companyId,
           firstName,
           lastName,
@@ -201,7 +205,18 @@ export async function createEmployee(
           userId: orNull(formData, "linkedUserId"),
           notes: orNull(formData, "notes"),
           actor: { id: user.id, name: user.name },
-        }),
+        });
+        await hrRecords.defaultProbationEnd(tx, row.id);
+        // Hired from a vacancy: the candidate becomes this employee, in the
+        // same transaction, so a candidate is never "hired" without one.
+        if (candidateId) {
+          if (!roleAllowed(user.role, rolesFor("hr.recruit") as string[])) {
+            throw new Error("Only HR can hire a candidate.");
+          }
+          await hrRecords.hireCandidate(tx, candidateId, row.id);
+        }
+        return row;
+      },
     );
     id = created.id;
   } catch (err) {
