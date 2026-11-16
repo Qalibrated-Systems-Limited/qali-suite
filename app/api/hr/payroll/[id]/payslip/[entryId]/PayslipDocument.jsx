@@ -6,6 +6,7 @@ import {
   StyleSheet,
   Font,
 } from "@react-pdf/renderer";
+import { TopBar, RefinedHeader, TitlePill, RefinedFooter } from "@/lib/pdf/refined";
 
 // ============================================
 // STYLES
@@ -15,7 +16,9 @@ const styles = StyleSheet.create({
     fontFamily: "Helvetica",
     fontSize: 9,
     color: "#111827",
-    padding: 32,
+    paddingTop: 26,
+    paddingBottom: 84,
+    paddingHorizontal: 32,
     backgroundColor: "#ffffff",
   },
   // Header
@@ -339,28 +342,19 @@ export function PayslipDocument({ run, entry, company }) {
   const variableEarnings =
     entry.overtimePay + entry.bonus + entry.commission + entry.additionalEarnings;
 
-  const companyAddress = company?.address
-    ? [company.address.street, company.address.city, company.address.country].filter(Boolean).join(", ")
-    : null;
-
   return (
     <Document title={`Payslip — ${entry.employeeName} — ${period}`}>
       <Page size="A4" style={styles.page}>
 
-        {/* ── Header ── */}
-        <View style={styles.header}>
-          <View>
-            <Text style={styles.companyName}>{company?.name || "Company"}</Text>
-            {companyAddress && <Text style={styles.companyMeta}>{companyAddress}</Text>}
-            {company?.email && <Text style={styles.companyMeta}>{company.email}</Text>}
-            {company?.phone && <Text style={styles.companyMeta}>{company.phone}</Text>}
-          </View>
-          <View>
-            <Text style={styles.payslipTitle}>PAYSLIP</Text>
-            <Text style={styles.periodLabel}>{period}</Text>
-            <Text style={styles.payrollNumber}>{run.payrollNumber}</Text>
-          </View>
-        </View>
+        <TopBar kind="default" />
+        <RefinedHeader
+          company={company}
+          meta={[
+            { k: "Period", v: period },
+            { k: "Payroll", v: run.payrollNumber, mono: true },
+          ]}
+        />
+        <TitlePill title="Payslip" />
 
         {/* ── Employee Info ── */}
         <View style={styles.infoSection}>
@@ -528,14 +522,11 @@ export function PayslipDocument({ run, entry, company }) {
           </View>
         )}
 
-        {/* ── Footer ── */}
-        <View style={styles.footer}>
-          <Text style={styles.footerText}>
-            Generated on {new Date().toLocaleDateString("en-KE", { day: "numeric", month: "long", year: "numeric" })}
-          </Text>
-          <Text style={styles.confidential}>CONFIDENTIAL — For the named employee only</Text>
-          <Text style={{ fontSize: 7, color: "#CA8A04" }}>Powered by QaliSuite</Text>
-        </View>
+        <RefinedFooter
+          company={company}
+          serial={`${run.payrollNumber} · ${entry.employeeNumber || ""}`}
+          note="CONFIDENTIAL — for the named employee only."
+        />
       </Page>
     </Document>
   );

@@ -7,19 +7,19 @@ import {
   Text,
   View,
   StyleSheet,
-  Image,
 } from "@react-pdf/renderer";
+import { TopBar, RefinedHeader, TitleBanner, RefinedFooter, VerifyCode, verifyText } from "../refined";
 
 // ============================================
 // COLORS
 // ============================================
 const colors = {
-  primary: "#eab308", // Yellow to match app theme
-  primaryLight: "#fef3c7",
-  dark: "#18181b",
-  gray: "#71717a",
-  grayLight: "#d4d4d8",
-  grayLightest: "#f4f4f5",
+  primary: "#F5A800", // Yellow to match app theme
+  primaryLight: "#F6F1E4",
+  dark: "#161310",
+  gray: "#6B6355",
+  grayLight: "#D9D2C3",
+  grayLightest: "#F7F4EC",
   white: "#ffffff",
   success: "#16a34a",
   danger: "#dc2626",
@@ -31,9 +31,11 @@ const colors = {
 // ============================================
 const styles = StyleSheet.create({
   page: {
+    paddingTop: 26,
+    paddingBottom: 84,
+    paddingHorizontal: 32,
     fontFamily: "Helvetica",
     fontSize: 9,
-    padding: 40,
     backgroundColor: colors.white,
     color: colors.dark,
   },
@@ -400,32 +402,9 @@ export const SupplierStatementPDF = ({ statement, company }) => {
   return (
     <Document title={`Supplier Statement - ${supplier.name}`}>
       <Page size="A4" style={styles.page}>
-        {/* Header */}
-        <View style={styles.header}>
-          <View style={styles.logoSection}>
-            <Image style={styles.logo} src={company.logo || "/qsl.png"} />
-            <Text style={styles.companyDetails}>
-              {formatAddress(company.address)}
-              {company.city && `, ${company.city}`}
-              {"\n"}
-              {company.phone} | {company.email}
-              {company.taxPin && `\n${company.taxPin}`}
-            </Text>
-            {company.tagline && (
-              <Text style={styles.companyTagline}>{company.tagline}</Text>
-            )}
-          </View>
-          <View style={styles.statementHeader}>
-            <Text style={styles.statementTitle}>SUPPLIER</Text>
-            <Text style={styles.statementSubtitle}>STATEMENT</Text>
-            <Text style={styles.statementDate}>
-              Generated: {formatDate(statement.generatedAt)}
-            </Text>
-          </View>
-        </View>
-
-        {/* Divider */}
-        <View style={styles.divider} />
+        <TopBar kind="statement" />
+        <RefinedHeader company={company} meta={[{ k: "Date", v: formatDate(statement.generatedAt) }, { k: "From", v: period?.startDate ? formatDate(period.startDate) : "—" }, { k: "To", v: period?.endDate ? formatDate(period.endDate) : "—" }]} />
+        <TitleBanner title="Supplier Statement" status={null} />
 
         {/* Supplier & Period Info */}
         <View style={styles.infoRow}>
@@ -652,15 +631,8 @@ export const SupplierStatementPDF = ({ statement, company }) => {
           </Text>
         </View>
 
-        {/* Footer */}
-        <View style={styles.footer} fixed>
-          <Text style={styles.footerText}>
-            {company.name} | {company.phone} | {company.email}
-          </Text>
-          <Text style={styles.footerNote}>
-            Supplier Statement - {supplier.name}
-          </Text>
-        </View>
+        <VerifyCode value={verifyText({ company: company, title: "Supplier Statement", reference: supplier?.name, date: formatDate(statement.generatedAt) })} />
+        <RefinedFooter company={company} serial={supplier?.name} />
       </Page>
     </Document>
   );

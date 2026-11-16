@@ -5,13 +5,16 @@ import {
   View,
   StyleSheet,
 } from "@react-pdf/renderer";
+import { TopBar, RefinedHeader, TitlePill, RefinedFooter } from "@/lib/pdf/refined";
 
 const s = StyleSheet.create({
   page: {
     fontFamily: "Helvetica",
     fontSize: 8,
     color: "#111827",
-    padding: 28,
+    paddingTop: 26,
+    paddingBottom: 84,
+    paddingHorizontal: 32,
     backgroundColor: "#ffffff",
   },
   // Header
@@ -121,21 +124,16 @@ export function PayrollSummaryDocument({ run, entries, company }) {
   return (
     <Document>
       <Page size="A4" orientation="landscape" style={s.page}>
-        {/* Header */}
-        <View style={s.header}>
-          <View>
-            <Text style={s.companyName}>{company?.name || "Company"}</Text>
-            {company?.email && <Text style={s.companyMeta}>{company.email}</Text>}
-            {company?.phone && <Text style={s.companyMeta}>{company.phone}</Text>}
-          </View>
-          <View>
-            <Text style={s.docTitle}>Payroll Summary Report</Text>
-            <Text style={s.docMeta}>Period: {period}</Text>
-            <Text style={s.docMeta}>Payroll No: {run.payrollNumber}</Text>
-            <Text style={s.docMeta}>Status: {run.status?.toUpperCase()}</Text>
-            <Text style={s.docMeta}>Generated: {generatedAt}</Text>
-          </View>
-        </View>
+        <TopBar kind="default" />
+        <RefinedHeader
+          company={company}
+          meta={[
+            { k: "Period", v: period },
+            { k: "Payroll", v: run.payrollNumber, mono: true },
+            { k: "Printed", v: generatedAt },
+          ]}
+        />
+        <TitlePill title="Payroll Summary" status={{ label: String(run.status || "").toUpperCase(), bg: "#161310", color: "#fff" }} />
 
         {/* Summary boxes */}
         <View style={s.boxRow}>
@@ -235,12 +233,7 @@ export function PayrollSummaryDocument({ run, entries, company }) {
           ))}
         </View>
 
-        {/* Footer */}
-        <View style={s.footer}>
-          <Text style={s.footerText}>CONFIDENTIAL — For internal use only</Text>
-          <Text style={s.footerText}>{company?.name} · {period} Payroll · {run.payrollNumber}</Text>
-          <Text style={s.footerText}>Generated {generatedAt}</Text>
-        </View>
+        <RefinedFooter company={company} serial={`${period} payroll · ${run.payrollNumber}`} note="CONFIDENTIAL — for internal use only." />
       </Page>
     </Document>
   );

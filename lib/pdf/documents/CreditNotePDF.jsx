@@ -7,19 +7,19 @@ import {
   Text,
   View,
   StyleSheet,
-  Image,
 } from "@react-pdf/renderer";
+import { TopBar, RefinedHeader, TitleBanner, RefinedFooter, VerifyCode, verifyText } from "../refined";
 
 // ============================================
 // COLORS
 // ============================================
 const colors = {
-  primary: "#eab308", // Yellow to match app theme
-  primaryLight: "#fef3c7",
-  dark: "#18181b",
-  gray: "#71717a",
-  grayLight: "#d4d4d8",
-  grayLightest: "#f4f4f5",
+  primary: "#F5A800", // Yellow to match app theme
+  primaryLight: "#F6F1E4",
+  dark: "#161310",
+  gray: "#6B6355",
+  grayLight: "#D9D2C3",
+  grayLightest: "#F7F4EC",
   white: "#ffffff",
   success: "#16a34a",
   warning: "#eab308",
@@ -30,9 +30,11 @@ const colors = {
 // ============================================
 const styles = StyleSheet.create({
   page: {
+    paddingTop: 26,
+    paddingBottom: 84,
+    paddingHorizontal: 32,
     fontFamily: "Helvetica",
     fontSize: 9,
-    padding: 40,
     backgroundColor: colors.white,
     color: colors.dark,
   },
@@ -384,56 +386,13 @@ const getReasonLabel = (reason) => {
 // CREDIT NOTE PDF COMPONENT
 // ============================================
 export const CreditNotePDF = ({ creditNote, company }) => {
-  const getStatusColor = () => {
-    switch (creditNote.status) {
-      case "issued":
-        return { bg: "#dcfce7", text: "#16a34a" };
-      case "applied":
-        return { bg: "#dbeafe", text: "#2563eb" };
-      case "void":
-        return { bg: "#fee2e2", text: "#dc2626" };
-      default:
-        return { bg: "#fef3c7", text: "#ca8a04" };
-    }
-  };
-
-  const statusColor = getStatusColor();
 
   return (
     <Document title={`Credit Note ${creditNote.creditNoteNumber}`}>
       <Page size="A4" style={styles.page}>
-        {/* Header */}
-        <View style={styles.header}>
-          <View style={styles.logoSection}>
-            <Image style={styles.logo} src={company.logo || "/qsl.png"} />
-            <Text style={styles.companyDetails}>
-              {formatAddress(company.address)}
-              {company.city && `, ${company.city}`}
-              {"\n"}
-              {company.phone} | {company.email}
-              {company.taxPin && `\n${company.taxPin}`}
-            </Text>
-            {company.tagline && (
-              <Text style={styles.companyTagline}>{company.tagline}</Text>
-            )}
-          </View>
-          <View style={styles.creditNoteHeader}>
-            <Text style={styles.creditNoteTitle}>CREDIT NOTE</Text>
-            <Text style={styles.creditNoteNumber}>
-              {creditNote.creditNoteNumber}
-            </Text>
-            <View
-              style={[styles.statusBadge, { backgroundColor: statusColor.bg }]}
-            >
-              <Text style={[styles.statusText, { color: statusColor.text }]}>
-                {creditNote.status.toUpperCase()}
-              </Text>
-            </View>
-          </View>
-        </View>
-
-        {/* Divider */}
-        <View style={styles.divider} />
+        <TopBar kind="invoice" />
+        <RefinedHeader company={company} meta={[{ k: "Date", v: formatDate(creditNote.creditNoteDate) }, { k: "No.", v: creditNote.creditNoteNumber, mono: true }, { k: "Invoice", v: creditNote.invoice?.invoiceNumber || "—" }]} />
+        <TitleBanner title="Credit Note" status={{ label: String(creditNote.status || "").replace(/_/g, " ").toUpperCase(), bg: "#161310", color: "#fff" }} />
 
         {/* Customer & Credit Note Details */}
         <View style={styles.infoRow}>
@@ -572,15 +531,8 @@ export const CreditNotePDF = ({ creditNote, company }) => {
           </View>
         )}
 
-        {/* Footer */}
-        <View style={styles.footer} fixed>
-          <Text style={styles.footerText}>
-            {company.name} | {company.phone} | {company.email}
-          </Text>
-          <Text style={styles.footerNote}>
-            Credit Note - {creditNote.creditNoteNumber}
-          </Text>
-        </View>
+        <VerifyCode value={verifyText({ company: company, title: "Credit Note", reference: creditNote.creditNoteNumber, date: formatDate(creditNote.creditNoteDate) })} />
+        <RefinedFooter company={company} serial={creditNote.creditNoteNumber} />
       </Page>
     </Document>
   );

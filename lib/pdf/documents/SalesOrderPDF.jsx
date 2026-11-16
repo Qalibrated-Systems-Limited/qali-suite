@@ -7,8 +7,8 @@ import {
   Text,
   View,
   StyleSheet,
-  Image,
 } from "@react-pdf/renderer";
+import { TopBar, RefinedHeader, TitleBanner, RefinedFooter, VerifyCode, verifyText } from "../refined";
 
 // ============================================
 // SALES ORDER PDF — mirrors QuotePDF's theme/layout. A sales order is a
@@ -16,12 +16,12 @@ import {
 // signature; instead order date, expected delivery, and the order status.
 // ============================================
 const colors = {
-  primary: "#eab308",
-  primaryLight: "#fef3c7",
-  dark: "#18181b",
-  gray: "#71717a",
-  grayLight: "#d4d4d8",
-  grayLightest: "#f4f4f5",
+  primary: "#F5A800",
+  primaryLight: "#F6F1E4",
+  dark: "#161310",
+  gray: "#6B6355",
+  grayLight: "#D9D2C3",
+  grayLightest: "#F7F4EC",
   white: "#ffffff",
   success: "#16a34a",
   danger: "#dc2626",
@@ -29,7 +29,7 @@ const colors = {
 };
 
 const styles = StyleSheet.create({
-  page: { fontFamily: "Helvetica", fontSize: 9, padding: 40, backgroundColor: colors.white, color: colors.dark },
+  page: { paddingTop: 26, paddingBottom: 84, paddingHorizontal: 32, fontFamily: "Helvetica", fontSize: 9, backgroundColor: colors.white, color: colors.dark },
   header: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 25 },
   logoSection: { flex: 1 },
   logo: { width: 140, height: 45, objectFit: "contain", marginBottom: 6 },
@@ -108,51 +108,18 @@ const formatAddress = (address) => {
   return "";
 };
 
-const STATUS_COLORS = {
-  draft: { bg: "#fef3c7", text: "#ca8a04" },
-  confirmed: { bg: "#dbeafe", text: "#2563eb" },
-  invoiced: { bg: "#dcfce7", text: "#16a34a" },
-  cancelled: { bg: "#fee2e2", text: "#dc2626" },
-};
-
 // ============================================
 // SALES ORDER PDF COMPONENT
 // ============================================
 export const SalesOrderPDF = ({ order, company }) => {
   const safeCompany = company || {};
-  const statusColor = STATUS_COLORS[order.status] || STATUS_COLORS.draft;
 
   return (
     <Document title={`Sales Order ${order.orderNumber}`}>
       <Page size="A4" style={styles.page}>
-        {/* Header */}
-        <View style={styles.header}>
-          <View style={styles.logoSection}>
-            <Image style={styles.logo} src={safeCompany.logo || "/qsl.png"} />
-            <Text style={styles.companyDetails}>
-              {safeCompany.fullAddress || formatAddress(safeCompany.address)}
-              {"\n"}
-              {safeCompany.phone && `${safeCompany.phone}`}
-              {safeCompany.phone && safeCompany.email && " | "}
-              {safeCompany.email && `${safeCompany.email}`}
-              {safeCompany.taxPin && `\nPIN: ${safeCompany.taxPin}`}
-            </Text>
-            {safeCompany.tagline && (
-              <Text style={styles.companyTagline}>{safeCompany.tagline}</Text>
-            )}
-          </View>
-          <View style={styles.docHeader}>
-            <Text style={styles.docTitle}>SALES ORDER</Text>
-            <Text style={styles.docNumber}>{order.orderNumber}</Text>
-            <View style={[styles.statusBadge, { backgroundColor: statusColor.bg }]}>
-              <Text style={[styles.statusText, { color: statusColor.text }]}>
-                {order.status?.toUpperCase() || "DRAFT"}
-              </Text>
-            </View>
-          </View>
-        </View>
-
-        <View style={styles.divider} />
+        <TopBar kind="quotation" />
+        <RefinedHeader company={safeCompany} meta={[{ k: "Date", v: formatDate(order.orderDate) }, { k: "No.", v: order.orderNumber, mono: true }]} />
+        <TitleBanner title="Sales Order" status={{ label: String(order.status || "draft" || "").replace(/_/g, " ").toUpperCase(), bg: "#161310", color: "#fff" }} />
 
         {/* Customer & Order Details */}
         <View style={styles.infoRow}>
@@ -264,15 +231,8 @@ export const SalesOrderPDF = ({ order, company }) => {
           </View>
         )}
 
-        {/* Footer */}
-        <View style={styles.footer} fixed>
-          <Text style={styles.footerText}>
-            {safeCompany.name}
-            {safeCompany.phone && ` | ${safeCompany.phone}`}
-            {safeCompany.email && ` | ${safeCompany.email}`}
-          </Text>
-          <Text style={styles.footerThank}>Thank you for your business!</Text>
-        </View>
+        <VerifyCode value={verifyText({ company: safeCompany, title: "Sales Order", reference: order.orderNumber, date: formatDate(order.orderDate) })} />
+        <RefinedFooter company={safeCompany} serial={order.orderNumber} />
       </Page>
     </Document>
   );

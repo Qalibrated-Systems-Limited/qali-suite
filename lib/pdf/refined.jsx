@@ -1,5 +1,6 @@
 import React from "react";
-import { Text, View, StyleSheet, Image } from "@react-pdf/renderer";
+import { Text, View, StyleSheet, Image, Svg, Path } from "@react-pdf/renderer";
+import QRCode from "qrcode";
 
 /**
  * THE REFINED DOCUMENT DESIGN — ported from the QSL Workflow Reports app
@@ -258,4 +259,88 @@ export function fmtEat(d, withTime = true) {
   } catch {
     return String(d);
   }
+}
+
+// ── Commercial documents ─────────────────────────────────────────────────────
+
+const c = StyleSheet.create({
+  titleRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: 12, marginBottom: 10 },
+  banner: {
+    fontSize: 13,
+    fontFamily: "Helvetica-Bold",
+    color: R.COAL,
+    backgroundColor: R.GOLD,
+    paddingVertical: 4,
+    paddingHorizontal: 12,
+    letterSpacing: 1,
+    textTransform: "uppercase",
+  },
+  verifyBox: { position: "absolute", bottom: 54, right: 34, alignItems: "center" },
+  verifyTxt: { fontSize: 5.8, fontFamily: "Helvetica-Bold", color: R.FAINT, letterSpacing: 0.6, marginTop: 2 },
+});
+
+/**
+ * The gold banner title the app's quotation uses (QUOTATION, INVOICE, …),
+ * with the status badge on the right. Commercial documents use this; reports
+ * use the coal TitlePill.
+ */
+export function TitleBanner({ title, status }) {
+  return (
+    <View style={c.titleRow}>
+      <Text style={c.banner}>{title}</Text>
+      {status ? (
+        <View style={[s.badge, { backgroundColor: status.bg || R.COAL }]}>
+          <Text style={[s.badgeText, { color: status.color || "#fff" }]}>{status.label}</Text>
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+/**
+ * A QR code drawn as vector paths. `QRCode.create` is synchronous, so a
+ * document rendered in the browser (where the async image route is not
+ * available) can carry the code too.
+ */
+export function QrSvg({ value, size = 46 }) {
+  if (!value) return null;
+  let qr;
+  try {
+    qr = QRCode.create(String(value), { errorCorrectionLevel: "M" });
+  } catch {
+    return null;
+  }
+  const n = qr.modules.size;
+  let d = "";
+  for (let r = 0; r < n; r++) for (let col = 0; col < n; col++) if (qr.modules.get(r, col)) d += `M${col} ${r}h1v1h-1z`;
+  return (
+    <Svg width={size} height={size} viewBox={`-1 -1 ${n + 2} ${n + 2}`}>
+      <Path d={`M-1 -1h${n + 2}v${n + 2}h-${n + 2}z`} fill="#ffffff" />
+      <Path d={d} fill={R.COAL} />
+    </Svg>
+  );
+}
+
+/**
+ * "SCAN TO VERIFY", from text rather than an image, bottom-right above the
+ * footer on the page where it is placed (the documents put it last, so it sits
+ * on the final page, beside the totals and signatures). Not `fixed` with a
+ * page-1 render callback like VerifyQr: react-pdf mis-places vector content
+ * inside a render callback.
+ */
+export function VerifyCode({ value }) {
+  if (!value) return null;
+  return (
+    <View style={c.verifyBox}>
+      <QrSvg value={value} />
+      <Text style={c.verifyTxt}>SCAN TO VERIFY</Text>
+    </View>
+  );
+}
+
+/** What a document's code carries: issuer, document, reference, date — readable without an account. */
+export function verifyText({ company, title, reference, date, extra }) {
+  return [company?.name, [title, reference].filter(Boolean).join(" "), extra, date ? `Issued ${date}` : null, company?.website]
+    .filter(Boolean)
+    .join("\n");
 }

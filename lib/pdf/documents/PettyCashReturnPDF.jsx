@@ -2,6 +2,7 @@
 
 import React from "react";
 import { Document, Page, Text, View, StyleSheet } from "@react-pdf/renderer";
+import { TopBar, RefinedHeader, TitleBanner, RefinedFooter } from "../refined";
 
 // ============================================
 // PETTY CASH RETURNS FORM
@@ -21,7 +22,7 @@ const colors = {
 };
 
 const styles = StyleSheet.create({
-  page: { fontFamily: "Helvetica", fontSize: 8, padding: 36, color: colors.dark },
+  page: { fontFamily: "Helvetica", fontSize: 8, paddingTop: 26, paddingBottom: 84, paddingHorizontal: 32, color: colors.dark },
   header: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 },
   company: { fontSize: 13, fontFamily: "Helvetica-Bold", color: colors.dark },
   tagline: { fontSize: 7, fontFamily: "Helvetica-Oblique", color: colors.primary, marginTop: 2 },
@@ -69,20 +70,16 @@ export const PettyCashReturnPDF = ({ data, company }) => {
   return (
     <Document>
       <Page size="A4" style={styles.page}>
-        <View style={styles.header}>
-          <View>
-            <Text style={styles.company}>{company?.name || "Company"}</Text>
-            <Text style={styles.tagline}>{company?.tagline || ""}</Text>
-          </View>
-          <View style={styles.docHeader}>
-            <Text style={styles.docTitle}>PETTY CASH RETURNS FORM</Text>
-            <Text style={styles.docNumber}>{ret.documentNumber}</Text>
-            <Text style={styles.docNumber}>
-              Status: {(ret.status || "draft").toUpperCase()}
-            </Text>
-          </View>
-        </View>
-        <View style={styles.divider} />
+        <TopBar kind="invoice" />
+        <RefinedHeader
+          company={company}
+          meta={[
+            { k: "No.", v: ret.documentNumber, mono: true },
+            { k: "From", v: fmtDate(ret.period?.from) },
+            { k: "To", v: fmtDate(ret.period?.to) },
+          ]}
+        />
+        <TitleBanner title="Petty Cash Returns" status={{ label: (ret.status || "draft").toUpperCase(), bg: "#161310", color: "#fff" }} />
 
         {/* Meta: custodian, period, opening float (the DR lives here) */}
         <View style={styles.metaRow}>
@@ -164,6 +161,7 @@ export const PettyCashReturnPDF = ({ data, company }) => {
             beyond the float are recorded as Bills/Expenses paid from the bank.
           </Text>
         </View>
+        <RefinedFooter company={company} serial={ret.documentNumber} />
       </Page>
     </Document>
   );

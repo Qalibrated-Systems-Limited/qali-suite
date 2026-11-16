@@ -6,20 +6,20 @@ import {
   Page,
   Text,
   View,
-  Image,
   StyleSheet,
 } from "@react-pdf/renderer";
+import { TopBar, RefinedHeader, TitleBanner, RefinedFooter, VerifyCode, verifyText } from "../refined";
 
 // ============================================
 // COLOR PALETTE
 // ============================================
 const colors = {
-  primary: "#eab308",
-  primaryLight: "#fef9c3",
+  primary: "#F5A800",
+  primaryLight: "#F6F1E4",
   primaryBorder: "#fde047",
   black: "#18181b",
   darkGray: "#3f3f46",
-  gray: "#71717a",
+  gray: "#6B6355",
   lightGray: "#a1a1aa",
   border: "#e4e4e7",
   bgLight: "#fafafa",
@@ -32,11 +32,11 @@ const colors = {
 // ============================================
 const styles = StyleSheet.create({
   page: {
+    paddingTop: 26,
+    paddingBottom: 84,
+    paddingHorizontal: 32,
     fontFamily: "Helvetica",
     fontSize: 9,
-    paddingTop: 25,
-    paddingBottom: 25,
-    paddingHorizontal: 30,
     color: colors.darkGray,
     backgroundColor: colors.white,
   },
@@ -434,19 +434,6 @@ const formatDate = (date) => {
   });
 };
 
-const getStatusColor = (status) => {
-  const statusColors = {
-    draft: { bg: "#f4f4f5", text: "#71717a" },
-    sent: { bg: "#dbeafe", text: "#2563eb" },
-    confirmed: { bg: "#d1fae5", text: "#059669" },
-    partial: { bg: "#fef9c3", text: "#ca8a04" },
-    received: { bg: "#dcfce7", text: "#16a34a" },
-    cancelled: { bg: "#fee2e2", text: "#dc2626" },
-    expired: { bg: "#fef3c7", text: "#d97706" },
-  };
-  return statusColors[status] || statusColors.draft;
-};
-
 const formatStatus = (status) => {
   if (!status) return "Draft";
   return status.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase());
@@ -544,7 +531,6 @@ export const PurchaseOrderPDF = ({ data, company }) => {
     netPayable = 0,
   } = amounts;
 
-  const statusColor = getStatusColor(status);
   const hasLines = lines && lines.length > 0;
   const lineCount = lines?.length || 0;
 
@@ -554,44 +540,17 @@ export const PurchaseOrderPDF = ({ data, company }) => {
   return (
     <Document>
       <Page size="A4" style={styles.page}>
-        {/* HEADER */}
-        <View style={styles.header}>
-          <View style={styles.logoSection}>
-            <Image src={safeCompany.logo || "/qsl.png"} style={styles.logo} />
-            <View style={styles.companyInfo}>
-              <Text style={styles.companyName}>
-                {safeCompany.name || "Company Name"}
-              </Text>
-              {safeCompany.tagline && (
-                <Text style={styles.companyTagline}>{safeCompany.tagline}</Text>
-              )}
-              {companyAddress && (
-                <Text style={styles.companyDetails}>{companyAddress}</Text>
-              )}
-              {(safeCompany.phone || safeCompany.email) && (
-                <Text style={styles.companyDetails}>
-                  {[safeCompany.phone, safeCompany.email]
-                    .filter(Boolean)
-                    .join(" • ")}
-                </Text>
-              )}
-            </View>
-          </View>
-          <View style={styles.documentTitle}>
-            <Text style={styles.documentType}>PURCHASE ORDER</Text>
-            <Text style={styles.documentNumber}>{poNumber}</Text>
-            <Text style={styles.documentDate}>
-              Date: {formatDate(poDate || new Date())}
-            </Text>
-            <View
-              style={[styles.statusBadge, { backgroundColor: statusColor.bg }]}
-            >
-              <Text style={[styles.statusText, { color: statusColor.text }]}>
-                {formatStatus(status)}
-              </Text>
-            </View>
-          </View>
-        </View>
+        <TopBar kind="invoice" />
+        <RefinedHeader
+          company={safeCompany}
+          meta={[
+            { k: "Date", v: formatDate(poDate || new Date()) },
+            { k: "No.", v: poNumber, mono: true },
+            { k: "Deliver by", v: expectedDeliveryDate ? formatDate(expectedDeliveryDate) : "—" },
+            { k: "Valid to", v: validUntil ? formatDate(validUntil) : "—" },
+          ]}
+        />
+        <TitleBanner title="Purchase Order" status={{ label: formatStatus(status).toUpperCase(), bg: "#161310", color: "#fff" }} />
 
         {/* INFO GRID */}
         <View style={styles.infoGrid}>
@@ -862,41 +821,8 @@ export const PurchaseOrderPDF = ({ data, company }) => {
           </View>
         </View>
 
-        {/* FOOTER - Fixed at bottom of every page */}
-        <View style={styles.footer} fixed>
-          <View style={styles.footerContent}>
-            <View style={styles.footerLeft}>
-              <Text style={styles.footerCompany}>
-                {safeCompany.name || "Company Name"}
-              </Text>
-              {companyAddress && (
-                <Text style={styles.footerAddress}>{companyAddress}</Text>
-              )}
-            </View>
-            <View style={styles.footerCenter}>
-              <Text style={styles.footerContact}>
-                {[
-                  safeCompany.phone && `Tel: ${safeCompany.phone}`,
-                  safeCompany.email,
-                  safeCompany.website,
-                ]
-                  .filter(Boolean)
-                  .join(" • ")}
-              </Text>
-            </View>
-            <View style={styles.footerRight}>
-              {safeCompany.taxPin && (
-                <Text style={styles.footerPin}>PIN: {safeCompany.taxPin}</Text>
-              )}
-              <Text
-                style={styles.pageNumber}
-                render={({ pageNumber, totalPages }) =>
-                  `Page ${pageNumber} of ${totalPages}`
-                }
-              />
-            </View>
-          </View>
-        </View>
+        <VerifyCode value={verifyText({ company: safeCompany, title: "Purchase Order", reference: poNumber, date: formatDate(poDate || new Date()) })} />
+        <RefinedFooter company={safeCompany} serial={poNumber} />
 
       </Page>
     </Document>
