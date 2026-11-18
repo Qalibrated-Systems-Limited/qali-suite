@@ -91,4 +91,11 @@ export default defineConfig([
     ],
     rules: { "react/jsx-key": "warn" },
   },
+  // Tests exercise a vertical by importing it — that is what testing it means
+  // — and they ship nowhere, so the boundary that keeps core free of
+  // verticals does not apply to them.
+  {
+    files: ["tests/**"],
+    rules: { "local/no-core-imports-vertical": "off" },
+  },
 ]);

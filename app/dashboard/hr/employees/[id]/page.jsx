@@ -4,7 +4,7 @@ import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
 import {
   ChevronLeft, Edit, User, Briefcase, Calendar, Banknote, FileText, History,
-  LogOut, ScrollText,
+  LogOut, ScrollText, FolderOpen,
 } from "lucide-react";
 import {
   getEmployeeForPage,
@@ -18,6 +18,17 @@ import { EmployeeActions } from "../../components/EmployeeActions";
 import { getEmployeeExit } from "@/app/db/actions/hr-exit-actions";
 import EmployeePhotoUpload from "../../components/EmployeePhotoUpload";
 import EmployeeDocuments from "../../components/EmployeeDocuments";
+import ProbationEditor from "../../components/ProbationEditor";
+import { getEmployeeRecords } from "@/app/db/actions/hr-records-actions";
+import {
+  LETTER_KIND_LABELS,
+  CASE_TYPE_LABELS,
+  CASE_STATUS_LABELS,
+  CASE_OUTCOME_LABELS,
+  TRAINING_KIND_LABELS,
+  REVIEW_STATUS_LABELS,
+  fmtDay,
+} from "@/lib/hr/record-labels";
 
 export async function generateMetadata({ params }) {
   const { id } = await params;
@@ -63,7 +74,7 @@ function InfoCard({ title, icon: Icon, rows }) {
   );
 }
 
-function ProfileTab({ e, canSeePay }) {
+function ProfileTab({ e, canSeePay, canManage }) {
   return (
     <div className="grid gap-6 lg:grid-cols-2">
       <InfoCard
@@ -90,7 +101,15 @@ function ProfileTab({ e, canSeePay }) {
           ["Designation", e.designation || "—"],
           ["Type", e.employmentType?.replace("_", " ") || "—"],
           ["Hired", day(e.hireDate)],
-          ["Confirmed", day(e.confirmationDate)],
+          ...(e.status === "probation"
+            ? [[
+                "Probation ends",
+                <span key="p" className="inline-flex items-center gap-2">
+                  {day(e.probationEndDate)}
+                  {canManage && <ProbationEditor employeeId={e.id} value={e.probationEndDate} />}
+                </span>,
+              ]]
+            : [["Confirmed", day(e.confirmationDate)]]),
           ["Job grade", e.jobGrade || "—"],
           ["Work location", e.workLocation || "—"],
           ["Manager", e.managerName || "—"],
@@ -286,6 +305,72 @@ async function PayrollTab({ employeeId }) {
 }
 
 /**
+ * The employee's HR file: letters issued, disciplinary and grievance cases,
+ * training and certificates, performance reviews. Letters and cases show only
+ * to HR — getEmployeeRecords returns null for a role that may not see them.
+ */
+async function HrFileTab({ employeeId }) {
+  const r = await getEmployeeRecords(employeeId);
+  const Section = ({ title, newHref, newLabel, children, empty }) => (
+    <div className="rounded-lg border border-border bg-card p-4 shadow-sm">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <h3 className="font-semibold text-foreground">{title}</h3>
+        {newHref && <Link href={newHref} className="text-xs text-primary hover:underline">{newLabel}</Link>}
+      </div>
+      {empty ? <p className="text-sm text-muted-foreground">None yet.</p> : <ul className="divide-y divide-border text-sm">{children}</ul>}
+    </div>
+  );
+  return (
+    <div className="grid gap-4 lg:grid-cols-2">
+      {r.letters && (
+        <Section title="Letters" newHref={`/dashboard/hr/letters/new?employee=${employeeId}`} newLabel="+ Issue a letter" empty={!r.letters.length}>
+          {r.letters.map((l) => (
+            <li key={l.id} className="flex justify-between gap-2 py-2">
+              <Link href={`/dashboard/hr/letters/${l.id}`} className="hover:underline">{l.subject}</Link>
+              <span className="shrink-0 text-xs text-muted-foreground">
+                {LETTER_KIND_LABELS[l.kind]} · {fmtDay(l.issued_on)}{l.status === "void" ? " · void" : ""}
+              </span>
+            </li>
+          ))}
+        </Section>
+      )}
+      {r.cases && (
+        <Section title="Disciplinary & grievances" newHref={`/dashboard/hr/cases/new?employee=${employeeId}`} newLabel="+ Open a case" empty={!r.cases.length}>
+          {r.cases.map((c) => (
+            <li key={c.id} className="flex justify-between gap-2 py-2">
+              <Link href={`/dashboard/hr/cases/${c.id}`} className="hover:underline">{c.case_number} · {CASE_TYPE_LABELS[c.case_type]}</Link>
+              <span className="shrink-0 text-xs text-muted-foreground">
+                {c.outcome ? CASE_OUTCOME_LABELS[c.outcome] : CASE_STATUS_LABELS[c.status]} · {fmtDay(c.incident_date)}
+              </span>
+            </li>
+          ))}
+        </Section>
+      )}
+      <Section title="Training & certificates" newHref={`/dashboard/hr/training?employee=${employeeId}`} newLabel="+ Record training" empty={!r.training.length}>
+        {r.training.map((t) => (
+          <li key={t.id} className="flex justify-between gap-2 py-2">
+            <span>{t.title}<span className="text-xs text-muted-foreground"> · {TRAINING_KIND_LABELS[t.kind]}</span></span>
+            <span className={`shrink-0 text-xs ${t.days_to_expiry != null && Number(t.days_to_expiry) < 0 ? "text-destructive" : "text-muted-foreground"}`}>
+              {t.expires_on ? `expires ${fmtDay(t.expires_on)}` : fmtDay(t.completed_on)}
+            </span>
+          </li>
+        ))}
+      </Section>
+      <Section title="Performance reviews" newHref="/dashboard/hr/reviews" newLabel="Reviews →" empty={!r.reviews.length}>
+        {r.reviews.map((v) => (
+          <li key={v.id} className="flex justify-between gap-2 py-2">
+            <Link href={`/dashboard/hr/reviews/${v.id}`} className="hover:underline">{v.cycle}</Link>
+            <span className="shrink-0 text-xs text-muted-foreground">
+              {REVIEW_STATUS_LABELS[v.status]}{v.overall_rating ? ` · ${Number(v.overall_rating).toFixed(2)}` : ""}
+            </span>
+          </li>
+        ))}
+      </Section>
+    </div>
+  );
+}
+
+/**
  * Employment events and pay changes, together.
  *
  * The source records history for confirmations and terminations only, and
@@ -382,6 +467,7 @@ export default async function EmployeeDetailPage({ params, searchParams }) {
     { key: "leave", label: "Leave", icon: Calendar },
     { key: "payroll", label: "Payroll", icon: Banknote },
     { key: "history", label: "History", icon: History },
+    { key: "file", label: "HR file", icon: FolderOpen },
     { key: "documents", label: "Documents", icon: FileText },
   ];
 
@@ -517,7 +603,13 @@ export default async function EmployeeDetailPage({ params, searchParams }) {
         ))}
       </div>
 
-      {activeTab === "profile" && <ProfileTab e={employee} canSeePay={canSeePay} />}
+      {activeTab === "profile" && <ProfileTab e={employee} canSeePay={canSeePay} canManage={canManageLeave} />}
+
+      {activeTab === "file" && (
+        <Suspense fallback={<div className="h-48 animate-pulse rounded-lg bg-muted" />}>
+          <HrFileTab employeeId={employee.id} />
+        </Suspense>
+      )}
 
       {activeTab === "leave" && (
         <Suspense fallback={<div className="h-48 animate-pulse rounded-lg bg-muted" />}>

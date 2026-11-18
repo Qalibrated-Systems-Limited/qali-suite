@@ -3,6 +3,7 @@
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import * as overviewRepo from "../repositories/projectOverview";
 import { withAuthorizedTenant } from "../tenant";
 import { userMessage } from "../errors";
 import { requirePlanAccess } from "@/lib/plan-gate";
@@ -209,6 +210,17 @@ export async function fetchProjectPages(
       priority: filters.priority,
     }),
   );
+}
+
+/** The module overview: what is happening across every section, and what waits on someone. */
+export async function getProjectsOverview() {
+  return withAuthorizedTenant([], async (tx) => {
+    const [summary, recent] = await Promise.all([
+      overviewRepo.getProjectsActivitySummary(tx),
+      overviewRepo.listRecentProjectActivity(tx, 10),
+    ]);
+    return { summary, recent };
+  });
 }
 
 export async function getProjectStats() {

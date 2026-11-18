@@ -51,6 +51,7 @@ import {
   Wallet,
   Ruler,
   Scale,
+  Plus,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -470,10 +471,22 @@ export const getNavigationGroups = (user) => {
     id: "projects",
     defaultOpen: false,
     hidden: !canSeeProjectsNav(user?.role) || !hasMod("projects"),
-    // No "Overview" item: the department's "Dashboard" link (prepended by the
-    // renderer) already points at /dashboard/projects via DEPARTMENTS.homeHref,
-    // so the portfolio home is one entry, not a Dashboard/Overview pair.
+    // Overview first: the department "Dashboard" link that used to lead here
+    // went with the IA cleanup, which left the module's own home with no
+    // entry at all. Starting a project sits right under it.
     items: [
+      {
+        icon: LayoutDashboard,
+        label: "Overview",
+        id: "projects-overview",
+        href: "/dashboard/projects",
+      },
+      {
+        icon: Plus,
+        label: "New project",
+        id: "projects-new",
+        href: "/dashboard/projects/create",
+      },
       {
         icon: Ruler,
         label: "Bill of Quantities",
@@ -607,6 +620,13 @@ export const getNavigationGroups = (user) => {
         id: "commissions",
         href: "/dashboard/commissions",
         hidden: !canSeeFinanceNav(user?.role),
+      },
+      {
+        icon: Settings,
+        label: "Finance Settings",
+        id: "finance-settings",
+        href: "/dashboard/accounts/settings",
+        hidden: !can(user?.role, "finance.write"),
       },
     ],
   },
@@ -909,6 +929,20 @@ export const getNavigationGroups = (user) => {
           user?.role === "SuperAdmin" ||
           !(can(user?.role, "exit.manage") || can(user?.role, "exit.approve") || can(user?.role, "exit.pay")),
       },
+      { icon: FileText, label: "Letters", id: "hr-letters", href: "/dashboard/hr/letters", hidden: !can(user?.role, "hr.letters") },
+      { icon: Gavel, label: "Disciplinary & Grievances", id: "hr-cases", href: "/dashboard/hr/cases", hidden: !can(user?.role, "hr.discipline") },
+      { icon: Award, label: "Training & Certificates", id: "hr-training", href: "/dashboard/hr/training", hidden: !can(user?.role, "hr.training") },
+      { icon: Target, label: "Performance Reviews", id: "hr-reviews", href: "/dashboard/hr/reviews", hidden: !can(user?.role, "hr.reviews") },
+      { icon: Briefcase, label: "Recruitment", id: "hr-recruitment", href: "/dashboard/hr/recruitment", hidden: !can(user?.role, "hr.recruit") },
+      { icon: TrendingUp, label: "HR Reports", id: "hr-reports", href: "/dashboard/hr/reports", hidden: !can(user?.role, "hr.reports") },
+      { icon: Users, label: "Org Chart", id: "hr-org-chart", href: "/dashboard/hr/org-chart", hidden: !can(user?.role, "hr.view") },
+      {
+        icon: Settings,
+        label: "HR Settings",
+        id: "hr-settings",
+        href: "/dashboard/hr/settings",
+        hidden: !can(user?.role, "hr.admin") && !can(user?.role, "payroll.rates.write"),
+      },
       {
         icon: Users,
         label: "User Accounts",
@@ -920,66 +954,65 @@ export const getNavigationGroups = (user) => {
   },
 
   // ============================================
-  // PEOPLE & ADMIN
+  // SYSTEM ADMINISTRATION (no department)
   // ============================================
+  // Company-wide configuration: users and access, the company record,
+  // licensing and system settings. It used to be split across People, Company,
+  // Licensing and Settings under the "HR & Admin" department, which put system
+  // settings inside HR. It belongs to no department. The platform
+  // administrator (SuperAdmin) holds all of it; a company Admin holds what
+  // their capabilities and the company's licence allow. Settings that belong to
+  // one module (HR's payroll rates, holidays, attendance) live in that module.
   {
     type: "group",
-    label: "People",
-    icon: Users,
-    id: "people",
+    label: "System Administration",
+    icon: Settings,
+    id: "system",
     defaultOpen: false,
     items: [
       {
+        icon: Settings,
+        label: "System Settings",
+        id: "settings",
+        href: "/dashboard/settings",
+        hidden: !can(user?.role, "system.settings"),
+      },
+      {
         icon: Users,
-        label: "Users",
+        label: "Users & Access",
         id: "users",
         href: "/dashboard/users",
-        hidden: !["Admin", "SuperAdmin"].includes(user?.role),
+        hidden: !can(user?.role, "admin.manage"),
+      },
+      {
+        icon: ShieldCheck,
+        label: "Roles & Permissions",
+        id: "roles",
+        href: "/dashboard/settings/roles",
+        hidden: !can(user?.role, "system.settings"),
+      },
+      {
+        icon: Building2,
+        label: "Company Profile",
+        id: "company",
+        href: "/dashboard/company",
+        hidden: !can(user?.role, "admin.manage"),
       },
       {
         icon: Building2,
         label: "Companies",
         id: "companies",
         href: "/dashboard/admin/companies",
-        hidden: user?.role !== "SuperAdmin",
+        hidden: !can(user?.role, "company.create"),
+      },
+      {
+        icon: KeyRound,
+        label: "Licensing",
+        id: "licensing",
+        href: "/dashboard/licensing",
+        hidden: !can(user?.role, "licensing.manage"),
       },
     ],
-  },
-
-  // ============================================
-  // COMPANY SETTINGS (for Admin)
-  // ============================================
-  {
-    type: "single",
-    icon: Building2,
-    label: "Company",
-    id: "company",
-    href: "/dashboard/company",
-    hidden: !["Admin", "SuperAdmin"].includes(user?.role),
-  },
-
-  // ============================================
-  // LICENSING (ungrouped, platform/Admin only)
-  // ============================================
-  {
-    type: "single",
-    icon: KeyRound,
-    label: "Licensing",
-    id: "licensing",
-    href: "/dashboard/licensing",
-    hidden: !["Admin", "SuperAdmin"].includes(user?.role),
-  },
-
-  // ============================================
-  // SETTINGS (ungrouped)
-  // ============================================
-  {
-    type: "single",
-    icon: Settings,
-    label: "Settings",
-    id: "settings",
-    href: "/dashboard/settings",
-    hidden: !canSeeSettingsNav(user?.role) && user?.role !== "HR Manager",
   },
 ];
 }; // end getNavigationGroups
@@ -1390,27 +1423,38 @@ export const SidebarContentGrouped = ({ onItemClick, user, collapsed }) => {
             const extraTop = navigationGroups.filter(
               (g) =>
                 !departmentOf(g.id) &&
-                !["dashboard", "shared"].includes(g.id),
+                !["dashboard", "shared", "system"].includes(g.id),
             );
 
+            // Order: the Dashboard (built for this person's role), then the
+            // Shared Services everyone uses, then the departments, then the
+            // exec extras and System Administration, each set apart by a
+            // hairline. System Administration is no department's: it was under
+            // "HR & Admin", which put company-wide settings inside HR.
+            const systemEntry = navigationGroups.find((g) => g.id === "system");
             return (
               <>
                 {dashboardEntry && renderEntry(dashboardEntry)}
-                {deptGroups.map((dg) => (
-                  <NavGroup
-                    key={dg.id}
-                    group={dg}
-                    user={user}
-                    onItemClick={onItemClick}
-                    collapsed={collapsed}
-                  />
-                ))}
-                {/* Shared services and the exec extras sit a little apart from
-                    the departments — a hairline, no heavier. */}
-                {(sharedEntry || extraTop.length > 0) && (
+                {sharedEntry && renderEntry(sharedEntry)}
+                <div className="mt-2 space-y-1 border-t border-border/60 pt-2">
+                  {deptGroups.map((dg) => (
+                    <NavGroup
+                      key={dg.id}
+                      group={dg}
+                      user={user}
+                      onItemClick={onItemClick}
+                      collapsed={collapsed}
+                    />
+                  ))}
+                </div>
+                {extraTop.length > 0 && (
                   <div className="mt-2 space-y-1 border-t border-border/60 pt-2">
-                    {sharedEntry && renderEntry(sharedEntry)}
                     {extraTop.map(renderEntry)}
+                  </div>
+                )}
+                {systemEntry && entryVisible(systemEntry) && (
+                  <div className="mt-2 space-y-1 border-t border-border/60 pt-2">
+                    {renderEntry(systemEntry)}
                   </div>
                 )}
               </>
@@ -1512,15 +1556,17 @@ export const SidebarContentGrouped = ({ onItemClick, user, collapsed }) => {
                 </Link>
               </DropdownMenuItem>
 
-              <DropdownMenuItem
-                asChild
-                className="cursor-pointer focus:bg-accent focus:text-accent-foreground"
-              >
-                <Link href="/dashboard/settings" className="flex items-center">
-                  <Settings className="mr-2 h-4 w-4" />
-                  <span>Settings</span>
-                </Link>
-              </DropdownMenuItem>
+              {can(user?.role, "system.settings") && (
+                <DropdownMenuItem
+                  asChild
+                  className="cursor-pointer focus:bg-accent focus:text-accent-foreground"
+                >
+                  <Link href="/dashboard/settings" className="flex items-center">
+                    <Settings className="mr-2 h-4 w-4" />
+                    <span>System Settings</span>
+                  </Link>
+                </DropdownMenuItem>
+              )}
 
               <DropdownMenuSeparator className="bg-border" />
 

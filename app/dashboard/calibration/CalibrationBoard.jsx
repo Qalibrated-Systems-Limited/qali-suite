@@ -12,6 +12,7 @@ import {
   deleteCalibrationStandard,
 } from "@/app/db/actions/technical-actions";
 import { fmtDate } from "../technical/lib/meta";
+import PdfPreviewButton from "@/components/pdf/PdfPreviewButton";
 
 const JOB_STATUS = [
   { v: "scheduled", label: "Scheduled", cls: "amber" },
@@ -117,7 +118,7 @@ export default function CalibrationBoard({ jobs = [], standards = [], stats, can
 
         {tab === "certs" && (
           <Table
-            head={["Cert No", "Customer", "Service Type", "Location", "Issued", "Result"]}
+            head={["Cert No", "Customer", "Service Type", "Location", "Issued", "Result", ""]}
             rows={certs.map((j) => [
               <span className="mono">{j.certNumber}</span>,
               j.clientName,
@@ -125,6 +126,12 @@ export default function CalibrationBoard({ jobs = [], standards = [], stats, can
               j.site || "—",
               fmtDate(j.updatedAt),
               <Badge cls={cfg(RESULT, j.result).cls}>{cfg(RESULT, j.result).label}</Badge>,
+              <PdfPreviewButton
+                href={`/api/technical/calibration/${j.id}/certificate`}
+                title={`Calibration certificate ${j.certNumber}`}
+                className="tech-rowbtn"
+                label="Certificate"
+              />,
             ])}
             empty="No certificates issued yet — complete a passed Cal Job to issue one."
           />
@@ -151,7 +158,7 @@ export default function CalibrationBoard({ jobs = [], standards = [], stats, can
                   st.uncertainty || "—",
                   <Badge cls={s.cls}>{s.label}</Badge>,
                   canManage ? (
-                    <button className="tech-rowbtn" onClick={() => act(deleteCalibrationStandard, st.id)} disabled={isPending} aria-label="Delete">
+                    <button className="tech-rowbtn" onClick={() => confirm(`Delete ${st.name}?`) && act(deleteCalibrationStandard, st.id)} disabled={isPending} aria-label="Delete">
                       <Trash2 size={14} />
                     </button>
                   ) : null,
@@ -189,7 +196,7 @@ export default function CalibrationBoard({ jobs = [], standards = [], stats, can
                   <RowSelect options={BILLING} value={j.billingStatus} disabled={isPending} onChange={(v) => act(setCalibrationJobOutcome, j.id, { billingStatus: v })} />
                 ) : <Badge cls={cfg(BILLING, j.billingStatus).cls}>{cfg(BILLING, j.billingStatus).label}</Badge>,
                 canManage ? (
-                  <button className="tech-rowbtn" onClick={() => act(deleteCalibrationJob, j.id)} disabled={isPending} aria-label="Delete"><Trash2 size={14} /></button>
+                  <button className="tech-rowbtn" onClick={() => confirm(`Delete ${j.jobNumber}?`) && act(deleteCalibrationJob, j.id)} disabled={isPending} aria-label="Delete"><Trash2 size={14} /></button>
                 ) : null,
               ])}
               empty="No calibration jobs yet."

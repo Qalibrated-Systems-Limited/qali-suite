@@ -3,9 +3,10 @@ import { getWorkspaceContext } from "../../projects/lib/workspace";
 import AccessDenied from "../../projects/components/AccessDenied";
 import NoProjectsCard from "../../projects/components/NoProjectsCard";
 import TechnicalReportForm from "../components/TechnicalReportForm";
+import { listReportSignoffUsers } from "@/app/db/actions/workflow-report-actions";
 import { hasRole, WORKFLOW_REPORT_WRITE_ROLES } from "@/lib/utils/role-gates";
 import { templateByCode } from "../lib/templates";
-import { ArrowLeft } from "lucide-react";
+import { WAIT } from "../components/ui";
 
 export const metadata = {
   title: "New report | Technical",
@@ -19,39 +20,27 @@ export default async function CreateReportPage({ searchParams }) {
   const { projects, project, user } = ctx;
   const canManage = hasRole(user, WORKFLOW_REPORT_WRITE_ROLES);
   const template = templateByCode(sp?.sheet) || templateByCode("TR01");
+  const signoffUsers = canManage ? await listReportSignoffUsers().catch(() => []) : [];
 
-  const backHref = `/dashboard/technical/new${project ? `?project=${project.id}` : ""}`;
+  const backHref = `/dashboard/technical/new?work=${encodeURIComponent(template.category || "")}${project ? `&project=${project.id}` : ""}`;
 
   return (
-    <>
-      <div className="tech-bar">
-        <Link href={backHref} className="tech-btn-ghost">
-          <ArrowLeft size={14} />
-          Choose sheet
-        </Link>
-        <span className="tech-bar-title" style={{ marginLeft: 4 }}>
-          {template.name}
-          <span className="count">{template.code}</span>
-        </span>
-      </div>
-
-      <div className="tech-wrap">
-        {!project && <NoProjectsCard />}
-        {project && !canManage && <AccessDenied />}
-        {project && canManage && (
-          <>
-            <p className="tech-lead">
-              {template.desc} Filled by: <strong>{template.who}</strong>.
-            </p>
-            <TechnicalReportForm
-              sheet={template}
-              projects={projects}
-              defaultProjectId={project.id}
-              defaultAuthorName={user?.name || ""}
-            />
-          </>
-        )}
-      </div>
-    </>
+    <div className="app-content">
+      <Link href={backHref} style={{ color: WAIT, fontWeight: 700, fontSize: 13, textDecoration: "none", display: "inline-block", margin: "12px 0 8px" }}>
+        ← Choose a different sheet
+      </Link>
+      {!project && <NoProjectsCard />}
+      {project && !canManage && <AccessDenied />}
+      {project && canManage && (
+        <TechnicalReportForm
+          sheet={template}
+          projects={projects}
+          defaultProjectId={project.id}
+          defaultAuthorName={user?.name || ""}
+          signoffUsers={signoffUsers}
+          currentUserId={user?.id || null}
+        />
+      )}
+    </div>
   );
 }

@@ -65,6 +65,7 @@ export const TEMPLATES = [
   {
     code: "WB01",
     name: "Daily Site Check",
+    cadence: "Daily report",
     category: "Weighing & Metrology",
     who: "Site Technician",
     desc: "Quick morning walk-around. Mark each line OK or report a problem.",
@@ -91,6 +92,7 @@ export const TEMPLATES = [
   {
     code: "WB02",
     name: "Weekly Accuracy Check",
+    cadence: "Weekly report",
     category: "Weighing & Metrology",
     who: "Site Technician",
     desc: "End-Middle-End test with the same loaded truck.",
@@ -119,6 +121,7 @@ export const TEMPLATES = [
   {
     code: "WB03",
     name: "Monthly Maintenance",
+    cadence: "Monthly report",
     category: "Weighing & Metrology",
     who: "Site Technician",
     desc: "Cleaning and inspection. Never spray water at load cells or the junction box.",
@@ -163,6 +166,7 @@ export const TEMPLATES = [
   {
     code: "WB04",
     name: "Engineer Service Checklist",
+    cadence: "Quarterly / bi-annual service",
     category: "Weighing & Metrology",
     who: "QSL Engineer",
     desc: "Quarterly / bi-annual service inspection (QSL/F/WB-04).",
@@ -210,6 +214,7 @@ export const TEMPLATES = [
   {
     code: "WB05",
     name: "Weighbridge Service Report",
+    cadence: "Breakdown / corrective service",
     category: "Weighing & Metrology",
     who: "QSL Engineer",
     desc: "Corrective / breakdown visit (QSL/F/WB-05): fault, diagnosis, work, parts.",
@@ -256,6 +261,7 @@ export const TEMPLATES = [
   {
     code: "WB06",
     name: "Calibration & Verification Record",
+    cadence: "Annual calibration",
     category: "Weighing & Metrology",
     who: "QSL Engineer",
     desc: "ISO/IEC 17025 calibration with traceable test weights (QSL/F/WB-06).",
@@ -539,9 +545,27 @@ export const TEMPLATES = [
   {
     code: "SI01",
     name: "Site Instruction",
+    cadence: "Site instruction",
     category: "Construction",
     who: "Consultant / Site Engineer",
     desc: "Formal construction site instruction: contract details, the instruction itself, cost code and approvals.",
+    // ISO document control and the printed wet-signature sign-off, as the
+    // Workflow Reports app prints them on a Site Instruction (QSL SOPs).
+    docControl: {
+      reference: "QSL-PM-SOP-004 (Project Management SOP) — Issuance & Control of Site Instructions",
+      docNo: "QSL-PD-FRM-001",
+      serialLabel: "SI no.",
+      revision: "00",
+      issueDate: "August 2026",
+      notice: "CONTROLLED DOCUMENT — Uncontrolled if printed or downloaded",
+    },
+    signOff: {
+      title: "Sign-off / Approval",
+      statement:
+        "This Site Instruction is issued for action in accordance with the Contract. The Main Contractor shall acknowledge receipt and confirm understanding by signing below. Any cost or time implication arising from this instruction shall be notified in writing in accordance with the Contract, prior to implementation, unless stated otherwise above.",
+      lines: ["Name", "Designation", "Signature", "Date"],
+      parties: ["For: Consultant", "For: Main Contractor"],
+    },
     sections: [
       {
         type: "fields",
@@ -1627,6 +1651,7 @@ export const TEMPLATES = [
   {
     code: "TR01",
     name: "Technical Report",
+    cadence: "Field service / calibration visit",
     category: "Field Service & General",
     who: "Technician (approved by Project Manager)",
     desc: "In-house field service report: nature of visit, machine details, fault, findings, correction, result, parts and job time.",
@@ -1661,6 +1686,61 @@ export const TEMPLATES = [
         title: "Job time",
         cols: ["Time in", "Time out", "Mileage (km)"],
         rows: 1,
+      },
+    ],
+  },
+  {
+    // Ported from the Workflow Reports app as it has it: a general daily record
+    // so any technician or engineer can log whatever work they did that day —
+    // installations, repairs, inspections, support, deliveries, workshop or
+    // office work. Any report-filing role may file it.
+    code: "GD01",
+    name: "General Daily Activity",
+    cadence: "Daily report",
+    category: "Field Service & General",
+    who: "Technician / Engineer",
+    desc: "Daily record of general field or workshop work beyond weighbridge service — any task a technician or engineer carries out that day.",
+    anyone: true,
+    sections: [
+      {
+        type: "choices",
+        k: "activityTypes",
+        title: "Type of work done today",
+        multi: true,
+        options: [
+          "Installation",
+          "Repair",
+          "Preventive maintenance",
+          "Inspection",
+          "Calibration / verification",
+          "Site survey",
+          "Customer support",
+          "Delivery / collection",
+          "Training",
+          "Travel",
+          "Workshop / office work",
+          "Other",
+        ],
+      },
+      {
+        type: "fields",
+        fields: [
+          { k: "equipment", label: "Equipment / machine worked on" },
+          { k: "contactPerson", label: "Contact person" },
+          { k: "telNo", label: "Tel. no." },
+        ],
+      },
+      { type: "textarea", k: "workDone", label: "Work done today (summary)" },
+      { type: "textarea", k: "issuesFound", label: "Issues or faults found" },
+      { type: "textarea", k: "actionsTaken", label: "Actions taken" },
+      { type: "textarea", k: "partsUsed", label: "Parts / materials used" },
+      { type: "textarea", k: "followUp", label: "Follow-up required" },
+      {
+        type: "rows",
+        key: "timeLog",
+        title: "Time log",
+        cols: ["Activity", "Time in", "Time out"],
+        rows: 3,
       },
     ],
   },

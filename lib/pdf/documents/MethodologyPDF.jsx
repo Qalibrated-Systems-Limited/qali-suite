@@ -1,8 +1,9 @@
 // Server-render safe (no "use client") — rendered via renderToBuffer inside the
 // /api/projects/[id]/methodology/pdf route, sharing the house PDF theme.
 import React from "react";
-import { Document, Page, Text, View, StyleSheet, Image } from "@react-pdf/renderer";
-import { formatDate, formatAddress } from "../utils";
+import { Document, Page, Text, View, StyleSheet } from "@react-pdf/renderer";
+import { formatDate } from "../utils";
+import { TopBar, RefinedHeader, TitlePill, RefinedFooter } from "../refined";
 
 const colors = {
   primary: "#eab308",
@@ -15,7 +16,7 @@ const colors = {
 };
 
 const s = StyleSheet.create({
-  page: { fontFamily: "Helvetica", fontSize: 9, padding: 40, backgroundColor: colors.white, color: colors.dark },
+  page: { fontFamily: "Helvetica", fontSize: 9, paddingTop: 26, paddingBottom: 84, paddingHorizontal: 32, backgroundColor: colors.white, color: colors.dark },
   header: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 18 },
   logoSection: { flex: 1 },
   logo: { width: 140, height: 45, objectFit: "contain", marginBottom: 6 },
@@ -62,29 +63,15 @@ export function MethodologyPDF({ methodology, project, company, links = {} }) {
   return (
     <Document>
       <Page size="A4" style={s.page}>
-        <View style={s.header}>
-          <View style={s.logoSection}>
-            {typeof company?.logo === "string" && company.logo ? (
-              <Image style={s.logo} src={company.logo} />
-            ) : company?.logo?.url ? (
-              <Image style={s.logo} src={company.logo.url} />
-            ) : (
-              <Text style={s.planValue}>{company?.name || "Qalibrated Systems Ltd"}</Text>
-            )}
-            <Text style={s.companyDetails}>
-              {company?.name || "Qalibrated Systems Ltd"}
-              {formatAddress(company?.address) ? `\n${formatAddress(company.address)}` : ""}
-              {company?.phone || company?.email ? `\n${[company.phone, company.email].filter(Boolean).join(" | ")}` : ""}
-            </Text>
-            {company?.tagline ? <Text style={s.companyTagline}>{company.tagline}</Text> : null}
-          </View>
-          <View style={s.docHead}>
-            <Text style={s.docTitle}>METHOD STATEMENT</Text>
-            <Text style={s.docSub}>Implementation Methodology</Text>
-          </View>
-        </View>
-
-        <View style={s.divider} />
+        <TopBar kind="report" />
+        <RefinedHeader
+          company={company}
+          meta={[
+            { k: "Project", v: project?.projectNumber || "—", mono: true },
+            { k: "Updated", v: m.updatedAt ? formatDate(m.updatedAt) : "—" },
+          ]}
+        />
+        <TitlePill title="Method Statement" />
 
         <Text style={s.projectTitle}>{project?.name || "Project"}</Text>
         <Text style={s.projectNo}>
@@ -121,14 +108,7 @@ export function MethodologyPDF({ methodology, project, company, links = {} }) {
           </View>
         ))}
 
-        <View style={s.footer} fixed>
-          <Text style={s.footerMotto}>{company?.tagline || "Qalibrated Systems"}</Text>
-          <Text
-            style={s.footerText}
-            render={({ pageNumber, totalPages }) => `Method Statement · Page ${pageNumber} of ${totalPages}`}
-            fixed
-          />
-        </View>
+        <RefinedFooter company={company} serial={project?.projectNumber ? `${project.projectNumber} Method Statement` : "Method Statement"} />
       </Page>
     </Document>
   );

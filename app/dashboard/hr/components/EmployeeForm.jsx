@@ -88,6 +88,7 @@ export default function EmployeeForm({ departments = [], managers = [], defaults
       )}
 
       {d.linkedUserId && <input type="hidden" name="linkedUserId" value={d.linkedUserId} />}
+      {d.candidateId && <input type="hidden" name="candidateId" value={d.candidateId} />}
 
       {/* Personal */}
       <SectionCard title="Personal Information">

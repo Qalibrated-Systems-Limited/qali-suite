@@ -211,3 +211,50 @@ export async function getDigestRecipients(
 
   return rows.map((r) => String(r.email)).filter(Boolean);
 }
+
+export interface HrDigest {
+  companyId: string;
+  count: number;
+  top: Array<{ kind: "probation" | "certificate"; name: string; detail: string; due: string; days: number }>;
+}
+
+/**
+ * HR's daily digest: probations ending within 14 days, and certificates or
+ * licences expiring within 30 days or already expired, for staff still
+ * employed. Cross-tenant like the other digests, grouped per company.
+ */
+export async function getHrDigests(maxLines = MAX_LINES): Promise<HrDigest[]> {
+  const rows = (await privilegedDb().execute(sql`
+    WITH due AS (
+      SELECT e.company_id, 'probation' AS kind,
+             COALESCE(e.full_name, e.first_name || ' ' || e.last_name) AS name,
+             'Probation ends' AS detail, e.probation_end_date AS due
+        FROM employees e
+       WHERE e.status = 'probation' AND e.probation_end_date IS NOT NULL
+         AND e.probation_end_date <= CURRENT_DATE + 14
+      UNION ALL
+      SELECT t.company_id, 'certificate',
+             COALESCE(e.full_name, e.first_name || ' ' || e.last_name), t.title, t.expires_on
+        FROM hr_training_records t JOIN employees e ON e.id = t.employee_id
+       WHERE t.expires_on IS NOT NULL AND t.status <> 'cancelled'
+         AND t.expires_on <= CURRENT_DATE + 30
+         AND e.status IN ('active', 'probation', 'on_leave', 'suspended')
+    ), ranked AS (
+      SELECT *, row_number() OVER (PARTITION BY company_id ORDER BY due) AS rn,
+             count(*) OVER (PARTITION BY company_id) AS company_count
+        FROM due
+    )
+    SELECT company_id, company_count::int AS count,
+           json_agg(json_build_object(
+             'kind', kind, 'name', name, 'detail', detail,
+             'due', to_char(due, 'YYYY-MM-DD'), 'days', (due - CURRENT_DATE)
+           ) ORDER BY rn) FILTER (WHERE rn <= ${maxLines}) AS top
+      FROM ranked
+     GROUP BY company_id, company_count
+  `)) as unknown as Array<Record<string, unknown>>;
+  return rows.map((r) => ({
+    companyId: String(r.company_id),
+    count: Number(r.count),
+    top: (r.top as HrDigest["top"]) ?? [],
+  }));
+}

@@ -4,7 +4,8 @@ import Link from "next/link";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ArrowLeft, ShieldCheck, Users, KeyRound, AlertTriangle } from "lucide-react";
-import { canSeeSettingsNav, roleAllowed } from "@/lib/permissions";
+import { roleAllowed } from "@/lib/permissions";
+import { can } from "@/lib/capabilities";
 import { ADMIN_ROLES } from "@/lib/utils/role-gates";
 import {
   getCustomRoles,
@@ -28,7 +29,7 @@ export const metadata = {
 export default async function RolesPermissionsPage() {
   const session = await auth();
   if (!session?.user) redirect("/login");
-  if (!canSeeSettingsNav(session.user.role)) redirect("/dashboard");
+  if (!can(session.user.role, "system.settings")) redirect("/dashboard");
 
   const roles = roleSummary();
   const totalPermissions = PERMISSION_GROUPS.length + NAV_PERMISSIONS.length;

@@ -1,4 +1,5 @@
 import { Document, Page, Text, View, StyleSheet } from "@react-pdf/renderer";
+import { TopBar, RefinedHeader, TitlePill, RefinedFooter } from "@/lib/pdf/refined";
 
 /**
  * The two documents an employee leaves with: the certificate of service
@@ -6,11 +7,7 @@ import { Document, Page, Text, View, StyleSheet } from "@react-pdf/renderer";
  */
 
 const styles = StyleSheet.create({
-  page: { fontFamily: "Helvetica", fontSize: 10, color: "#111827", padding: 48, backgroundColor: "#ffffff" },
-  header: { marginBottom: 24, paddingBottom: 12, borderBottomWidth: 2, borderBottomColor: "#CA8A04" },
-  companyName: { fontSize: 16, fontFamily: "Helvetica-Bold" },
-  companyMeta: { fontSize: 8, color: "#6b7280", marginTop: 2 },
-  title: { fontSize: 14, fontFamily: "Helvetica-Bold", textAlign: "center", marginBottom: 4, letterSpacing: 1 },
+  page: { fontFamily: "Helvetica", fontSize: 10, color: "#26221C", paddingTop: 26, paddingBottom: 84, paddingHorizontal: 40, backgroundColor: "#ffffff" },
   subtitle: { fontSize: 8, color: "#6b7280", textAlign: "center", marginBottom: 24 },
   paragraph: { fontSize: 10, lineHeight: 1.6, marginBottom: 12 },
   table: { marginTop: 4, marginBottom: 16 },
@@ -28,7 +25,6 @@ const styles = StyleSheet.create({
   signatures: { flexDirection: "row", justifyContent: "space-between", marginTop: 48 },
   signature: { width: "42%" },
   signatureLine: { borderTopWidth: 0.75, borderTopColor: "#111827", paddingTop: 4, fontSize: 8, color: "#6b7280" },
-  footer: { position: "absolute", bottom: 28, left: 48, right: 48, fontSize: 7, color: "#9ca3af", textAlign: "center" },
 });
 
 const longDate = (d) =>
@@ -38,17 +34,14 @@ const longDate = (d) =>
 const kes = (n) =>
   (Number(n) || 0).toLocaleString("en-KE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-function Letterhead({ company }) {
-  const address = company?.address
-    ? [company.address.street, company.address.city, company.address.country].filter(Boolean).join(", ")
-    : null;
+/** The company letterhead every QaliSuite document now carries (lib/pdf/refined.jsx). */
+function Letterhead({ company, title, date, reference }) {
   return (
-    <View style={styles.header}>
-      <Text style={styles.companyName}>{company?.name || "Company"}</Text>
-      {address && <Text style={styles.companyMeta}>{address}</Text>}
-      {company?.email && <Text style={styles.companyMeta}>{company.email}</Text>}
-      {company?.phone && <Text style={styles.companyMeta}>{company.phone}</Text>}
-    </View>
+    <>
+      <TopBar kind="default" />
+      <RefinedHeader company={company} meta={[{ k: "Date", v: date }, { k: "Ref", v: reference || "—", mono: true }]} />
+      <TitlePill title={title} />
+    </>
   );
 }
 
@@ -76,8 +69,7 @@ export function CertificateOfServiceDocument({ company, data, issuedOn }) {
   return (
     <Document title={`Certificate of Service — ${e.fullName}`}>
       <Page size="A4" style={styles.page}>
-        <Letterhead company={company} />
-        <Text style={styles.title}>CERTIFICATE OF SERVICE</Text>
+        <Letterhead company={company} title="Certificate of Service" date={longDate(issuedOn)} reference={data.reference || e.employeeNumber} />
         <Text style={styles.subtitle}>Issued under section 51 of the Employment Act, 2007</Text>
 
         <Text style={styles.paragraph}>
@@ -110,9 +102,7 @@ export function CertificateOfServiceDocument({ company, data, issuedOn }) {
           </View>
         </View>
 
-        <Text style={styles.footer}>
-          {company?.name} · Certificate of service for {e.fullName} · {e.employeeNumber}
-        </Text>
+        <RefinedFooter company={company} serial={`Certificate of service · ${e.employeeNumber}`} />
       </Page>
     </Document>
   );
@@ -145,9 +135,7 @@ export function FinalDuesStatementDocument({ company, data }) {
   return (
     <Document title={`Final dues — ${employee.fullName}`}>
       <Page size="A4" style={styles.page}>
-        <Letterhead company={company} />
-        <Text style={styles.title}>STATEMENT OF FINAL DUES</Text>
-        <Text style={styles.subtitle}>{exit.exitNumber}</Text>
+        <Letterhead company={company} title="Statement of Final Dues" date={longDate(exit.approvedAt ? String(exit.approvedAt).slice(0, 10) : exit.lastWorkingDate)} reference={exit.exitNumber} />
 
         <View style={styles.table}>
           <Detail label="Employee" value={`${employee.fullName} (${employee.employeeNumber})`} />
@@ -190,9 +178,7 @@ export function FinalDuesStatementDocument({ company, data }) {
           </View>
         </View>
 
-        <Text style={styles.footer}>
-          {company?.name} · {exit.exitNumber} · approved by {exit.approvedByName}
-        </Text>
+        <RefinedFooter company={company} serial={exit.exitNumber} note={exit.approvedByName ? `Approved by ${exit.approvedByName}` : null} />
       </Page>
     </Document>
   );

@@ -100,7 +100,14 @@ export const workflowReports = pgTable(
     snapshotProgress: integer("snapshot_progress"),
     snapshotRevenue: money("snapshot_revenue"),
     snapshotCost: money("snapshot_cost"),
+    submittedById: text("submitted_by_id"),
     submittedByName: text("submitted_by_name"),
+    /** Named at submission: only they sign the supervisor step. */
+    assignedReviewerId: text("assigned_reviewer_id"),
+    assignedReviewerName: text("assigned_reviewer_name"),
+    /** Named at submission: only they give manager approval. */
+    assignedApproverId: text("assigned_approver_id"),
+    assignedApproverName: text("assigned_approver_name"),
     submittedAt: timestamp("submitted_at", { withTimezone: true }),
 
     reviewedById: text("reviewed_by_id").references(() => users.id, {

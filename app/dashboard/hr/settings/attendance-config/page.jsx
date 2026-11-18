@@ -7,12 +7,12 @@ import { HR_ADMIN_ROLES } from "@/lib/utils/role-gates";
 import { roleAllowed } from "@/lib/permissions";
 import AttendanceConfigClient from "./AttendanceConfigClient";
 
-export const metadata = { title: "Attendance Config | Settings" };
+export const metadata = { title: "Attendance Config | HR Settings" };
 
 export default async function AttendanceConfigPage() {
   const session = await auth();
   if (!session?.user) redirect("/login");
-  if (!roleAllowed(session.user.role, HR_ADMIN_ROLES)) redirect("/dashboard/settings");
+  if (!roleAllowed(session.user.role, HR_ADMIN_ROLES)) redirect("/dashboard/hr");
 
   // Always a policy: a company with none gets the defaults, which is what the
   // clock-in path uses too.
@@ -38,8 +38,8 @@ export default async function AttendanceConfigPage() {
   return (
     <div className="space-y-6 p-4 sm:p-6 max-w-2xl">
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
-        <Link href="/dashboard/settings" className="flex items-center gap-1 hover:text-foreground">
-          <ChevronLeft className="h-4 w-4" /> Settings
+        <Link href="/dashboard/hr/settings" className="flex items-center gap-1 hover:text-foreground">
+          <ChevronLeft className="h-4 w-4" /> HR Settings
         </Link>
         <span>/</span>
         <span className="text-foreground">Attendance</span>

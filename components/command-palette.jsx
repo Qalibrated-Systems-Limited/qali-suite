@@ -111,7 +111,17 @@ const PAGES = [
   { label: "Companies", href: "/dashboard/admin/companies", icon: Building2, category: "Admin", aliases: ["tenants"] },
   { label: "Company Settings", href: "/dashboard/company", icon: Building2, category: "Admin" },
   { label: "Integrations", href: "/dashboard/integrations", icon: Settings, category: "Admin", module: "integration" },
-  { label: "Settings", href: "/dashboard/settings", icon: Settings, category: "Admin" },
+  { label: "System Settings", href: "/dashboard/settings", icon: Settings, category: "Admin", aliases: ["settings", "configuration"] },
+  { label: "Roles & Permissions", href: "/dashboard/settings/roles", icon: ShieldCheck, category: "Admin", aliases: ["permissions", "access"] },
+  { label: "Finance Settings", href: "/dashboard/accounts/settings", icon: Settings, category: "Finance", aliases: ["account setup", "accounting settings"] },
+  { label: "HR Letters", href: "/dashboard/hr/letters", icon: FileText, category: "HR", module: "hr", aliases: ["offer letter", "appointment letter", "warning letter", "confirmation letter"] },
+  { label: "Disciplinary & Grievances", href: "/dashboard/hr/cases", icon: Users, category: "HR", module: "hr", aliases: ["disciplinary", "grievance", "show cause", "hearing"] },
+  { label: "Training & Certificates", href: "/dashboard/hr/training", icon: Users, category: "HR", module: "hr", aliases: ["training", "certificate", "licence", "competence"] },
+  { label: "Performance Reviews", href: "/dashboard/hr/reviews", icon: Users, category: "HR", module: "hr", aliases: ["appraisal", "performance", "review"] },
+  { label: "Recruitment", href: "/dashboard/hr/recruitment", icon: Users, category: "HR", module: "hr", aliases: ["vacancy", "candidate", "hiring", "jobs"] },
+  { label: "HR Reports", href: "/dashboard/hr/reports", icon: Users, category: "HR", module: "hr", aliases: ["headcount", "turnover", "hr analytics"] },
+  { label: "Org Chart", href: "/dashboard/hr/org-chart", icon: Users, category: "HR", module: "hr", aliases: ["organisation chart", "reporting lines"] },
+  { label: "HR Settings", href: "/dashboard/hr/settings", icon: Settings, category: "HR", module: "hr", aliases: ["payroll config", "public holidays", "attendance config", "paye rates"] },
 
   // ── HR ─────────────────────────────────────────────
   { label: "HR Overview", href: "/dashboard/hr", icon: Briefcase, category: "HR", module: "hr" },

@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { renderToBuffer } from "@react-pdf/renderer";
+import QRCode from "qrcode";
 import { auth } from "@/auth";
 import { safeErrorMessage } from "@/lib/safe-error";
-import { getTenantContext } from "@/lib/utils/tenant-utils";
 import { canSeeProjectsNav } from "@/lib/permissions";
 import { getWorkflowReport } from "@/app/db/actions/workflow-report-actions";
 import { getProjectById } from "@/app/db/actions/project-actions";
@@ -19,7 +19,7 @@ import { templateByCode } from "@/app/dashboard/technical/lib/templates";
 // theme.
 // ============================================
 
-export async function GET(_req, { params }) {
+export async function GET(req, { params }) {
   try {
     const session = await auth();
     if (!session?.user || !canSeeProjectsNav(session.user.role)) {
@@ -36,10 +36,32 @@ export async function GET(_req, { params }) {
 
     const project = report.projectId ? await getProjectById(report.projectId).catch(() => null) : null;
 
-    // Company branding for the PDF header.
-    const { companyId } = await getTenantContext();
+    // Company branding for the letterhead — the company the REPORT belongs to.
+    // This asked getTenantContext(), whose company can be unset for a user
+    // working in a company that is not their home one, and the letterhead
+    // then came out blank: no logo, name, address or accreditation line.
     const { getCompanyForDocuments } = await import("@/app/db/platform");
-    const company = await getCompanyForDocuments(String(companyId));
+    const company = await getCompanyForDocuments(String(report.companyId));
+
+    // The "scan to verify" code carries a short description of the document,
+    // ending with the link to it, as the Workflow Reports app's does. It is
+    // read on any phone without an account; the link needs a login.
+    const serial = displaySerial(report.reportNumber);
+    const header = report.data?.header || {};
+    const origin = new URL(req.url).origin;
+    const qrText = [
+      `${company?.name || ""} ${sheetName(report.type)}`.trim(),
+      `${serial}${header.client ? ` · ${header.client}` : ""}${header.site ? ` - ${header.site}` : ""}`,
+      `Status: ${(STATUS_CONFIG[report.status] || STATUS_CONFIG.draft).label.toLowerCase()}`,
+      `Filed by ${report.createdByName || "—"}`,
+      `${origin}/dashboard/technical/${report.id}`,
+    ].join("\n");
+    const qrSrc = await QRCode.toDataURL(qrText, {
+      margin: 1,
+      width: 240,
+      errorCorrectionLevel: "M",
+      color: { dark: "#161310", light: "#ffffff" },
+    }).catch(() => null);
 
     const buffer = await renderToBuffer(
       TechnicalReportPDF({
@@ -48,8 +70,8 @@ export async function GET(_req, { params }) {
         company,
         template: templateByCode(report.type),
         sheetLabel: sheetName(report.type),
-        serial: displaySerial(report.reportNumber),
-        statusLabel: (STATUS_CONFIG[report.status] || STATUS_CONFIG.draft).label,
+        serial,
+        qrSrc,
       }),
     );
 
@@ -58,7 +80,9 @@ export async function GET(_req, { params }) {
       status: 200,
       headers: {
         "Content-Type": "application/pdf",
-        "Content-Disposition": `attachment; filename="${filename}"`,
+        // Inline so the in-app preview (and a browser tab) can show it;
+        // ?download=1 for the download button.
+        "Content-Disposition": `${new URL(req.url).searchParams.get("download") ? "attachment" : "inline"}; filename="${filename}"`,
       },
     });
   } catch (error) {

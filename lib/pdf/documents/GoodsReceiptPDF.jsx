@@ -11,8 +11,8 @@ import {
   Text,
   View,
   StyleSheet,
-  Image,
 } from "@react-pdf/renderer";
+import { TopBar, RefinedHeader, TitleBanner, RefinedFooter, VerifyCode, verifyText } from "../refined";
 
 // ============================================
 // GOODS RECEIPT NOTE PDF
@@ -31,11 +31,11 @@ import {
 // ============================================
 
 const colors = {
-  primary: "#eab308",
-  dark: "#18181b",
-  gray: "#71717a",
-  grayLight: "#d4d4d8",
-  grayLightest: "#f4f4f5",
+  primary: "#F5A800",
+  dark: "#161310",
+  gray: "#6B6355",
+  grayLight: "#D9D2C3",
+  grayLightest: "#F7F4EC",
   white: "#ffffff",
   good: "#16a34a",
   warn: "#d97706",
@@ -44,9 +44,11 @@ const colors = {
 
 const styles = StyleSheet.create({
   page: {
+    paddingTop: 26,
+    paddingBottom: 84,
+    paddingHorizontal: 32,
     fontFamily: "Helvetica",
     fontSize: 9,
-    padding: 36,
     backgroundColor: colors.white,
     color: colors.dark,
   },
@@ -256,14 +258,6 @@ const styles = StyleSheet.create({
 });
 
 // Status-specific pill colours
-const STATUS_PILL = {
-  draft: { bg: "#f4f4f5", color: "#71717a" },
-  pending_acceptance: { bg: "#fef3c7", color: "#92400e" },
-  accepted: { bg: "#d1fae5", color: "#065f46" },
-  partially_accepted: { bg: "#dbeafe", color: "#1e40af" },
-  rejected: { bg: "#fee2e2", color: "#991b1b" },
-  voided: { bg: "#f4f4f5", color: "#71717a" },
-};
 const STATUS_LABEL = {
   draft: "Draft",
   pending_acceptance: "Pending acceptance",
@@ -282,20 +276,6 @@ const CONDITION_COLOR = {
   deformed: colors.warn,
   defective: colors.bad,
 };
-
-function formatAddress(addr) {
-  if (!addr) return "";
-  if (typeof addr === "string") return addr;
-  // Structured address subdoc — join non-empty parts with commas.
-  const parts = [
-    addr.street,
-    addr.city,
-    addr.state,
-    addr.postalCode,
-    addr.country,
-  ].filter((p) => typeof p === "string" && p.trim());
-  return parts.join(", ");
-}
 
 function fmtDate(d) {
   if (!d) return "—";
@@ -318,7 +298,6 @@ function fmtDateTime(d) {
 }
 
 export const GoodsReceiptPDF = ({ grn, company }) => {
-  const pill = STATUS_PILL[grn?.status] || STATUS_PILL.draft;
   const sourceLabel = (() => {
     if (grn?.source?.type === "bill") return `Bill: ${grn.source.reference || "—"}`;
     if (grn?.source?.type === "purchase_order")
@@ -329,47 +308,9 @@ export const GoodsReceiptPDF = ({ grn, company }) => {
   return (
     <Document>
       <Page size="A4" style={styles.page}>
-        {/* HEADER */}
-        <View style={styles.header}>
-          <View style={styles.logoSection}>
-            {/* Some tenants store logo as an object ({url, publicId});
-                @react-pdf needs a string src. Resolve defensively. */}
-            {typeof company?.logo === "string" && company.logo ? (
-              <Image src={company.logo} style={styles.logo} />
-            ) : company?.logo?.url ? (
-              <Image src={company.logo.url} style={styles.logo} />
-            ) : (
-              <Text style={styles.companyName}>
-                {company?.name || "Your Company"}
-              </Text>
-            )}
-            {/* Address may be a string OR a structured object
-                ({ street, city, state, postalCode, country }) depending
-                on tenant. Flatten to a single string before rendering;
-                Text children must be primitives in @react-pdf. */}
-            <Text style={styles.companyDetails}>
-              {formatAddress(company?.address)}
-              {formatAddress(company?.address) ? "\n" : ""}
-              {company?.email || ""}
-              {company?.email && company?.phone ? " · " : ""}
-              {company?.phone || ""}
-            </Text>
-          </View>
-          <View style={styles.docHeader}>
-            <Text style={styles.docTitle}>GOODS RECEIPT NOTE</Text>
-            <Text style={styles.docNumber}>{grn?.grnNumber || ""}</Text>
-            <Text
-              style={[
-                styles.statusPill,
-                { backgroundColor: pill.bg, color: pill.color },
-              ]}
-            >
-              {STATUS_LABEL[grn?.status] || grn?.status}
-            </Text>
-          </View>
-        </View>
-
-        <View style={styles.divider} />
+        <TopBar kind="invoice" />
+        <RefinedHeader company={company} meta={[{ k: "Date", v: fmtDate(grn?.receivedDate) }, { k: "No.", v: grn?.grnNumber, mono: true }]} />
+        <TitleBanner title="Goods Received Note" status={{ label: String(STATUS_LABEL[grn?.status] || grn?.status || "").toUpperCase(), bg: "#161310", color: "#fff" }} />
 
         {/* SUPPLIER + SOURCE */}
         <View style={styles.infoRow}>
@@ -550,17 +491,8 @@ export const GoodsReceiptPDF = ({ grn, company }) => {
           </View>
         </View>
 
-        {/* FOOTER */}
-        <View style={styles.footer} fixed>
-          <Text>
-            {company?.name || "Company"} · GRN {grn?.grnNumber}
-          </Text>
-          <Text
-            render={({ pageNumber, totalPages }) =>
-              `Page ${pageNumber} of ${totalPages} · Generated ${fmtDate(new Date())}`
-            }
-          />
-        </View>
+        <VerifyCode value={verifyText({ company, title: "Goods Received Note", reference: grn?.grnNumber, date: fmtDate(grn?.receivedDate) })} />
+        <RefinedFooter company={company} serial={grn?.grnNumber} />
       </Page>
     </Document>
   );

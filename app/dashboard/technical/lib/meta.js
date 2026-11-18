@@ -63,7 +63,7 @@ export const CATEGORY_META = {
   "Electrical": { icon: "⚡", blurb: "Installations, testing & solar PV" },
   "Inspection & QA/QC": { icon: "🔍", blurb: "Incoming, final, welding & NDT" },
   "HSE & Safety": { icon: "🦺", blurb: "Inspections, permits & incidents" },
-  "Field Service & General": { icon: "📋", blurb: "Site visits, handover & sign-off" },
+  "Field Service & General": { icon: "📋", blurb: "Daily activity, site visits, handover & sign-off" },
 };
 
 /**

@@ -52,12 +52,14 @@ export default async function ApprovalThresholdsPage() {
   return (
     <div className="mx-auto max-w-3xl space-y-5">
       <nav className="flex items-center gap-1.5 text-sm text-muted-foreground">
+        {/* Reached from System Settings by administrators and from Finance
+            Settings by the CFO, who cannot open System Settings. */}
         <Link
-          href="/dashboard/settings"
+          href={role === "CFO" ? "/dashboard/accounts/settings" : "/dashboard/settings"}
           className="inline-flex items-center gap-1 hover:text-foreground"
         >
           <ChevronLeft className="h-4 w-4" />
-          Settings
+          {role === "CFO" ? "Finance Settings" : "System Settings"}
         </Link>
         <span>/</span>
         <span className="text-foreground">Approval thresholds</span>

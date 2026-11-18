@@ -10,6 +10,7 @@ import {
   deleteInspection,
 } from "@/app/db/actions/technical-actions";
 import { fmtDate } from "../technical/lib/meta";
+import PdfPreviewButton from "@/components/pdf/PdfPreviewButton";
 
 const RULING = [
   { v: "pending", label: "Pending", cls: "slate" },
@@ -113,9 +114,17 @@ export default function InspectionBoard({ inspections = [], inspectors = [], sta
                 canManage ? (
                   <RowSelect options={RULING} value={i.ruling} disabled={isPending} onChange={(v) => act(setInspectionOutcome, i.id, { ruling: v })} />
                 ) : <Badge cls={cfg(RULING, i.ruling).cls}>{cfg(RULING, i.ruling).label}</Badge>,
-                canManage ? (
-                  <button className="tech-rowbtn" onClick={() => act(deleteInspection, i.id)} disabled={isPending} aria-label="Delete"><Trash2 size={14} /></button>
-                ) : null,
+                <span style={{ display: "inline-flex", gap: 6 }}>
+                  <PdfPreviewButton
+                    href={`/api/technical/inspection/${i.id}/report`}
+                    title={`Inspection report ${i.inspectionNumber}`}
+                    className="tech-rowbtn"
+                    label="Report"
+                  />
+                  {canManage ? (
+                    <button className="tech-rowbtn" onClick={() => confirm(`Delete ${i.inspectionNumber}?`) && act(deleteInspection, i.id)} disabled={isPending} aria-label="Delete"><Trash2 size={14} /></button>
+                  ) : null}
+                </span>,
               ])}
               empty="No inspections yet."
             />

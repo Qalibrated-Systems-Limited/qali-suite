@@ -7,7 +7,7 @@ import { getPayrollSettings } from "@/app/db/actions/hr-payroll-actions";
 import { can } from "@/lib/capabilities";
 import PayrollConfigClient from "./PayrollConfigClient";
 
-export const metadata = { title: "Payroll Configuration | Settings" };
+export const metadata = { title: "Payroll Configuration | HR Settings" };
 
 /*
  * NO ROLE ARRAYS HERE ANY MORE.
@@ -59,7 +59,7 @@ export default async function PayrollConfigPage() {
   const session = await auth();
   if (!session?.user) redirect("/login");
   if (!can(session.user.role, "payroll.rates.write")) {
-    redirect("/dashboard/settings");
+    redirect("/dashboard/hr");
   }
 
   // Whoever may open this may set the RATES — the source showed the page to HR
@@ -76,8 +76,8 @@ export default async function PayrollConfigPage() {
     <div className="space-y-6 p-4 sm:p-6 lg:p-8 max-w-4xl">
       {/* Breadcrumb */}
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
-        <Link href="/dashboard/settings" className="flex items-center gap-1 hover:text-foreground">
-          <ChevronLeft className="h-4 w-4" /> Settings
+        <Link href="/dashboard/hr/settings" className="flex items-center gap-1 hover:text-foreground">
+          <ChevronLeft className="h-4 w-4" /> HR Settings
         </Link>
         <span>/</span>
         <span className="text-foreground">Payroll Configuration</span>

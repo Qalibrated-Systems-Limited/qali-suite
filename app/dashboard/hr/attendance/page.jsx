@@ -237,7 +237,7 @@ export default async function AttendancePage({ searchParams }) {
           </p>
         </div>
         <Link
-          href="/dashboard/settings/attendance-config"
+          href="/dashboard/hr/settings/attendance-config"
           className="inline-flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm text-foreground transition-colors hover:bg-accent"
         >
           <Settings2 className="h-4 w-4" />

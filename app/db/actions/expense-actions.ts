@@ -361,6 +361,30 @@ export async function voidExpensePg(
   }
 }
 
+/**
+ * Posts a DRAFT expense to the books.
+ *
+ * Drafts come from screens where somebody records a cost without the
+ * authority to post it — a fleet trip's fuel, a vehicle's service. Finance
+ * checks the draft here and posts it exactly as an expense entered on this
+ * screen would be: the same journal, the same tax records.
+ */
+export async function postDraftExpensePg(expenseId: string): Promise<ActionResult> {
+  try {
+    const { expense } = await withAuthorizedTenant(
+      [...EXPENSE_PAY_ROLES],
+      (tx, { user }) => expensesRepo.postExpense(tx, expenseId, user.id),
+    );
+    revalidatePath("/dashboard/expenses");
+    revalidatePath(`/dashboard/expenses/${expenseId}`);
+    revalidatePath("/dashboard/journal");
+    revalidatePath("/dashboard/fleet");
+    return { success: true, message: `Expense ${expense.expenseNumber} posted` };
+  } catch (err) {
+    return { success: false, error: toActionError(err) };
+  }
+}
+
 export async function deleteExpensePg(expenseId: string): Promise<ActionResult> {
   try {
     const number = await withAuthorizedTenant(

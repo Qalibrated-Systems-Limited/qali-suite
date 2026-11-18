@@ -30,7 +30,7 @@ export const DEPARTMENTS = [
   { slug: "business-dev", label: "Business Dev & Sales", icon: Briefcase, blurb: "The pipeline — leads, quotes, orders, bids and the shop." },
   { slug: "ict-quality", label: "ICT, Quality & Compliance", icon: ShieldCheck, blurb: "Quality, compliance, HSE, the service desk and integrations." },
   { slug: "procurement", label: "Procurement", icon: Activity, blurb: "Procurement, the fleet and the task spine." },
-  { slug: "hr-admin", label: "HR & Admin", icon: Users, blurb: "People, payroll, users, the company record and settings." },
+  { slug: "hr-admin", label: "Human Resources", icon: Users, blurb: "People, payroll, leave, attendance and exits." },
 ];
 
 const DEPARTMENT_OF = {
@@ -49,10 +49,6 @@ const DEPARTMENT_OF = {
   purchases: "procurement",
   operations: "procurement",
   hr: "hr-admin",
-  people: "hr-admin",
-  company: "hr-admin",
-  licensing: "hr-admin",
-  settings: "hr-admin",
 };
 
 export const departmentOf = (id) => DEPARTMENT_OF[id] ?? null;

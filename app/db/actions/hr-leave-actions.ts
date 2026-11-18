@@ -321,7 +321,7 @@ export async function seedKenyaHolidays() {
       [...HR_ADMIN_ROLES],
       (tx, { companyId }) => leave.seedKenyaHolidays(tx, companyId),
     );
-    revalidatePath("/dashboard/settings/public-holidays");
+    revalidatePath("/dashboard/hr/settings/public-holidays");
     return {
       success: true as const,
       seeded,
@@ -374,7 +374,7 @@ export async function createHoliday(
     return { success: false, error: userMessage(err, "Could not add the holiday.") };
   }
 
-  revalidatePath("/dashboard/settings/public-holidays");
+  revalidatePath("/dashboard/hr/settings/public-holidays");
   return { success: true, message: `${name} added.` };
 }
 
@@ -384,7 +384,7 @@ export async function deleteHoliday(id: string) {
   } catch (err) {
     return { success: false as const, error: userMessage(err, "Could not remove the holiday.") };
   }
-  revalidatePath("/dashboard/settings/public-holidays");
+  revalidatePath("/dashboard/hr/settings/public-holidays");
   return { success: true as const };
 }
 

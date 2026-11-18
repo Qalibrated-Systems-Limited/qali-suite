@@ -238,3 +238,19 @@ export async function deleteInspection(id: string) {
     return { error: userMessage(error) };
   }
 }
+
+// ── Documents ─────────────────────────────────────────────────────────────────
+
+/** An issued calibration certificate and the reference standards on file. */
+export async function getCalibrationCertificate(id: string) {
+  return withAuthorizedTenant([], async (tx) => {
+    const job = await repo.getJobById(tx, id);
+    if (!job) return null;
+    const standards = await repo.listStandards(tx);
+    return { job, standards };
+  });
+}
+
+export async function getInspectionForReport(id: string) {
+  return withAuthorizedTenant([], (tx) => repo.getInspectionById(tx, id));
+}

@@ -11,6 +11,14 @@ import {
   LayoutDashboard,
   Clock,
   LogOut,
+  Settings,
+  FileText,
+  Gavel,
+  GraduationCap,
+  Star,
+  Briefcase,
+  BarChart3,
+  Network,
 } from "lucide-react";
 
 const ADMIN_NAV = [
@@ -21,12 +29,22 @@ const ADMIN_NAV = [
   { label: "Attendance", href: "/dashboard/hr/attendance", icon: Clock },
   { label: "Payroll", href: "/dashboard/hr/payroll", icon: Banknote },
   { label: "Exits", href: "/dashboard/hr/exits", icon: LogOut, capability: "exit.manage" },
+  { label: "Letters", href: "/dashboard/hr/letters", icon: FileText, capability: "hr.letters" },
+  { label: "Cases", href: "/dashboard/hr/cases", icon: Gavel, capability: "hr.discipline" },
+  { label: "Training", href: "/dashboard/hr/training", icon: GraduationCap, capability: "hr.training" },
+  { label: "Reviews", href: "/dashboard/hr/reviews", icon: Star, capability: "hr.reviews" },
+  { label: "Recruitment", href: "/dashboard/hr/recruitment", icon: Briefcase, capability: "hr.recruit" },
+  { label: "Reports", href: "/dashboard/hr/reports", icon: BarChart3, capability: "hr.reports" },
+  { label: "Org chart", href: "/dashboard/hr/org-chart", icon: Network },
+  { label: "Settings", href: "/dashboard/hr/settings", icon: Settings, capability: "hr.admin" },
 ];
 
 const EMPLOYEE_NAV = [
   { label: "My Leave", href: "/dashboard/hr/my-leave", icon: Calendar },
   { label: "My Attendance", href: "/dashboard/hr/my-attendance", icon: Clock },
   { label: "My Payslips", href: "/dashboard/hr/my-payslips", icon: Banknote },
+  { label: "My Reviews", href: "/dashboard/hr/my-reviews", icon: Star },
+  { label: "My Letters", href: "/dashboard/hr/my-letters", icon: FileText },
 ];
 
 export default function HRNav({ role }) {
