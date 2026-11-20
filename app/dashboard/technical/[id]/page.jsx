@@ -5,8 +5,8 @@ import AccessDenied from "../../projects/components/AccessDenied";
 import TechnicalReportActions from "../components/TechnicalReportActions";
 import { getWorkflowReport, listReportSignoffUsers } from "@/app/db/actions/workflow-report-actions";
 import { getProjectById } from "@/app/db/actions/project-actions";
-import { canSeeProjectsNav } from "@/lib/permissions";
-import { hasRole, WORKFLOW_REPORT_WRITE_ROLES, WORKFLOW_REPORT_SIGNOFF_ROLES } from "@/lib/utils/role-gates";
+import { hasRole, WORKFLOW_REPORT_SIGNOFF_ROLES } from "@/lib/utils/role-gates";
+import { technicalViewer } from "../lib/access";
 import { sheetName, displaySerial } from "../lib/meta";
 import { templateByCode } from "../lib/templates";
 import SheetDataView from "../components/SheetDataView";
@@ -25,14 +25,19 @@ export const metadata = { title: "Report | Technical" };
 export default async function ReportDetailPage({ params }) {
   const { id } = await params;
   const session = await auth();
-  if (!session?.user || !canSeeProjectsNav(session.user.role)) return <AccessDenied />;
+  if (!session?.user) return <AccessDenied />;
+  const viewer = await technicalViewer(session.user);
+  if (!viewer.canView) return <AccessDenied />;
 
   const report = await getWorkflowReport(id);
   if (!report) notFound();
 
   const project = await getProjectById(report.projectId);
   const template = templateByCode(report.type);
-  const canManage = hasRole(session.user, WORKFLOW_REPORT_WRITE_ROLES);
+  // A technician changes their own reports; a technical manager anyone's.
+  const isAuthor = [report.createdById, report.submittedById].includes(viewer.userId);
+  const canManage = viewer.isManager || (viewer.isTechnician && isAuthor);
+  const canRecall = isAuthor && report.status === "submitted";
   const canSignOff = hasRole(session.user, WORKFLOW_REPORT_SIGNOFF_ROLES);
   const signoffUsers = canManage || canSignOff ? await listReportSignoffUsers().catch(() => []) : [];
 
@@ -115,6 +120,7 @@ export default async function ReportDetailPage({ params }) {
           authorName={session.user?.name || ""}
           canManage={canManage}
           canSignOff={canSignOff}
+          canRecall={canRecall}
           currentUserId={session.user.id}
           signoffUsers={signoffUsers}
         />

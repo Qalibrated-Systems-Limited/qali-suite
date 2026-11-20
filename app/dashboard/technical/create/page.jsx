@@ -4,7 +4,7 @@ import AccessDenied from "../../projects/components/AccessDenied";
 import NoProjectsCard from "../../projects/components/NoProjectsCard";
 import TechnicalReportForm from "../components/TechnicalReportForm";
 import { listReportSignoffUsers } from "@/app/db/actions/workflow-report-actions";
-import { hasRole, WORKFLOW_REPORT_WRITE_ROLES } from "@/lib/utils/role-gates";
+import { technicalViewer } from "../lib/access";
 import { templateByCode } from "../lib/templates";
 import { WAIT } from "../components/ui";
 
@@ -14,11 +14,11 @@ export const metadata = {
 
 export default async function CreateReportPage({ searchParams }) {
   const sp = await searchParams;
-  const ctx = await getWorkspaceContext(sp);
+  const ctx = await getWorkspaceContext(sp, { admit: async (u) => (await technicalViewer(u)).canView });
   if (ctx.denied) return <AccessDenied />;
 
   const { projects, project, user } = ctx;
-  const canManage = hasRole(user, WORKFLOW_REPORT_WRITE_ROLES);
+  const canManage = (await technicalViewer(user)).isTechnician;
   const template = templateByCode(sp?.sheet) || templateByCode("TR01");
   const signoffUsers = canManage ? await listReportSignoffUsers().catch(() => []) : [];
 

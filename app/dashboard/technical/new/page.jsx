@@ -4,7 +4,7 @@ import { getWorkspaceContext } from "../../projects/lib/workspace";
 import AccessDenied from "../../projects/components/AccessDenied";
 import NoProjectsCard from "../../projects/components/NoProjectsCard";
 import ProjectSwitcher from "../../projects/components/ProjectSwitcher";
-import { hasRole, WORKFLOW_REPORT_WRITE_ROLES } from "@/lib/utils/role-gates";
+import { technicalViewer } from "../lib/access";
 import { sheetsByCategory, resolveCategory, CATEGORY_META } from "../lib/meta";
 import { SectionBar, COAL, GOLD, INK, WAIT } from "../components/ui";
 
@@ -22,11 +22,11 @@ export const metadata = {
  */
 export default async function ChooseSheetPage({ searchParams }) {
   const sp = await searchParams;
-  const ctx = await getWorkspaceContext(sp);
+  const ctx = await getWorkspaceContext(sp, { admit: async (u) => (await technicalViewer(u)).canView });
   if (ctx.denied) return <AccessDenied />;
 
   const { projects, project, user } = ctx;
-  const canManage = hasRole(user, WORKFLOW_REPORT_WRITE_ROLES);
+  const canManage = (await technicalViewer(user)).isTechnician;
   const projectQ = project ? `&project=${project.id}` : "";
   const active = resolveCategory(sp?.work);
   const groups = sheetsByCategory().filter((g) => !active || g.category === active);

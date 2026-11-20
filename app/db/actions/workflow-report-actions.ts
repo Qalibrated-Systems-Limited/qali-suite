@@ -4,10 +4,8 @@ import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { withAuthorizedTenant } from "../tenant";
 import { userMessage } from "../errors";
-import {
-  WORKFLOW_REPORT_WRITE_ROLES,
-  WORKFLOW_REPORT_SIGNOFF_ROLES,
-} from "@/lib/utils/role-gates";
+import { WORKFLOW_REPORT_SIGNOFF_ROLES } from "@/lib/utils/role-gates";
+import { requireTechnician } from "../technicalAccess";
 import * as repo from "../repositories/workflowReports";
 import * as notifications from "../repositories/notifications";
 import {
@@ -159,8 +157,9 @@ export async function createWorkflowReport(prevState: unknown, formData: FormDat
   const data = parseData(formData);
   try {
     const row = await withAuthorizedTenant(
-      WORKFLOW_REPORT_WRITE_ROLES as unknown as string[],
+      [],
       async (tx, { user, companyId }) => {
+        await requireTechnician(tx, user, companyId);
         const actor = actorFrom(user);
         return repo.createReport(tx, {
           companyId,
@@ -199,10 +198,11 @@ export async function updateWorkflowReport(
   const data = parseData(formData);
   try {
     await withAuthorizedTenant(
-      WORKFLOW_REPORT_WRITE_ROLES as unknown as string[],
-      async (tx, { user }) => {
+      [],
+      async (tx, { user, companyId }) => {
         const existing = await repo.getReportById(tx, id);
         if (!existing) throw new Error("Report not found");
+        await requireAuthorOrManager(tx, user, companyId, existing);
         if (existing.status !== "draft") {
           throw new Error("Only a draft report can be edited — reopen it first.");
         }
@@ -226,6 +226,51 @@ export async function updateWorkflowReport(
     return { success: true, message: "Report updated" };
   } catch (error) {
     return { errors: { _form: [userMessage(error)] }, values };
+  }
+}
+
+/**
+ * A technician works on their own reports; a technical manager on anyone's.
+ * Without this, opening report writing to the Technical department would let
+ * any technician edit or delete a colleague's draft.
+ */
+async function requireAuthorOrManager(
+  tx: Parameters<Parameters<typeof withAuthorizedTenant>[1]>[0],
+  user: { id?: string | null; role?: string | null },
+  companyId: string,
+  report: { createdById: string | null; submittedById?: string | null },
+) {
+  const standing = await requireTechnician(tx, user, companyId);
+  if (standing.isManager) return standing;
+  const mine = [report.createdById, report.submittedById].filter(Boolean);
+  if (!mine.includes(String(user.id))) {
+    throw new Error("You can only change reports you wrote. Ask a technical manager.");
+  }
+  return standing;
+}
+
+/**
+ * The author takes a submitted report back before anyone has signed it — to
+ * fix a mistake they spotted — without waiting for it to be returned.
+ */
+export async function recallWorkflowReport(id: string, projectId: string) {
+  try {
+    const row = await withAuthorizedTenant([], async (tx, { user }) => {
+      const existing = await repo.getReportById(tx, id);
+      if (!existing) throw new Error("Report not found");
+      const author = existing.submittedById || existing.createdById;
+      if (author !== user.id) throw new Error("Only the person who submitted a report can recall it.");
+      if (existing.status !== "submitted") {
+        throw new Error("A report can be recalled only before the supervisor has signed it.");
+      }
+      const updated = await repo.reopenReport(tx, id, actorFrom(user), "");
+      if (!updated) throw new Error("Report not found");
+      return updated;
+    });
+    revalidateReports(projectId, id);
+    return { success: true, message: `${row.reportNumber} recalled — it is a draft again` };
+  } catch (error) {
+    return { success: false, error: userMessage(error) };
   }
 }
 
@@ -287,8 +332,11 @@ export async function submitWorkflowReport(
     };
 
     const row = await withAuthorizedTenant(
-      WORKFLOW_REPORT_WRITE_ROLES as unknown as string[],
+      [],
       async (tx, { user, companyId }) => {
+        const existing = await repo.getReportById(tx, id);
+        if (!existing) throw new Error("Report not found");
+        await requireAuthorOrManager(tx, user, companyId, existing);
         const eligible = await repo.listSignoffUsers(tx, SIGNOFF);
         const reviewer = eligible.find((u) => u.id === assignment?.reviewerId);
         const approver = eligible.find((u) => u.id === assignment?.approverId);
@@ -415,10 +463,11 @@ export async function reopenWorkflowReport(id: string, projectId: string, commen
 export async function deleteWorkflowReport(id: string, projectId: string) {
   try {
     await withAuthorizedTenant(
-      WORKFLOW_REPORT_WRITE_ROLES as unknown as string[],
-      async (tx) => {
+      [],
+      async (tx, { user, companyId }) => {
         const existing = await repo.getReportById(tx, id);
         if (!existing) throw new Error("Report not found");
+        await requireAuthorOrManager(tx, user, companyId, existing);
         if (existing.status === "approved") {
           throw new Error("An approved report cannot be deleted — reopen it first.");
         }
@@ -430,6 +479,11 @@ export async function deleteWorkflowReport(id: string, projectId: string) {
   } catch (error) {
     return { success: false, error: userMessage(error) };
   }
+}
+
+/** The viewer's own report work, for the Technical "My work" page. */
+export async function getMyReports() {
+  return withAuthorizedTenant([], (tx, { user }) => repo.listMyReports(tx, String(user.id)));
 }
 
 /** Company-wide aggregates for the Technical dashboard overview. */

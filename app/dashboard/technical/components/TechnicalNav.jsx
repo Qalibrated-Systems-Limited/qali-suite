@@ -9,9 +9,12 @@ import { usePathname, useSearchParams } from "next/navigation";
  * them.
  */
 const ITEMS = [
+  { label: "My work", href: "/dashboard/technical/my-work" },
   { label: "Dashboard", href: "/dashboard/technical/overview" },
   { label: "New report", href: "/dashboard/technical/new" },
   { label: "Report registry", href: "/dashboard/technical", exact: true },
+  { label: "Calibration", href: "/dashboard/calibration" },
+  { label: "Inspection", href: "/dashboard/inspection" },
 ];
 
 export default function TechnicalNav() {

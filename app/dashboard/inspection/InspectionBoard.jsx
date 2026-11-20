@@ -11,6 +11,7 @@ import {
 } from "@/app/db/actions/technical-actions";
 import { fmtDate } from "../technical/lib/meta";
 import PdfPreviewButton from "@/components/pdf/PdfPreviewButton";
+import WorkActions, { StatusBadge } from "../technical/components/WorkActions";
 
 const RULING = [
   { v: "pending", label: "Pending", cls: "slate" },
@@ -30,7 +31,9 @@ function Badge({ cls, children }) {
   return <span className={`tech-b ${cls}`}>{children}</span>;
 }
 
-export default function InspectionBoard({ inspections = [], inspectors = [], stats, canManage }) {
+export default function InspectionBoard({ inspections = [], inspectors = [], stats, me, team = [] }) {
+  const canManage = Boolean(me?.isManager);
+  const canCreate = Boolean(me?.isTechnician);
   const router = useRouter();
   const [tab, setTab] = useState("inspections");
   const [isPending, startTransition] = useTransition();
@@ -38,7 +41,12 @@ export default function InspectionBoard({ inspections = [], inspectors = [], sta
   const [q, setQ] = useState("");
   const [rulingFilter, setRulingFilter] = useState("");
 
-  const appeals = useMemo(() => inspections.filter((i) => i.appealStatus !== "none"), [inspections]);
+  // A failed or quarantined ruling is what a client appeals, so those are
+  // listed here ready for a manager to record one.
+  const appeals = useMemo(
+    () => inspections.filter((i) => i.appealStatus !== "none" || ["fail", "quarantined"].includes(i.ruling)),
+    [inspections],
+  );
   const filtered = useMemo(() => {
     let l = inspections;
     if (rulingFilter) l = l.filter((i) => i.ruling === rulingFilter);
@@ -73,7 +81,7 @@ export default function InspectionBoard({ inspections = [], inspectors = [], sta
           <span className="count">ISO/IEC 17020 inspection bodies, rulings &amp; appeals</span>
         </span>
         <span className="tech-bar-spacer" />
-        {canManage && (
+        {canCreate && (
           <button className="tech-btn-gold" onClick={() => setOpen(true)}>
             <Plus size={14} strokeWidth={3} /> New Inspection
           </button>
@@ -104,24 +112,26 @@ export default function InspectionBoard({ inspections = [], inspectors = [], sta
               </select>
             </div>
             <Table
-              head={["Inspection No.", "Type", "Equipment S/N", "Client", "Inspector", "Ruling", ""]}
+              head={["Inspection No.", "Type", "Equipment S/N", "Client", "Inspector", "Status", "Ruling", "Actions"]}
               rows={filtered.map((i) => [
                 <span className="mono">{i.inspectionNumber}</span>,
                 i.type || "—",
                 i.equipmentSerial || "—",
                 i.clientName,
                 i.inspectorName || "—",
-                canManage ? (
-                  <RowSelect options={RULING} value={i.ruling} disabled={isPending} onChange={(v) => act(setInspectionOutcome, i.id, { ruling: v })} />
-                ) : <Badge cls={cfg(RULING, i.ruling).cls}>{cfg(RULING, i.ruling).label}</Badge>,
-                <span style={{ display: "inline-flex", gap: 6 }}>
+                <span title={i.returnComment ? `Returned: ${i.returnComment}` : undefined}>
+                  <StatusBadge status={i.status} />
+                </span>,
+                <Badge cls={cfg(RULING, i.ruling).cls}>{cfg(RULING, i.ruling).label}</Badge>,
+                <span style={{ display: "inline-flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                  <WorkActions kind="inspection" item={i} me={me} team={team} />
                   <PdfPreviewButton
                     href={`/api/technical/inspection/${i.id}/report`}
                     title={`Inspection report ${i.inspectionNumber}`}
                     className="tech-rowbtn"
                     label="Report"
                   />
-                  {canManage ? (
+                  {canManage && i.status !== "approved" ? (
                     <button className="tech-rowbtn" onClick={() => confirm(`Delete ${i.inspectionNumber}?`) && act(deleteInspection, i.id)} disabled={isPending} aria-label="Delete"><Trash2 size={14} /></button>
                   ) : null}
                 </span>,
@@ -157,7 +167,7 @@ export default function InspectionBoard({ inspections = [], inspectors = [], sta
 
         {canManage && tab === "inspections" && appeals.length === 0 && filtered.length > 0 && (
           <p className="tech-muted" style={{ fontSize: 12, marginTop: 8 }}>
-            Tip: set an inspection&apos;s appeal from the Appeals tab once one is lodged (change its ruling first).
+            Tip: set an inspection&apos;s appeal from the Appeals tab once one is lodged.
           </p>
         )}
       </div>
@@ -172,10 +182,17 @@ export default function InspectionBoard({ inspections = [], inspectors = [], sta
                 <Field name="clientName" label="Client (company)" required />
                 <Field name="type" label="Type" placeholder="Lifting Gear / Crane / Pressure Vessel…" />
                 <Field name="equipmentSerial" label="Equipment S/N" />
-                <Field name="inspectorName" label="Inspector" />
+                {canManage ? (
+                  <div className="tech-field">
+                    <label className="tech-label">Inspector</label>
+                    <select className="tech-select" name="inspectorId" defaultValue="">
+                      <option value="">Assign later</option>
+                      {team.map((p) => <option key={p.id} value={p.id}>{p.name}{p.title ? ` — ${p.title}` : ""}</option>)}
+                    </select>
+                  </div>
+                ) : null}
                 <Field name="scheduledDate" label="Scheduled date" type="date" />
                 <Field name="authorityExpiry" label="Authority expiry" type="date" />
-                <SelectField name="ruling" label="Ruling" options={RULING} />
               </div>
               <div className="tech-field" style={{ marginTop: 12 }}>
                 <label className="tech-label">Notes</label>

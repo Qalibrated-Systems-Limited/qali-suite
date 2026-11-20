@@ -14,7 +14,7 @@ export async function GET(req, { params }) {
     if (!inspection) return NextResponse.json({ error: "Inspection not found" }, { status: 404 });
     const companyId = await withAuthorizedTenant([], async (_tx, ctx) => ctx.companyId);
     const company = await getCompanyForDocuments(companyId);
-    const issuedOn = new Date(inspection.updatedAt).toISOString().slice(0, 10);
+    const issuedOn = new Date(inspection.approvedAt || inspection.updatedAt).toISOString().slice(0, 10);
     const buffer = await renderToBuffer(InspectionReportPDF({ company, inspection, issuedOn }));
     const download = new URL(req.url).searchParams.get("download");
     return new NextResponse(buffer, {

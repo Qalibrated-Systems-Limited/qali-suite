@@ -60,8 +60,24 @@ export async function permittedBySavedRoles(
   role: string,
   allowedRoles: readonly string[],
 ): Promise<boolean | null> {
+  return permittedForKeys(tx, userId, companyId, role, gateKeysFor(allowedRoles), allowedRoles);
+}
+
+/**
+ * The same judgement for one named permission, when the caller knows which it
+ * means. Two gates can list the same roles (TECHNICAL_MANAGE_ROLES and
+ * PROJECT_LOG_SIGNOFF_ROLES do); naming the key keeps unticking one from being
+ * overruled by the other.
+ */
+export async function permittedForKeys(
+  tx: Tx,
+  userId: string,
+  companyId: string,
+  role: string,
+  keys: readonly string[],
+  allowedRoles: readonly string[],
+): Promise<boolean | null> {
   if (role === "SuperAdmin") return true;
-  const keys = gateKeysFor(allowedRoles);
   if (!keys.length) return null;
 
   const holds = async (roleName: string) => {

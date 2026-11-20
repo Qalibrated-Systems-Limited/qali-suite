@@ -22,6 +22,7 @@ import {
   FileSpreadsheet,
   FileText,
   FlaskConical,
+  ClipboardList,
   FolderKanban,
   FolderTree,
   Gavel,
@@ -792,6 +793,7 @@ export const getNavigationGroups = (user) => {
       // group. Pages are plan-gated on the projects module in their layout.
       // Order: new report, registry, then the ISO tools. (The per-module
       // "Technical dashboard" was removed — there is one overall dashboard.)
+      { icon: ClipboardList, label: "My work", id: "technical-my-work", href: "/dashboard/technical/my-work" },
       { icon: FileText, label: "New report", id: "technical-new", href: "/dashboard/technical/new" },
       { icon: List, label: "Report registry", id: "technical-registry", href: "/dashboard/technical" },
       { icon: FlaskConical, label: "Calibration (17025)", id: "calibration", href: "/dashboard/calibration" },

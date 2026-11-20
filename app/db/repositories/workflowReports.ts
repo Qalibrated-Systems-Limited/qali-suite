@@ -330,14 +330,19 @@ export async function reassignSignoff(
 /** People in this company holding one of `roles` — who can be named to sign. */
 export async function listSignoffUsers(tx: Tx, roles: readonly string[]) {
   const rows = (await tx.execute(sql`
-    SELECT u.id, u.name, COALESCE(a.role, u.role) AS role
+    SELECT u.id, u.name, COALESCE(cr.base_role, a.role, u.role) AS role
       FROM users u
       LEFT JOIN user_company_access a
              ON a.user_id = u.id
             AND a.status = 'active'
             AND a.company_id = NULLIF(current_setting('app.company_id', true), '')::uuid
+      -- A custom role (e.g. "Technical Manager" acting as Manager) signs off
+      -- with its base role's authority, as every other gate already treats it.
+      LEFT JOIN custom_roles cr
+             ON cr.company_id = NULLIF(current_setting('app.company_id', true), '')::uuid
+            AND lower(cr.name) = lower(COALESCE(a.role, u.role))
      WHERE COALESCE(u.status, 'active') NOT IN ('inactive', 'Inactive')
-       AND COALESCE(a.role, u.role) IN (${sql.join(roles.map((r) => sql`${r}`), sql`, `)})
+       AND COALESCE(cr.base_role, a.role, u.role) IN (${sql.join(roles.map((r) => sql`${r}`), sql`, `)})
      ORDER BY u.name
   `)) as unknown as Array<{ id: string; name: string; role: string }>;
   return rows.map((r) => ({ id: String(r.id), name: String(r.name), role: String(r.role) }));
@@ -429,4 +434,43 @@ export async function getCompanyReportStats(tx: Tx) {
     byType: byType ?? [],
     byMonth: byMonth ?? [],
   };
+}
+
+/**
+ * A person's report work, for the Technical "My work" page: what they are
+ * writing, what came back to them, what they sent and is still waiting, and
+ * what is waiting for THEIR signature.
+ */
+export async function listMyReports(tx: Tx, userId: string) {
+  const cols = {
+    id: workflowReports.id,
+    projectId: workflowReports.projectId,
+    reportNumber: workflowReports.reportNumber,
+    type: workflowReports.type,
+    title: workflowReports.title,
+    status: workflowReports.status,
+    data: workflowReports.data,
+    updatedAt: workflowReports.updatedAt,
+    submittedAt: workflowReports.submittedAt,
+    submittedByName: workflowReports.submittedByName,
+    assignedReviewerName: workflowReports.assignedReviewerName,
+    assignedApproverName: workflowReports.assignedApproverName,
+  };
+  const mine = await tx
+    .select(cols)
+    .from(workflowReports)
+    .where(
+      sql`(${workflowReports.createdById} = ${userId} OR ${workflowReports.submittedById} = ${userId})
+          AND ${workflowReports.status} IN ('draft','submitted','reviewed')`,
+    )
+    .orderBy(desc(workflowReports.updatedAt));
+  const toSign = await tx
+    .select(cols)
+    .from(workflowReports)
+    .where(
+      sql`(${workflowReports.status} = 'submitted' AND ${workflowReports.assignedReviewerId} = ${userId})
+          OR (${workflowReports.status} = 'reviewed' AND ${workflowReports.assignedApproverId} = ${userId})`,
+    )
+    .orderBy(workflowReports.submittedAt);
+  return { mine, toSign };
 }

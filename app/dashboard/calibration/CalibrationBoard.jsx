@@ -13,13 +13,9 @@ import {
 } from "@/app/db/actions/technical-actions";
 import { fmtDate } from "../technical/lib/meta";
 import PdfPreviewButton from "@/components/pdf/PdfPreviewButton";
+import WorkActions, { StatusBadge, WORK_STATUS } from "../technical/components/WorkActions";
 
-const JOB_STATUS = [
-  { v: "scheduled", label: "Scheduled", cls: "amber" },
-  { v: "in_progress", label: "In progress", cls: "blue" },
-  { v: "completed", label: "Completed", cls: "green" },
-  { v: "cancelled", label: "Cancelled", cls: "slate" },
-];
+const JOB_STATUS = WORK_STATUS;
 const RESULT = [
   { v: "pending", label: "Pending", cls: "slate" },
   { v: "passed", label: "Passed", cls: "green" },
@@ -44,7 +40,11 @@ function standardStatus(nextCal) {
   return { cls: "green", label: "Valid" };
 }
 
-export default function CalibrationBoard({ jobs = [], standards = [], stats, canManage }) {
+export default function CalibrationBoard({ jobs = [], standards = [], stats, me, team = [] }) {
+  // Technical managers keep standards, billing and deletion; technicians run
+  // the jobs assigned to them and can log one found on site.
+  const canManage = Boolean(me?.isManager);
+  const canCreate = Boolean(me?.isTechnician);
   const router = useRouter();
   const [tab, setTab] = useState("certs");
   const [isPending, startTransition] = useTransition();
@@ -87,7 +87,7 @@ export default function CalibrationBoard({ jobs = [], standards = [], stats, can
           <span className="count">ISO/IEC 17025 calibration</span>
         </span>
         <span className="tech-bar-spacer" />
-        {canManage && (
+        {canCreate && (
           <button className="tech-btn-gold" onClick={() => setDialog("job")}>
             <Plus size={14} strokeWidth={3} /> New Cal Job
           </button>
@@ -105,7 +105,7 @@ export default function CalibrationBoard({ jobs = [], standards = [], stats, can
 
         <div className="tech-stats">
           <Stat label="Certs Issued" value={stats.certs} />
-          <Stat label="Passed" value={stats.passed} tone="green" />
+          <Stat label="Awaiting approval" value={stats.awaitingApproval} tone="amber" />
           <Stat label="Reference Standards" value={stats.standards} tone="blue" />
           <Stat label="Expiring ≤60 days" value={stats.expiring} tone="amber" />
         </div>
@@ -124,7 +124,7 @@ export default function CalibrationBoard({ jobs = [], standards = [], stats, can
               j.clientName,
               j.serviceType || "—",
               j.site || "—",
-              fmtDate(j.updatedAt),
+              fmtDate(j.approvedAt || j.updatedAt),
               <Badge cls={cfg(RESULT, j.result).cls}>{cfg(RESULT, j.result).label}</Badge>,
               <PdfPreviewButton
                 href={`/api/technical/calibration/${j.id}/certificate`}
@@ -133,7 +133,7 @@ export default function CalibrationBoard({ jobs = [], standards = [], stats, can
                 label="Certificate"
               />,
             ])}
-            empty="No certificates issued yet — complete a passed Cal Job to issue one."
+            empty="No certificates issued yet — a certificate is issued when a technical manager approves a passed Cal Job."
           />
         )}
 
@@ -179,25 +179,26 @@ export default function CalibrationBoard({ jobs = [], standards = [], stats, can
               </select>
             </div>
             <Table
-              head={["Job No", "Client", "Site", "Scheduled", "Technician", "Status", "Result", "Billing", ""]}
+              head={["Job No", "Client", "Site", "Scheduled", "Technician", "Status", "Result", "Billing", "Actions"]}
               rows={filteredJobs.map((j) => [
                 <span className="mono">{j.jobNumber}</span>,
                 j.clientName,
                 j.site || "—",
                 fmtDate(j.scheduledDate),
                 j.technicianName || "—",
-                canManage ? (
-                  <RowSelect options={JOB_STATUS} value={j.status} disabled={isPending} onChange={(v) => act(setCalibrationJobOutcome, j.id, { status: v })} />
-                ) : <Badge cls={cfg(JOB_STATUS, j.status).cls}>{cfg(JOB_STATUS, j.status).label}</Badge>,
-                canManage ? (
-                  <RowSelect options={RESULT} value={j.result} disabled={isPending} onChange={(v) => act(setCalibrationJobOutcome, j.id, { result: v })} />
-                ) : <Badge cls={cfg(RESULT, j.result).cls}>{cfg(RESULT, j.result).label}</Badge>,
+                <span title={j.returnComment ? `Returned: ${j.returnComment}` : undefined}>
+                  <StatusBadge status={j.status} />
+                </span>,
+                <Badge cls={cfg(RESULT, j.result).cls}>{cfg(RESULT, j.result).label}</Badge>,
                 canManage ? (
                   <RowSelect options={BILLING} value={j.billingStatus} disabled={isPending} onChange={(v) => act(setCalibrationJobOutcome, j.id, { billingStatus: v })} />
                 ) : <Badge cls={cfg(BILLING, j.billingStatus).cls}>{cfg(BILLING, j.billingStatus).label}</Badge>,
-                canManage ? (
-                  <button className="tech-rowbtn" onClick={() => confirm(`Delete ${j.jobNumber}?`) && act(deleteCalibrationJob, j.id)} disabled={isPending} aria-label="Delete"><Trash2 size={14} /></button>
-                ) : null,
+                <span style={{ display: "inline-flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                  <WorkActions kind="job" item={j} me={me} team={team} />
+                  {canManage && j.status !== "approved" ? (
+                    <button className="tech-rowbtn" onClick={() => confirm(`Delete ${j.jobNumber}?`) && act(deleteCalibrationJob, j.id)} disabled={isPending} aria-label="Delete"><Trash2 size={14} /></button>
+                  ) : null}
+                </span>,
               ])}
               empty="No calibration jobs yet."
             />
@@ -213,8 +214,9 @@ export default function CalibrationBoard({ jobs = [], standards = [], stats, can
               <Field name="site" label="Site / location" />
               <Field name="serviceType" label="Service type" placeholder="Mass / Temperature / Pressure…" />
               <Field name="scheduledDate" label="Scheduled date" type="date" />
-              <Field name="technicianName" label="Technician" />
-              <SelectField name="status" label="Status" options={JOB_STATUS} />
+              {canManage ? (
+                <TeamField name="technicianId" label="Technician" team={team} />
+              ) : null}
             </div>
             <FieldFull name="notes" label="Notes" textarea />
             <DialogActions pending={isPending} onCancel={() => setDialog(null)} submit="Create job" />
@@ -293,6 +295,17 @@ export function FieldFull({ name, label, textarea }) {
     <div className="tech-field" style={{ marginTop: 12 }}>
       <label className="tech-label">{label}</label>
       {textarea ? <textarea className="tech-textarea" name={name} rows={2} /> : <input className="tech-input" name={name} />}
+    </div>
+  );
+}
+export function TeamField({ name, label, team }) {
+  return (
+    <div className="tech-field">
+      <label className="tech-label">{label}</label>
+      <select className="tech-select" name={name} defaultValue="">
+        <option value="">Assign later</option>
+        {team.map((p) => <option key={p.id} value={p.id}>{p.name}{p.title ? ` — ${p.title}` : ""}</option>)}
+      </select>
     </div>
   );
 }

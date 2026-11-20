@@ -152,7 +152,7 @@ export function CalibrationCertificatePDF({ company, job, standards = [], issued
             <Text style={s.signLabel}>Calibrated by</Text>
           </View>
           <View style={s.sign}>
-            <Text style={s.signName}> </Text>
+            <Text style={s.signName}>{job.approvedByName || " "}</Text>
             <Text style={s.signLabel}>Authorised signatory</Text>
           </View>
         </View>
@@ -219,10 +219,15 @@ export function InspectionReportPDF({ company, inspection, issuedOn }) {
             <Text style={s.signLabel}>Inspector</Text>
           </View>
           <View style={s.sign}>
-            <Text style={s.signName}> </Text>
+            <Text style={s.signName}>{inspection.approvedByName || " "}</Text>
             <Text style={s.signLabel}>Technical manager</Text>
           </View>
         </View>
+        {!["approved", "completed"].includes(inspection.status || "completed") && (
+          <Text style={{ marginTop: 8, fontSize: 9, color: "#b91c1c", textAlign: "center" }}>
+            DRAFT — not yet approved by a technical manager. Not valid as an inspection report.
+          </Text>
+        )}
 
         <RefinedFooter company={company} serial={number} />
       </Page>

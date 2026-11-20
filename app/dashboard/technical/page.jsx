@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { technicalViewer } from "./lib/access";
 import { getWorkspaceContext } from "../projects/lib/workspace";
 import AccessDenied from "../projects/components/AccessDenied";
 import Registry from "./components/Registry";
@@ -18,7 +19,7 @@ export const metadata = {
  */
 export default async function TechnicalRegistryPage({ searchParams }) {
   const sp = await searchParams;
-  const ctx = await getWorkspaceContext(sp);
+  const ctx = await getWorkspaceContext(sp, { admit: async (u) => (await technicalViewer(u)).canView });
   if (ctx.denied) return <AccessDenied />;
 
   const { projects, project, user } = ctx;

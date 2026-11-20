@@ -2,7 +2,7 @@ import Link from "next/link";
 import { auth } from "@/auth";
 import AccessDenied from "../../projects/components/AccessDenied";
 import { getTechnicalDashboard } from "@/app/db/actions/workflow-report-actions";
-import { canSeeProjectsNav } from "@/lib/permissions";
+import { technicalViewer } from "../lib/access";
 import { sheetName, sheetCategory } from "../lib/meta";
 import { Plus } from "lucide-react";
 
@@ -40,7 +40,7 @@ function lastSixMonths(byMonth) {
 
 export default async function TechnicalDashboardPage() {
   const session = await auth();
-  if (!session?.user || !canSeeProjectsNav(session.user.role)) return <AccessDenied />;
+  if (!session?.user || !(await technicalViewer(session.user)).canView) return <AccessDenied />;
 
   const stats = await getTechnicalDashboard();
   const t = stats.totals;

@@ -10,6 +10,7 @@ import {
   reopenWorkflowReport,
   deleteWorkflowReport,
   reassignWorkflowReport,
+  recallWorkflowReport,
 } from "@/app/db/actions/workflow-report-actions";
 import TechnicalReportForm from "./TechnicalReportForm";
 import { GOLD, INK, MUTE, PASS, FAIL, WAIT } from "./ui";
@@ -97,6 +98,7 @@ export default function TechnicalReportActions({
   authorName = "",
   canManage = false,
   canSignOff = false,
+  canRecall = false,
   currentUserId = null,
   signoffUsers = [],
 }) {
@@ -208,6 +210,21 @@ export default function TechnicalReportActions({
             name={report.assignedApproverName || "Any of the sign-off group"}
             state={status === "reviewed" ? "current" : "waiting"}
           />
+          {canRecall && (
+            <div style={{ display: "flex", gap: 8, marginTop: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <button
+                className="btn"
+                style={{ fontSize: 12, padding: "6px 10px" }}
+                disabled={isPending}
+                onClick={() => run(recallWorkflowReport, id, projectId)}
+              >
+                Recall to draft
+              </button>
+              <span className="muted" style={{ fontSize: 12 }}>
+                Spotted a mistake? Take it back before the supervisor signs it.
+              </span>
+            </div>
+          )}
           {canSignOff && (
             <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
               <button className="btn" style={{ fontSize: 12, padding: "6px 10px" }} disabled={isPending} onClick={() => setDialog("reassign")}>

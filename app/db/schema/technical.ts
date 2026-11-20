@@ -66,12 +66,20 @@ export const calibrationJobs = pgTable(
     serviceType: text("service_type").notNull().default(""),
     scheduledDate: date("scheduled_date"),
     technicianName: text("technician_name").notNull().default(""),
+    /** The user doing the work — whose "My work" it appears on. */
+    technicianId: text("technician_id").references(() => users.id, { onDelete: "set null" }),
     status: text("status").notNull().default("scheduled"),
     result: text("result").notNull().default("pending"),
     /** CERT-00001, stamped when a passed job issues its certificate. */
     certNumber: text("cert_number").notNull().default(""),
     billingStatus: text("billing_status").notNull().default("pending"),
     notes: text("notes").notNull().default(""),
+    submittedAt: timestamp("submitted_at", { withTimezone: true }),
+    approvedById: text("approved_by_id").references(() => users.id, { onDelete: "set null" }),
+    approvedByName: text("approved_by_name"),
+    approvedAt: timestamp("approved_at", { withTimezone: true }),
+    /** Why the approver sent it back; cleared on the next submission. */
+    returnComment: text("return_comment").notNull().default(""),
     ...audit,
   },
   (t) => [
@@ -81,7 +89,12 @@ export const calibrationJobs = pgTable(
     check("calibration_jobs_client_not_blank", sql`length(btrim(${t.clientName})) > 0`),
     check(
       "calibration_jobs_status_valid",
-      sql`${t.status} IN ('scheduled','in_progress','completed','cancelled')`,
+      sql`${t.status} IN ('scheduled','in_progress','submitted','returned','approved','completed','cancelled')`,
+    ),
+    index("calibration_jobs_technician_idx").on(t.technicianId, t.status),
+    check(
+      "calibration_jobs_approver_not_technician",
+      sql`${t.approvedById} IS NULL OR ${t.technicianId} IS NULL OR ${t.approvedById} <> ${t.technicianId}`,
     ),
     check("calibration_jobs_result_valid", sql`${t.result} IN ('pending','passed','failed')`),
     check("calibration_jobs_billing_valid", sql`${t.billingStatus} IN ('pending','invoiced')`),
@@ -101,17 +114,32 @@ export const inspections = pgTable(
     equipmentSerial: text("equipment_serial").notNull().default(""),
     clientName: text("client_name").notNull(),
     inspectorName: text("inspector_name").notNull().default(""),
+    /** The user doing the inspection — whose "My work" it appears on. */
+    inspectorId: text("inspector_id").references(() => users.id, { onDelete: "set null" }),
+    status: text("status").notNull().default("scheduled"),
     scheduledDate: date("scheduled_date"),
     ruling: text("ruling").notNull().default("pending"),
     appealStatus: text("appeal_status").notNull().default("none"),
     authorityExpiry: date("authority_expiry"),
     notes: text("notes").notNull().default(""),
+    submittedAt: timestamp("submitted_at", { withTimezone: true }),
+    approvedById: text("approved_by_id").references(() => users.id, { onDelete: "set null" }),
+    approvedByName: text("approved_by_name"),
+    approvedAt: timestamp("approved_at", { withTimezone: true }),
+    /** Why the approver sent it back; cleared on the next submission. */
+    returnComment: text("return_comment").notNull().default(""),
     ...audit,
   },
   (t) => [
     uniqueIndex("inspections_company_number_idx").on(t.companyId, t.inspectionNumber),
     index("inspections_company_idx").on(t.companyId, t.scheduledDate),
     index("inspections_ruling_idx").on(t.companyId, t.ruling),
+    index("inspections_inspector_idx").on(t.inspectorId, t.status),
+    check("inspections_status_valid", sql`${t.status} IN ('scheduled','in_progress','submitted','returned','approved','completed','cancelled')`),
+    check(
+      "inspections_approver_not_inspector",
+      sql`${t.approvedById} IS NULL OR ${t.inspectorId} IS NULL OR ${t.approvedById} <> ${t.inspectorId}`,
+    ),
     check("inspections_client_not_blank", sql`length(btrim(${t.clientName})) > 0`),
     check(
       "inspections_ruling_valid",

@@ -2,8 +2,11 @@ import "../technical/technical.css";
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import InspectionBoard from "./InspectionBoard";
-import { getInspectionData } from "@/app/db/actions/technical-actions";
-import { hasRole, TECHNICAL_WRITE_ROLES } from "@/lib/utils/role-gates";
+import {
+  getInspectionData,
+  getMyTechnicalStanding,
+  getTechnicalTeam,
+} from "@/app/db/actions/technical-actions";
 
 export const metadata = {
   title: "Inspection (17020) | Technical",
@@ -14,8 +17,11 @@ export default async function InspectionPage() {
   const session = await auth();
   if (!session?.user) redirect("/login");
 
-  const data = await getInspectionData();
-  const canManage = hasRole(session.user, TECHNICAL_WRITE_ROLES);
+  const [data, me, team] = await Promise.all([
+    getInspectionData(),
+    getMyTechnicalStanding(),
+    getTechnicalTeam(),
+  ]);
 
   return (
     <div className="tech">
@@ -24,7 +30,8 @@ export default async function InspectionPage() {
         inspections={data.inspections}
         inspectors={data.inspectors}
         stats={data.stats}
-        canManage={canManage}
+        me={me}
+        team={team}
       />
     </div>
   );

@@ -18,13 +18,13 @@ export async function GET(req, { params }) {
     if (!data) return NextResponse.json({ error: "Calibration job not found" }, { status: 404 });
     if (!data.job.certNumber) {
       return NextResponse.json(
-        { error: "A certificate is issued once the job is completed and passed." },
+        { error: "A certificate is issued once a passed job has been approved by a technical manager." },
         { status: 409 },
       );
     }
     const companyId = await withAuthorizedTenant([], async (_tx, ctx) => ctx.companyId);
     const company = await getCompanyForDocuments(companyId);
-    const issuedOn = new Date(data.job.updatedAt).toISOString().slice(0, 10);
+    const issuedOn = new Date(data.job.approvedAt || data.job.updatedAt).toISOString().slice(0, 10);
     const buffer = await renderToBuffer(
       CalibrationCertificatePDF({ company, job: data.job, standards: data.standards, issuedOn }),
     );

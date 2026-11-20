@@ -3,8 +3,11 @@ import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import AccessDenied from "../projects/components/AccessDenied";
 import CalibrationBoard from "./CalibrationBoard";
-import { getCalibrationData } from "@/app/db/actions/technical-actions";
-import { hasRole, TECHNICAL_WRITE_ROLES } from "@/lib/utils/role-gates";
+import {
+  getCalibrationData,
+  getMyTechnicalStanding,
+  getTechnicalTeam,
+} from "@/app/db/actions/technical-actions";
 
 export const metadata = {
   title: "Calibration (17025) | Technical",
@@ -15,8 +18,11 @@ export default async function CalibrationPage() {
   const session = await auth();
   if (!session?.user) redirect("/login");
 
-  const data = await getCalibrationData();
-  const canManage = hasRole(session.user, TECHNICAL_WRITE_ROLES);
+  const [data, me, team] = await Promise.all([
+    getCalibrationData(),
+    getMyTechnicalStanding(),
+    getTechnicalTeam(),
+  ]);
 
   return (
     <div className="tech">
@@ -25,7 +31,8 @@ export default async function CalibrationPage() {
         jobs={data.jobs}
         standards={data.standards}
         stats={data.stats}
-        canManage={canManage}
+        me={me}
+        team={team}
       />
     </div>
   );

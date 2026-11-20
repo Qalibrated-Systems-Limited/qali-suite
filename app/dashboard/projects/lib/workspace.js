@@ -44,13 +44,18 @@ export const workspaceProjects = cache(() => getProjectsForWorkspace());
  */
 export async function getWorkspaceContext(
   searchParams,
-  { detail = false, section = null } = {},
+  { detail = false, section = null, admit = null } = {},
 ) {
   const session = await auth();
   if (!session?.user) redirect("/login");
   const { user } = session;
 
-  if (!canSeeProjectsNav(user.role)) {
+  // A caller may admit more people than the Projects roles — the Technical
+  // pages admit Technical-department staff, who need a project to file a
+  // report against even though Projects is not their module.
+  let admitted = canSeeProjectsNav(user.role);
+  if (!admitted && typeof admit === "function") admitted = Boolean(await admit(user));
+  if (!admitted) {
     return {
       denied: true,
       hidden: false,
