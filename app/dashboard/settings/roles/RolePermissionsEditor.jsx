@@ -225,7 +225,13 @@ export default function RolePermissionsEditor({ modules, roles, canManage }) {
                             : "border-muted-foreground/40"
                         }`}
                       >
-                        {on && <Check className="h-3 w-3" />}
+                        {/* Always mounted, only hidden: adding and removing
+                            the node on every tick is what a DOM-rewriting
+                            browser extension turns into a whole-page crash. */}
+                        <Check
+                          className={`h-3 w-3 ${on ? "" : "invisible"}`}
+                          aria-hidden="true"
+                        />
                       </span>
                       <input
                         type="checkbox"

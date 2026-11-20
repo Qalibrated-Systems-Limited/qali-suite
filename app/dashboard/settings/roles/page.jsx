@@ -14,6 +14,7 @@ import {
 import { ROLES as CANONICAL_ROLES } from "@/lib/permission-catalog";
 import CustomRolesManager from "./CustomRolesManager";
 import RolePermissionsEditor from "./RolePermissionsEditor";
+import EditorBoundary from "./EditorBoundary";
 import {
   roleSummary,
   NON_CANONICAL_ROLES,
@@ -135,17 +136,19 @@ export default async function RolesPermissionsPage() {
           base defaults until you save it; saving makes the ticked set
           authoritative. {canManage ? "" : "You can view but not change these."}
         </p>
-        <RolePermissionsEditor
-          modules={matrix.modules}
-          roles={matrix.roles}
-          canManage={canManage}
-        />
+        <EditorBoundary>
+          <RolePermissionsEditor
+            modules={matrix.modules}
+            roles={matrix.roles}
+            canManage={canManage}
+          />
+        </EditorBoundary>
       </section>
 
       <p className="pt-2 text-xs text-muted-foreground">
-        SuperAdmin always holds every permission. Nav and module-access
-        permissions take effect immediately; in-code write gates back-stop by the
-        role&apos;s base.
+        SuperAdmin always holds every permission. A saved change applies to
+        every action that permission guards from the next request; a role
+        nobody has edited follows its built-in defaults.
       </p>
     </div>
   );

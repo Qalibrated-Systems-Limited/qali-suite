@@ -11,6 +11,7 @@ import { grantAllTenants } from "./companyAccessAdmin";
 import { getTenantContext } from "@/lib/utils/tenant-utils";
 import { roleAllowed } from "@/lib/permissions";
 import { accessDeniedError } from "@/lib/access-denied";
+import { permittedBySavedRoles, gateKeysFor } from "./permissionGate";
 import {
   provisionCompany,
   forgetCompanyMapping,
@@ -502,7 +503,17 @@ export async function withAuthorizedTenant<T>(
   // entered a company acts with full authority INSIDE it, on that company's
   // rows only. The gate runs again below against the role for the ACTIVE
   // company, which is the one that decides what this request may do.
-  if (allowedRoles.length && !roleAllowed(user.role, allowedRoles)) {
+  //
+  // The answer is not final here: a role whose permissions were edited on the
+  // Roles & Permissions page is judged by what was saved (see below), and that
+  // can grant as well as take away. So a refusal by the code defaults waits
+  // until the saved set has been read. A list that is no catalog permission
+  // cannot be edited there, so it is still refused straight away.
+  if (
+    allowedRoles.length &&
+    !roleAllowed(user.role, allowedRoles) &&
+    !gateKeysFor(allowedRoles).length
+  ) {
     throw accessDeniedError();
   }
 
@@ -518,13 +529,26 @@ export async function withAuthorizedTenant<T>(
   // The role for the ACTIVE company. Null on the grant means the global role,
   // which is what every grant carried over from the single-company model says.
   const actingUser = { ...(user as ActionUser), role: acting.role };
-  if (allowedRoles.length && !roleAllowed(actingUser.role, allowedRoles)) {
-    throw accessDeniedError();
-  }
+  const codeAllows =
+    !allowedRoles.length || roleAllowed(actingUser.role, allowedRoles);
 
   return withTenant(
     acting.companyUuid,
-    (tx) => fn(tx, { user: actingUser, companyId: acting.companyUuid }),
+    async (tx) => {
+      // What the company saved on the Roles & Permissions page decides first;
+      // a role nobody edited falls back to the code defaults.
+      if (allowedRoles.length) {
+        const saved = await permittedBySavedRoles(
+          tx,
+          String(actingUser.id),
+          acting.companyUuid,
+          actingUser.role,
+          allowedRoles,
+        );
+        if (!(saved ?? codeAllows)) throw accessDeniedError();
+      }
+      return fn(tx, { user: actingUser, companyId: acting.companyUuid });
+    },
     actingUser.id,
   );
 }

@@ -124,6 +124,17 @@ export async function getMyPermissionKeys() {
 /** Replace a role's permission set (admin only). */
 export async function setRolePermissionsAction(roleName: string, keys: string[]) {
   if (!roleName) return { error: "No role." };
+  // An Admin who unticks "Full administrative access" from Admin locks every
+  // Admin out of this page — only a SuperAdmin could put it back.
+  if (
+    String(roleName).toLowerCase() === "admin" &&
+    !(Array.isArray(keys) && keys.includes("ADMIN_ROLES"))
+  ) {
+    return {
+      error:
+        'Admin must keep "Full administrative access" — without it no Admin could open this page again to undo the change.',
+    };
+  }
   try {
     await withAuthorizedTenant(ADMIN, (tx, { companyId }) =>
       permRepo.setRoleKeys(tx, companyId, roleName, Array.isArray(keys) ? keys : []),
