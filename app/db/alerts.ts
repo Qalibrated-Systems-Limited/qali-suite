@@ -258,3 +258,24 @@ export async function getHrDigests(maxLines = MAX_LINES): Promise<HrDigest[]> {
     top: (r.top as HrDigest["top"]) ?? [],
   }));
 }
+
+/**
+ * The weekly work report, per company that had any assigned work open or
+ * moving in the last seven days. Privileged (the cron has no session), so the
+ * report is filtered by company explicitly.
+ */
+export async function getWeeklyWorkDigests() {
+  const { getWorkReport, periodRange } = await import("./repositories/workReport");
+  const db = privilegedDb();
+  const companies = (await db.execute(sql`
+    SELECT id FROM companies WHERE COALESCE(is_active, true)
+  `)) as unknown as Array<{ id: string }>;
+  const range = periodRange("week");
+  const out = [];
+  for (const c of companies) {
+    const report = await getWorkReport(db as never, range.from, range.to, String(c.id));
+    const moving = report.bySource.some((s) => s.assigned || s.completed || s.open);
+    if (moving) out.push({ companyId: String(c.id), report });
+  }
+  return out;
+}

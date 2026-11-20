@@ -7,6 +7,9 @@ import { userMessage } from "../errors";
 import { HELPDESK_WRITE_ROLES } from "@/lib/utils/role-gates";
 import * as repo from "../repositories/helpdesk";
 import * as usersRepo from "../repositories/users";
+import * as notifications from "../repositories/notifications";
+import { holdsGate } from "../assigneeAccess";
+import { technicalStanding, listTechnicalPeople } from "../technicalAccess";
 
 /**
  * Help Desk actions — 0089. Same shape as technical-actions.ts: Zod validates,
@@ -109,6 +112,30 @@ export async function createTicket(prevState: unknown, formData: FormData) {
   }
 }
 
+/**
+ * The Help Desk team works any ticket; the person a ticket is assigned to
+ * works THEIR ticket — moves it along, resolves it, replies — whatever their
+ * role. Closing, reopening and escalating stay with the desk.
+ */
+const ASSIGNEE_STATUSES = ["assigned", "in_progress", "pending", "resolved"];
+async function requireDeskOrAssignee(
+  tx: Parameters<Parameters<typeof withAuthorizedTenant>[1]>[0],
+  user: { id?: string | null; role?: string | null },
+  companyId: string,
+  ticketId: string,
+  status: string | null,
+) {
+  if (await holdsGate(tx, user, companyId, WRITE)) return;
+  const t = await repo.getTicketById(tx, ticketId);
+  if (!t) throw new Error("Ticket not found");
+  if (t.assignedToUserId !== String(user.id)) {
+    throw new Error("You can only work tickets assigned to you.");
+  }
+  if (status !== null && !ASSIGNEE_STATUSES.includes(status)) {
+    throw new Error("Ask the help desk to close, reopen or escalate this ticket.");
+  }
+}
+
 // ── lifecycle ───────────────────────────────────────────────────────────────
 export async function setTicketStatus(
   id: string,
@@ -116,7 +143,8 @@ export async function setTicketStatus(
   extra: { resolutionNotes?: string; rootCause?: string; closureReason?: string } = {},
 ) {
   try {
-    const row = await withAuthorizedTenant(WRITE, async (tx, { user }) => {
+    const row = await withAuthorizedTenant([], async (tx, { user, companyId }) => {
+      await requireDeskOrAssignee(tx, user, companyId, id, status);
       const updated = await repo.setTicketStatus(tx, id, status, actorFrom(user), extra);
       if (!updated) throw new Error("Ticket not found");
       return updated;
@@ -130,18 +158,51 @@ export async function setTicketStatus(
 
 export async function assignTicket(id: string, userId: string | null, name: string) {
   try {
-    const row = await withAuthorizedTenant(WRITE, async (tx, { user }) => {
+    const row = await withAuthorizedTenant([], async (tx, { user, companyId }) => {
+      const desk = await holdsGate(tx, user, companyId, WRITE);
+      // A technical manager hands tickets to the technical team from the
+      // Technical module, without needing Help Desk authority over the rest.
+      let to: { id: string; name: string } | null = null;
+      if (desk) {
+        if (userId) {
+          const u = (await usersRepo.listCompanyUsers(tx)).find((x) => String(x.id) === String(userId));
+          if (!u) throw new Error("Choose someone in this company.");
+          to = { id: String(u.id), name: String(u.name) };
+        }
+      } else {
+        const standing = await technicalStanding(tx, user, companyId);
+        if (!standing.isManager) throw new Error("You don't have permission to assign tickets.");
+        if (userId) {
+          const p = (await listTechnicalPeople(tx)).find((x) => x.id === String(userId));
+          if (!p) throw new Error("Choose someone from the technical team.");
+          to = { id: p.id, name: p.name };
+        }
+      }
       const updated = await repo.assignTicket(
         tx,
         id,
-        { userId: userId || null, name: name || "" },
+        { userId: to?.id ?? null, name: to?.name ?? "" },
         actorFrom(user),
       );
       if (!updated) throw new Error("Ticket not found");
-      return updated;
+      if (to && to.id !== String(user.id)) {
+        await notifications.createMany(tx, [
+          {
+            companyId,
+            userId: to.id,
+            type: "approval_request",
+            title: `Ticket assigned to you: ${updated.ticketNumber}`,
+            body: updated.title,
+            href: `/dashboard/helpdesk?ticket=${updated.id}`,
+          },
+        ]);
+      }
+      return { ...updated, assigneeName: to?.name ?? "" };
     });
     bump();
-    return { success: true, message: name ? `Assigned to ${name}` : "Unassigned" };
+    revalidatePath("/dashboard/technical/tickets");
+    revalidatePath("/dashboard/tasks");
+    return { success: true, message: row.assigneeName ? `${row.ticketNumber} assigned to ${row.assigneeName}` : `${row.ticketNumber} unassigned` };
   } catch (error) {
     return { error: userMessage(error) };
   }
@@ -167,7 +228,8 @@ export async function escalateTicket(id: string, level: string, reason: string) 
 export async function addTicketComment(id: string, content: string, isInternal: boolean) {
   if (!content?.trim()) return { error: "Write a message first" };
   try {
-    await withAuthorizedTenant(WRITE, async (tx, { user, companyId }) => {
+    await withAuthorizedTenant([], async (tx, { user, companyId }) => {
+      await requireDeskOrAssignee(tx, user, companyId, id, null);
       const c = await repo.addComment(tx, {
         companyId,
         ticketId: id,

@@ -7,6 +7,11 @@ import { userMessage } from "../errors";
 import { TASK_WRITE_ROLES } from "@/lib/utils/role-gates";
 import * as repo from "../repositories/tasks";
 import * as usersRepo from "../repositories/users";
+import { holdsGate } from "../assigneeAccess";
+import { listAssignmentsFor } from "../repositories/myAssignments";
+import { getWorkReport, periodRange } from "../repositories/workReport";
+import { HELPDESK_WRITE_ROLES } from "@/lib/utils/role-gates";
+import { technicalStanding } from "../technicalAccess";
 
 /**
  * Tasks actions — 0109. Same shape as helpdesk-actions.ts: Zod validates,
@@ -50,6 +55,15 @@ export async function getTasksData() {
         .map((u) => ({ id: u.id, name: u.name, role: u.role, department: u.department })),
     };
   });
+}
+
+/**
+ * Everything assigned to the viewer across the application — tasks, help
+ * desk tickets, project tasks, calibration jobs, inspections and technical
+ * reports — each marked with where it came from.
+ */
+export async function getMyAssignments() {
+  return withAuthorizedTenant([], (tx, { user }) => listAssignmentsFor(tx, String(user.id)));
 }
 
 // ── create ────────────────────────────────────────────────────────────────────
@@ -115,9 +129,18 @@ const STATUSES = ["open", "in_progress", "blocked", "completed", "cancelled"];
 export async function setTaskStatus(id: string, status: string) {
   if (!STATUSES.includes(status)) return { error: "Unknown status." };
   try {
-    const row = await withAuthorizedTenant(WRITE, (tx, { user }) =>
-      repo.setTaskStatus(tx, id, status, actorFrom(user)),
-    );
+    const row = await withAuthorizedTenant([], async (tx, { user, companyId }) => {
+      // The person a task is assigned to moves their own task along — that is
+      // the point of assigning it — whatever their role.
+      if (!(await holdsGate(tx, user, companyId, WRITE))) {
+        const t = await repo.getTaskById(tx, id);
+        if (!t) return null;
+        if (t.assignedToUserId !== String(user.id)) {
+          throw new Error("You can only update tasks assigned to you.");
+        }
+      }
+      return repo.setTaskStatus(tx, id, status, actorFrom(user));
+    });
     if (!row) return { error: "Task not found." };
     bump();
     return { success: true, message: `${row.taskNumber} → ${status.replace("_", " ")}` };
@@ -135,4 +158,21 @@ export async function deleteTask(id: string) {
   } catch (error) {
     return { error: userMessage(error) };
   }
+}
+
+/**
+ * The periodic report on tasks and tickets. For the people who hand work out:
+ * task or help desk managers, and technical managers.
+ */
+export async function getWorkReportFor(period: string, from?: string, to?: string) {
+  return withAuthorizedTenant([], async (tx, { user, companyId }) => {
+    const allowed =
+      (await holdsGate(tx, user, companyId, WRITE)) ||
+      (await holdsGate(tx, user, companyId, HELPDESK_WRITE_ROLES as unknown as string[])) ||
+      (await technicalStanding(tx, user, companyId)).isManager;
+    if (!allowed) throw new Error("The work report is for managers who assign tasks and tickets.");
+    const range = periodRange(period, from, to);
+    const report = await getWorkReport(tx, range.from, range.to);
+    return { ...report, label: range.label };
+  });
 }

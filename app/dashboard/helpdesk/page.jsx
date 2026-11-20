@@ -9,7 +9,8 @@ export const metadata = {
   description: "Ticketing — log, triage, assign and resolve requests against SLA.",
 };
 
-export default async function HelpdeskPage() {
+export default async function HelpdeskPage({ searchParams }) {
+  const sp = (await searchParams) || {};
   const session = await auth();
   if (!session?.user) redirect("/login");
 
@@ -24,6 +25,8 @@ export default async function HelpdeskPage() {
         stats={data.stats}
         users={data.users}
         canManage={canManage}
+        currentUserId={String(session.user.id)}
+        openTicketId={typeof sp.ticket === "string" ? sp.ticket : null}
       />
     </div>
   );

@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import AccessDenied from "../../projects/components/AccessDenied";
 import { getMyWork, getTechnicalTeam } from "@/app/db/actions/technical-actions";
 import { getMyReports } from "@/app/db/actions/workflow-report-actions";
+import { getMyAssignments } from "@/app/db/actions/tasks-actions";
 import { technicalViewer } from "../lib/access";
 import { displaySerial, sheetName } from "../lib/meta";
 import WorkActions, { StatusBadge } from "../components/WorkActions";
@@ -28,11 +29,13 @@ export default async function MyWorkPage() {
   const viewer = await technicalViewer(session.user);
   if (!viewer.canView) return <AccessDenied />;
 
-  const [work, reports, team] = await Promise.all([
+  const [work, reports, team, assignments] = await Promise.all([
     getMyWork(),
     getMyReports(),
     viewer.isManager ? getTechnicalTeam() : Promise.resolve([]),
+    getMyAssignments(),
   ]);
+  const myTickets = assignments.filter((a) => a.source === "ticket");
   const me = { userId: work.userId, isManager: work.isManager, isTechnician: work.isTechnician };
 
   const returnedReports = reports.mine.filter((r) => r.status === "draft" && r.data?.returned);
@@ -52,7 +55,8 @@ export default async function MyWorkPage() {
   ];
 
   const needsMe =
-    returnedReports.length + returnedWork.length + reports.toSign.length + (me.isManager ? toApprove.length : 0);
+    returnedReports.length + returnedWork.length + reports.toSign.length + myTickets.length +
+    (me.isManager ? toApprove.length : 0);
 
   return (
     <div className="tech-wrap">
@@ -69,6 +73,7 @@ export default async function MyWorkPage() {
           <Link className="tech-btn-gold" href="/dashboard/technical/new">New report</Link>
           <Link className="tech-btn-ghost" href="/dashboard/calibration">Calibration</Link>
           <Link className="tech-btn-ghost" href="/dashboard/inspection">Inspection</Link>
+          <Link className="tech-btn-ghost" href="/dashboard/technical/tickets">Service tickets</Link>
         </div>
       </div>
 
@@ -110,6 +115,30 @@ export default async function MyWorkPage() {
 
       <Section title="Assigned to you" count={openWork.length}>
         <WorkTable rows={openWork} me={me} team={team} empty="No calibration jobs or inspections are assigned to you." />
+      </Section>
+
+      <Section title="Help desk tickets assigned to you" count={myTickets.length}>
+        {myTickets.length === 0 ? (
+          <div className="tech-empty2">No help desk ticket is assigned to you.</div>
+        ) : (
+          <div className="tech-tablewrap">
+            <table className="tech-table">
+              <thead><tr><th>Ticket</th><th>Title</th><th>Category · client</th><th>Resolve by</th><th>Status</th><th></th></tr></thead>
+              <tbody>
+                {myTickets.map((t) => (
+                  <tr key={t.id}>
+                    <td className="mono">{t.ref}</td>
+                    <td>{t.title}</td>
+                    <td>{t.detail}</td>
+                    <td style={t.overdue ? { color: "#b91c1c", fontWeight: 700 } : undefined}>{fmt(t.dueDate)}{t.overdue ? " · overdue" : ""}</td>
+                    <td><span className="tech-b blue">{t.status.replace("_", " ")}</span></td>
+                    <td><Link className="tech-rowbtn" href={t.href}>Open</Link></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </Section>
 
       <Section title="Your draft reports" count={draftReports.length}>

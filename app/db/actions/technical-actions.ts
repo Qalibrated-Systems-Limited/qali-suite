@@ -6,6 +6,7 @@ import { withAuthorizedTenant } from "../tenant";
 import { userMessage } from "../errors";
 import * as repo from "../repositories/technical";
 import * as notifications from "../repositories/notifications";
+import * as helpdeskRepo from "../repositories/helpdesk";
 import {
   technicalStanding,
   requireTechnician,
@@ -482,4 +483,21 @@ export async function cancelTechnicalWork(kind: Kind, id: string) {
     await requireTechnicalManager(tx, user, companyId);
     return repo.cancelWork(tx, kind, id, actorFrom(user));
   }, (l) => `${l} cancelled`);
+}
+
+/** Help desk tickets for the Technical module (see listTicketsForTechnical). */
+export async function getTechnicalTickets(all = false) {
+  return withAuthorizedTenant([], async (tx, { user, companyId }) => {
+    const [standing, team] = await Promise.all([technicalStanding(tx, user, companyId), listTechnicalPeople(tx)]);
+    const rows = await helpdeskRepo.listTicketsForTechnical(tx, team.map((p) => p.id), all && standing.isManager);
+    return {
+      tickets: rows.map((r) => ({
+        ...r,
+        resolutionDueAt: r.resolutionDueAt ? new Date(r.resolutionDueAt).toISOString() : null,
+        createdAt: new Date(r.createdAt).toISOString(),
+      })),
+      team,
+      me: { userId: String(user.id), isManager: standing.isManager, isTechnician: standing.isTechnician },
+    };
+  });
 }

@@ -427,3 +427,36 @@ export async function getHelpdeskStats(tx: Tx) {
     },
   };
 }
+
+/**
+ * Open tickets for the Technical module: those filed to the Technical
+ * department (on the ticket or its category) plus any already with someone
+ * on the technical team. `all` widens it to every open ticket, so a technical
+ * manager can pick up a call the desk filed elsewhere.
+ */
+export async function listTicketsForTechnical(tx: Tx, technicalUserIds: string[], all = false) {
+  const ids = technicalUserIds.length ? technicalUserIds : ["__none__"];
+  return (await tx.execute(sql`
+    SELECT h.id, h.ticket_number AS "ticketNumber", h.title, h.priority, h.status,
+           h.category_name AS "categoryName", h.department, h.customer_name AS "customerName",
+           h.assigned_to_user_id AS "assignedToUserId", h.assignee_name AS "assigneeName",
+           h.resolution_due_at AS "resolutionDueAt", h.created_at AS "createdAt",
+           (h.resolution_due_at IS NOT NULL AND h.resolution_due_at < now()) AS "breached"
+      FROM helpdesk_tickets h
+      LEFT JOIN helpdesk_categories c ON c.id = h.category_id
+     WHERE h.status NOT IN ('resolved','closed')
+       AND (
+         ${all}
+         OR lower(COALESCE(h.department, '')) = 'technical'
+         OR lower(COALESCE(c.department, '')) = 'technical'
+         OR h.assigned_to_user_id IN (${sql.join(ids.map((i) => sql`${i}`), sql`, `)})
+       )
+     ORDER BY CASE h.priority WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
+              h.resolution_due_at NULLS LAST, h.created_at
+  `)) as unknown as Array<{
+    id: string; ticketNumber: string; title: string; priority: string; status: string;
+    categoryName: string | null; department: string | null; customerName: string | null;
+    assignedToUserId: string | null; assigneeName: string | null;
+    resolutionDueAt: Date | null; createdAt: Date; breached: boolean;
+  }>;
+}

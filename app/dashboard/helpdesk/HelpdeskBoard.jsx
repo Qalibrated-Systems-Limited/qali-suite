@@ -75,13 +75,14 @@ function whenShort(d) {
   return d ? new Date(d).toLocaleString("en-KE", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "—";
 }
 
-export default function HelpdeskBoard({ tickets = [], categories = [], stats, users = [], canManage }) {
+export default function HelpdeskBoard({ tickets = [], categories = [], stats, users = [], canManage, currentUserId = null, openTicketId = null }) {
   const router = useRouter();
   const [tab, setTab] = useState("overview");
   const [isPending, startTransition] = useTransition();
 
   const [showNew, setShowNew] = useState(false);
-  const [detailId, setDetailId] = useState(null);
+  // A link from Tasks or a notification (?ticket=…) opens that ticket.
+  const [detailId, setDetailId] = useState(openTicketId);
 
   const [q, setQ] = useState("");
   const [statusF, setStatusF] = useState("");
@@ -186,6 +187,7 @@ export default function HelpdeskBoard({ tickets = [], categories = [], stats, us
 
       {detailId && (
         <TicketDetail
+          currentUserId={currentUserId}
           id={detailId}
           users={users}
           canManage={canManage}
@@ -366,7 +368,7 @@ function SourceField() {
 }
 
 // ── Ticket detail modal ────────────────────────────────────────────────────────
-function TicketDetail({ id, users, canManage, isPending, act, onClose }) {
+function TicketDetail({ id, users, canManage, currentUserId, isPending, act, onClose }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [reply, setReply] = useState("");
@@ -394,6 +396,7 @@ function TicketDetail({ id, users, canManage, isPending, act, onClose }) {
   }
 
   const t = data?.ticket;
+  const isAssignee = Boolean(t && currentUserId && t.assignedToUserId === currentUserId);
   const sla = t ? slaState(t) : null;
 
   return (
@@ -429,7 +432,7 @@ function TicketDetail({ id, users, canManage, isPending, act, onClose }) {
               ))}
             </div>
 
-            {canManage && (
+            {(canManage || isAssignee) && (
               <div style={{ marginTop: 12 }}>
                 <textarea value={reply} onChange={(e) => setReply(e.target.value)} rows={2} placeholder="Write a reply or internal note…" style={{ width: "100%", padding: "9px 12px", border: "1.5px solid var(--border)", borderRadius: 7, fontSize: 13, color: "var(--foreground)", background: "var(--background)", boxSizing: "border-box", resize: "vertical" }} />
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6 }}>
@@ -455,6 +458,24 @@ function TicketDetail({ id, users, canManage, isPending, act, onClose }) {
             <Meta label="Resolution due" value={whenShort(t.resolutionDueAt)} />
             {t.firstResponseAt && <Meta label="First response" value={whenShort(t.firstResponseAt)} />}
             {t.resolvedAt && <Meta label="Resolved" value={whenShort(t.resolvedAt)} />}
+
+            {!canManage && isAssignee && (
+              <>
+                <hr style={{ border: "none", borderTop: "1px solid var(--border)", margin: "14px 0" }} />
+                <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "var(--foreground)", marginBottom: 5 }}>Status — this ticket is yours</label>
+                <select value={t.status} disabled={busy} onChange={(e) => run(setTicketStatus, id, e.target.value)} style={selStyle}>
+                  {[...new Set([t.status, "assigned", "in_progress", "pending"])].map((s) => <option key={s} value={s}>{STATUS[s]?.label || s}</option>)}
+                </select>
+                {OPEN_STATES.includes(t.status) && (
+                  <div style={{ marginTop: 14, background: T.greenL, borderRadius: 8, padding: 10 }}>
+                    <label style={{ display: "block", fontSize: 11.5, fontWeight: 700, color: T.green, marginBottom: 5 }}>Resolve</label>
+                    <textarea value={resolveNotes} onChange={(e) => setResolveNotes(e.target.value)} rows={2} placeholder="Resolution notes (what was done)" style={{ ...selStyle, resize: "vertical" }} />
+                    <textarea value={rootCause} onChange={(e) => setRootCause(e.target.value)} rows={1} placeholder="Root cause" style={{ ...selStyle, marginTop: 6, resize: "vertical" }} />
+                    <button disabled={busy} onClick={() => run(setTicketStatus, id, "resolved", { resolutionNotes: resolveNotes, rootCause })} style={{ marginTop: 6, width: "100%", background: T.green, color: "#fff", border: "none", padding: "7px", borderRadius: 7, fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>Mark resolved</button>
+                  </div>
+                )}
+              </>
+            )}
 
             {canManage && (
               <>

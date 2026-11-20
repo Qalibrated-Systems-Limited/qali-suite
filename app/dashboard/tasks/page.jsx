@@ -1,7 +1,7 @@
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import TasksBoard from "./TasksBoard";
-import { getTasksData } from "@/app/db/actions/tasks-actions";
+import { getTasksData, getMyAssignments } from "@/app/db/actions/tasks-actions";
 import { hasRole, TASK_WRITE_ROLES } from "@/lib/utils/role-gates";
 
 export const metadata = {
@@ -16,7 +16,7 @@ export default async function TasksPage() {
   const session = await auth();
   if (!session?.user) redirect("/login");
 
-  const data = await getTasksData();
+  const [data, assignments] = await Promise.all([getTasksData(), getMyAssignments()]);
   const canManage = hasRole(session.user, TASK_WRITE_ROLES);
 
   return (
@@ -26,6 +26,8 @@ export default async function TasksPage() {
         stats={data.stats}
         users={data.users}
         canManage={canManage}
+        assignments={assignments}
+        currentUserId={String(session.user.id)}
       />
     </div>
   );

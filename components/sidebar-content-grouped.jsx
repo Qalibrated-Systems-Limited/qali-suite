@@ -810,6 +810,7 @@ export const getNavigationGroups = (user) => {
       { icon: List, label: "Report registry", id: "technical-registry", href: "/dashboard/technical" },
       { icon: FlaskConical, label: "Calibration (17025)", id: "calibration", href: "/dashboard/calibration" },
       { icon: Search, label: "Inspection (17020)", id: "inspection", href: "/dashboard/inspection" },
+      { icon: LifeBuoy, label: "Service tickets", id: "technical-tickets", href: "/dashboard/technical/tickets" },
     ],
   },
   {

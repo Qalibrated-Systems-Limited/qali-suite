@@ -2,6 +2,7 @@ import {
   sendOverdueInvoiceDigests,
   sendLowStockDigests,
   sendHrDigests,
+  sendWeeklyWorkDigests,
 } from "@/lib/notifications/alert-digests";
 
 // ============================================
@@ -32,12 +33,13 @@ export async function GET(request) {
 
   try {
     // No Mongo connection: both digests read Postgres since 0102.
-    const [overdue, lowStock, hr] = await Promise.all([
+    const [overdue, lowStock, hr, work] = await Promise.all([
       sendOverdueInvoiceDigests(),
       sendLowStockDigests(),
       sendHrDigests(),
+      sendWeeklyWorkDigests(),
     ]);
-    return Response.json({ ok: true, overdue, lowStock, hr });
+    return Response.json({ ok: true, overdue, lowStock, hr, work });
   } catch (err) {
     console.error("[cron/notify-alerts] error:", err);
     return Response.json(
