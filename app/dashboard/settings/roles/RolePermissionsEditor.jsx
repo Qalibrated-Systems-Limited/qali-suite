@@ -214,7 +214,7 @@ export default function RolePermissionsEditor({ modules, roles, canManage }) {
                   return (
                     <label
                       key={p.key}
-                      className={`flex cursor-pointer items-start gap-2 rounded-md border p-2 text-sm ${
+                      className={`relative flex cursor-pointer items-start gap-2 rounded-md border p-2 text-sm ${
                         on ? "border-primary/40 bg-primary/5" : "border-border"
                       } ${canManage ? "" : "cursor-default opacity-90"}`}
                     >
@@ -233,6 +233,11 @@ export default function RolePermissionsEditor({ modules, roles, canManage }) {
                           aria-hidden="true"
                         />
                       </span>
+                      {/* The label is `relative` so this hidden box sits
+                          INSIDE it. Without that, sr-only's absolute
+                          positioning anchored it to the far top of the app
+                          shell; clicking focused it, the browser scrolled the
+                          whole page to reach it, and the screen went blank. */}
                       <input
                         type="checkbox"
                         className="sr-only"
