@@ -59,39 +59,57 @@ export default function RolePermissionsEditor({ modules, roles, canManage }) {
     });
   };
 
-  const save = () => {
+  /**
+   * Run one server action and report its outcome — never hang.
+   *
+   * The action's promise could reject (the tab is from before a deploy, so its
+   * action no longer exists; the network dropped; the server timed out) and
+   * nothing caught it, so the button kept spinning with no word of what went
+   * wrong. Now every outcome ends in a toast, and a stalled request gives up
+   * after 30 seconds. The page refresh happens AFTER the transition, so a slow
+   * re-render of the page cannot keep the spinner going either.
+   */
+  const run = (action, okMessage) => {
     startTransition(async () => {
-      const res = await setRolePermissionsAction(role.name, [...current]);
-      if (res?.error) toast.error(res.error);
-      else {
-        toast.success(res.message ?? "Saved.");
-        router.refresh();
+      let res;
+      try {
+        res = await Promise.race([
+          action(),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error("timeout")), 30000),
+          ),
+        ]);
+      } catch (err) {
+        console.error("Role permissions action failed:", err);
+        toast.error(
+          err?.message === "timeout"
+            ? "The server did not answer in 30 seconds. Reload the page and check whether the change was saved."
+            : "Could not save. This page may be out of date — reload it and try again.",
+        );
+        return;
       }
+      if (res?.error) {
+        toast.error(res.error);
+        return;
+      }
+      toast.success(res?.message ?? okMessage);
+      setTimeout(() => router.refresh(), 0);
     });
   };
+
+  const save = () =>
+    run(() => setRolePermissionsAction(role.name, [...current]), "Saved.");
 
   const reset = () => {
     if (!confirm(`Reset "${role.name}" to its base defaults?`)) return;
-    startTransition(async () => {
-      const res = await resetRolePermissionsAction(role.name);
-      if (res?.error) toast.error(res.error);
-      else {
-        toast.success(res.message ?? "Reset.");
-        router.refresh();
-      }
-    });
+    run(() => resetRolePermissionsAction(role.name), "Reset.");
   };
 
-  const toggleActive = () => {
-    startTransition(async () => {
-      const res = await setCustomRoleActiveAction(role.id, !role.isActive);
-      if (res?.error) toast.error(res.error);
-      else {
-        toast.success(role.isActive ? "Role deactivated." : "Role reactivated.");
-        router.refresh();
-      }
-    });
-  };
+  const toggleActive = () =>
+    run(
+      () => setCustomRoleActiveAction(role.id, !role.isActive),
+      role.isActive ? "Role deactivated." : "Role reactivated.",
+    );
 
   return (
     <div className="grid gap-4 md:grid-cols-[200px_1fr]">
