@@ -4,6 +4,7 @@ import {
   sendHrDigests,
   sendWeeklyWorkDigests,
 } from "@/lib/notifications/alert-digests";
+import { closeStaleResolvedTickets } from "@/app/db/alerts";
 
 // ============================================
 // GET /api/cron/notify-alerts
@@ -33,13 +34,14 @@ export async function GET(request) {
 
   try {
     // No Mongo connection: both digests read Postgres since 0102.
-    const [overdue, lowStock, hr, work] = await Promise.all([
+    const [overdue, lowStock, hr, work, helpdesk] = await Promise.all([
       sendOverdueInvoiceDigests(),
       sendLowStockDigests(),
       sendHrDigests(),
       sendWeeklyWorkDigests(),
+      closeStaleResolvedTickets(7),
     ]);
-    return Response.json({ ok: true, overdue, lowStock, hr, work });
+    return Response.json({ ok: true, overdue, lowStock, hr, work, helpdesk });
   } catch (err) {
     console.error("[cron/notify-alerts] error:", err);
     return Response.json(

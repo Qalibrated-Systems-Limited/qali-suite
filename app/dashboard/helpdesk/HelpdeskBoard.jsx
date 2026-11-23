@@ -28,6 +28,16 @@ import {
   deleteTicket,
   getTicketDetail,
   createCategory,
+  setTicketTypeAction,
+  mergeTicketAction,
+  rateTicketAction,
+  saveSlaPolicy,
+  saveCannedResponse,
+  deleteCannedResponseAction,
+  saveArticleAction,
+  markArticleHelpfulAction,
+  linkSolutionArticleAction,
+  setCategoryDefaultAssigneeAction,
 } from "@/app/db/actions/helpdesk-actions";
 
 // ── vocab ─────────────────────────────────────────────────────────────────────
@@ -48,6 +58,13 @@ const STATUS = {
   reopened: { label: "Reopened", variant: "amber" },
 };
 const SOURCES = ["manual", "system", "crm", "safety", "scheduled"];
+export const TICKET_TYPES = {
+  incident: "Incident",
+  service_request: "Service request",
+  question: "Question",
+  problem: "Problem",
+  complaint: "Complaint",
+};
 const OPEN_STATES = ["new", "assigned", "in_progress", "pending", "escalated", "reopened"];
 const STATUS_FLOW = ["new", "assigned", "in_progress", "pending", "escalated", "resolved", "closed", "reopened"];
 const ESC_LEVELS = [
@@ -63,7 +80,11 @@ function pill(map, key) {
 
 // SLA colour for a ticket's resolution clock.
 function slaState(t) {
-  if (t.status === "resolved" || t.status === "closed") return { label: "Met", variant: "green" };
+  if (t.status === "resolved" || t.status === "closed") {
+    if (t.resolvedAt && t.resolutionDueAt && new Date(t.resolvedAt) > new Date(t.resolutionDueAt)) return { label: "Missed", variant: "red" };
+    return { label: "Met", variant: "green" };
+  }
+  if (t.slaPausedAt) return { label: "Paused", variant: "default" };
   if (!t.resolutionDueAt) return { label: "—", variant: "default" };
   const due = new Date(t.resolutionDueAt).getTime();
   const now = Date.now();
@@ -75,9 +96,13 @@ function whenShort(d) {
   return d ? new Date(d).toLocaleString("en-KE", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "—";
 }
 
-export default function HelpdeskBoard({ tickets = [], categories = [], stats, users = [], canManage, currentUserId = null, openTicketId = null }) {
+export default function HelpdeskBoard({
+  tickets = [], categories = [], stats, users = [], canManage, currentUserId = null, openTicketId = null,
+  desk = canManage, canned = [], articles = [], sla = [],
+}) {
   const router = useRouter();
-  const [tab, setTab] = useState("overview");
+  // The desk opens on its dashboard; everyone else on their own tickets.
+  const [tab, setTab] = useState(desk ? "overview" : "tickets");
   const [isPending, startTransition] = useTransition();
 
   const [showNew, setShowNew] = useState(false);
@@ -125,7 +150,7 @@ export default function HelpdeskBoard({ tickets = [], categories = [], stats, us
         {t.ticketNumber}
       </button>,
       <span key="title" title={t.title}>{t.title.length > 46 ? t.title.slice(0, 44) + "…" : t.title}</span>,
-      t.categoryName || "—",
+      <span key="type" style={{ fontSize: 12 }}>{TICKET_TYPES[t.ticketType] || "Incident"}{t.categoryName ? ` · ${t.categoryName}` : ""}</span>,
       pill(PRIORITY, t.priority),
       pill(STATUS, t.status),
       t.assigneeName || <span key="assignee" style={{ color: T.mgrey }}>Unassigned</span>,
@@ -139,16 +164,25 @@ export default function HelpdeskBoard({ tickets = [], categories = [], stats, us
       <SectionHeader
         title="Help Desk"
         sub="Log, triage, assign and resolve requests against SLA."
-        action={canManage ? <Btn variant="gold" onClick={() => setShowNew(true)}>+ New Ticket</Btn> : null}
+        action={<Btn variant="gold" onClick={() => setShowNew(true)}>+ New Ticket</Btn>}
       />
 
       <Tabs
-        tabs={[{ id: "overview", label: "Dashboard" }, { id: "tickets", label: `Tickets (${tickets.length})` }]}
+        tabs={[
+          ...(desk ? [{ id: "overview", label: "Dashboard" }] : []),
+          { id: "tickets", label: desk ? `Tickets (${tickets.length})` : `My tickets (${tickets.length})` },
+          { id: "kb", label: `Knowledge base (${articles.length})` },
+          ...(desk ? [{ id: "settings", label: "Settings" }] : []),
+        ]}
         active={tab}
         setActive={setTab}
       />
 
-      {tab === "overview" && <Overview stats={stats} tickets={tickets} onOpen={setDetailId} />}
+      {tab === "overview" && desk && <Overview stats={stats} tickets={tickets} onOpen={setDetailId} />}
+      {tab === "kb" && <KnowledgeBase articles={articles} categories={categories} desk={desk} act={act} />}
+      {tab === "settings" && desk && (
+        <DeskSettings sla={sla} canned={canned} categories={categories} users={users} act={act} />
+      )}
 
       {tab === "tickets" && (
         <>
@@ -164,15 +198,17 @@ export default function HelpdeskBoard({ tickets = [], categories = [], stats, us
             </div>
           </div>
           <DataTable
-            headers={["Ticket", "Title", "Category", "Priority", "Status", "Assignee", "SLA", "Raised"]}
+            headers={["Ticket", "Title", "Type · category", "Priority", "Status", "Assignee", "SLA", "Raised"]}
             rows={rows}
-            empty="No tickets match. Raise one with “+ New Ticket”."
+            empty={desk ? "No tickets match. Raise one with “+ New Ticket”." : "You have not raised any tickets. Use “+ New Ticket” to ask for help."}
           />
         </>
       )}
 
       {showNew && (
         <NewTicketModal
+          desk={desk}
+          articles={articles}
           categories={categories}
           users={users}
           isPending={isPending}
@@ -188,6 +224,8 @@ export default function HelpdeskBoard({ tickets = [], categories = [], stats, us
       {detailId && (
         <TicketDetail
           currentUserId={currentUserId}
+          canned={canned}
+          articles={articles}
           id={detailId}
           users={users}
           canManage={canManage}
@@ -264,7 +302,19 @@ function Overview({ stats, tickets, onOpen }) {
 }
 
 // ── New ticket modal ─────────────────────────────────────────────────────────
-function NewTicketModal({ categories, users, isPending, act, onClose, onCreated }) {
+function NewTicketModal({ desk, articles = [], categories, users, isPending, act, onClose, onCreated }) {
+  const [titleText, setTitleText] = useState("");
+  // Before raising, the articles that may already answer it.
+  const suggestions = useMemo(() => {
+    const words = titleText.toLowerCase().split(/\W+/).filter((w) => w.length > 3);
+    if (!words.length) return [];
+    return articles
+      .map((a) => ({ a, hits: words.filter((w) => `${a.title} ${a.body}`.toLowerCase().includes(w)).length }))
+      .filter((x) => x.hits > 0)
+      .sort((x, y) => y.hits - x.hits)
+      .slice(0, 3)
+      .map((x) => x.a);
+  }, [titleText, articles]);
   const [categoryId, setCategoryId] = useState("");
   const [priority, setPriority] = useState("medium");
   const [assignee, setAssignee] = useState("");
@@ -312,7 +362,15 @@ function NewTicketModal({ categories, users, isPending, act, onClose, onCreated 
   return (
     <Modal title="New Ticket" onClose={onClose} width={620}>
       <form onSubmit={submit}>
-        <Input label="Title" name="title" required placeholder="Short summary of the request" />
+        <Input label="Title" name="title" required value={titleText} onChange={setTitleText} placeholder="Short summary of the request" />
+        {suggestions.length > 0 && (
+          <div style={{ background: T.blueL, border: "1px solid #BFDBFE", borderRadius: 8, padding: "8px 12px", margin: "-6px 0 12px", fontSize: 12.5 }}>
+            <b>These articles may already answer it:</b>
+            {suggestions.map((a) => (
+              <div key={a.id}>• {a.title}</div>
+            ))}
+          </div>
+        )}
         <div style={{ marginBottom: 14 }}>
           <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "var(--foreground)", marginBottom: 5 }}>Description</label>
           <textarea name="description" rows={3} placeholder="What happened, where, and any detail that helps." style={{ width: "100%", padding: "9px 12px", border: "1.5px solid var(--border)", borderRadius: 7, fontSize: 13, color: "var(--foreground)", background: "var(--background)", boxSizing: "border-box", resize: "vertical" }} />
@@ -320,14 +378,21 @@ function NewTicketModal({ categories, users, isPending, act, onClose, onCreated 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
           <div>
             <Select label="Category" value={categoryId} onChange={setCategoryId} options={[{ value: "", label: "— Select —" }, ...categories.map((c) => ({ value: c.id, label: c.name }))]} />
-            <button type="button" onClick={() => setAddingCat((v) => !v)} style={{ background: "none", border: "none", color: T.blue, fontSize: 11.5, fontWeight: 600, cursor: "pointer", padding: 0, marginTop: -8 }}>
-              {addingCat ? "− Cancel new category" : "+ New category"}
-            </button>
+            {desk && (
+              <button type="button" onClick={() => setAddingCat((v) => !v)} style={{ background: "none", border: "none", color: T.blue, fontSize: 11.5, fontWeight: 600, cursor: "pointer", padding: 0, marginTop: -8 }}>
+                {addingCat ? "− Cancel new category" : "+ New category"}
+              </button>
+            )}
           </div>
           <Select label="Priority" value={priority} onChange={setPriority} options={Object.keys(PRIORITY).map((p) => ({ value: p, label: PRIORITY[p].label }))} />
-          {/* Source is a native select so its value posts with the form. */}
-          <SourceField />
-          <Select label="Assign to" value={assignee} onChange={setAssignee} options={[{ value: "", label: "Unassigned" }, ...users.map((u) => ({ value: u.id, label: u.name }))]} />
+          <TypeField />
+          {desk && (
+            <>
+              {/* Source is a native select so its value posts with the form. */}
+              <SourceField />
+              <Select label="Assign to" value={assignee} onChange={setAssignee} options={[{ value: "", label: "Unassigned (or the category's default)" }, ...users.map((u) => ({ value: u.id, label: u.name }))]} />
+            </>
+          )}
         </div>
 
         {addingCat && (
@@ -337,12 +402,18 @@ function NewTicketModal({ categories, users, isPending, act, onClose, onCreated 
             <Btn variant="primary" size="sm" disabled={catBusy} onClick={saveCategory} style={{ marginBottom: 14 }}>{catBusy ? "Adding…" : "Add"}</Btn>
           </div>
         )}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-          <Input label="Client / company" name="customerName" placeholder="Who is this for" />
-          <Input label="Requester" name="requesterName" placeholder="Person who raised it" />
-          <Input label="Requester email" name="requesterEmail" type="email" placeholder="name@company.com" />
-          <Input label="Due date" name="dueDate" type="date" />
-        </div>
+        {desk ? (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+            <Input label="Client / company" name="customerName" placeholder="Who is this for" />
+            <Input label="Requester" name="requesterName" placeholder="Person who raised it" />
+            <Input label="Requester email" name="requesterEmail" type="email" placeholder="name@company.com" />
+            <Input label="Due date" name="dueDate" type="date" />
+          </div>
+        ) : (
+          <p style={{ fontSize: 12.5, color: "var(--muted-foreground)", margin: "0 0 8px" }}>
+            You will see replies under My tickets, and be notified when it is resolved.
+          </p>
+        )}
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 10 }}>
           <Btn variant="ghost" onClick={onClose} disabled={isPending}>Cancel</Btn>
           <button type="submit" disabled={isPending} style={{ background: T.gold, color: "#fff", border: "none", padding: "8px 18px", borderRadius: 7, fontSize: 13, fontWeight: 600, cursor: isPending ? "not-allowed" : "pointer" }}>
@@ -351,6 +422,17 @@ function NewTicketModal({ categories, users, isPending, act, onClose, onCreated 
         </div>
       </form>
     </Modal>
+  );
+}
+
+function TypeField() {
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "var(--foreground)", marginBottom: 5 }}>Type</label>
+      <select name="ticketType" defaultValue="incident" style={{ width: "100%", padding: "9px 12px", border: "1.5px solid var(--border)", borderRadius: 7, fontSize: 13, color: "var(--foreground)", background: "var(--background)", boxSizing: "border-box" }}>
+        {Object.entries(TICKET_TYPES).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+      </select>
+    </div>
   );
 }
 
@@ -368,7 +450,10 @@ function SourceField() {
 }
 
 // ── Ticket detail modal ────────────────────────────────────────────────────────
-function TicketDetail({ id, users, canManage, currentUserId, isPending, act, onClose }) {
+function TicketDetail({ id, users, canManage, currentUserId, canned = [], articles = [], isPending, act, onClose }) {
+  const [mergeInto, setMergeInto] = useState("");
+  const [stars, setStars] = useState(0);
+  const [rateNote, setRateNote] = useState("");
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [reply, setReply] = useState("");
@@ -397,6 +482,7 @@ function TicketDetail({ id, users, canManage, currentUserId, isPending, act, onC
 
   const t = data?.ticket;
   const isAssignee = Boolean(t && currentUserId && t.assignedToUserId === currentUserId);
+  const isRequester = Boolean(data?.viewer?.requester);
   const sla = t ? slaState(t) : null;
 
   return (
@@ -410,7 +496,10 @@ function TicketDetail({ id, users, canManage, currentUserId, isPending, act, onC
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
               {pill(STATUS, t.status)}
               {pill(PRIORITY, t.priority)}
+              <Badge variant="blue">{TICKET_TYPES[t.ticketType] || "Incident"}</Badge>
               <Badge variant={sla.variant}>SLA: {sla.label}</Badge>
+              {t.slaPausedAt && <Badge variant="default">Waiting on customer — clock paused</Badge>}
+              {t.mergedIntoId && <Badge variant="default">Merged</Badge>}
               {t.isEscalated && <Badge variant="purple">Escalated · {t.escalationLevel}</Badge>}
             </div>
 
@@ -432,13 +521,33 @@ function TicketDetail({ id, users, canManage, currentUserId, isPending, act, onC
               ))}
             </div>
 
-            {(canManage || isAssignee) && (
+            {(canManage || isAssignee || (isRequester && t.status !== "closed")) && (
               <div style={{ marginTop: 12 }}>
+                {canManage && canned.length > 0 && (
+                  <select
+                    value=""
+                    onChange={(e) => {
+                      const c = canned.find((x) => x.id === e.target.value);
+                      if (c) setReply((r) => (r ? `${r}\n\n${c.body}` : c.body));
+                    }}
+                    style={{ ...selStyle, marginBottom: 6 }}
+                  >
+                    <option value="">Insert a saved reply…</option>
+                    {canned.map((c) => <option key={c.id} value={c.id}>{c.title}</option>)}
+                  </select>
+                )}
+                {isRequester && !canManage && !isAssignee && t.status === "resolved" && (
+                  <p style={{ fontSize: 12, color: "var(--muted-foreground)", margin: "0 0 6px" }}>
+                    Not fixed? Reply and the ticket reopens.
+                  </p>
+                )}
                 <textarea value={reply} onChange={(e) => setReply(e.target.value)} rows={2} placeholder="Write a reply or internal note…" style={{ width: "100%", padding: "9px 12px", border: "1.5px solid var(--border)", borderRadius: 7, fontSize: 13, color: "var(--foreground)", background: "var(--background)", boxSizing: "border-box", resize: "vertical" }} />
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6 }}>
-                  <label style={{ fontSize: 12, color: "var(--foreground)", display: "flex", alignItems: "center", gap: 6 }}>
-                    <input type="checkbox" checked={internal} onChange={(e) => setInternal(e.target.checked)} /> Internal note
-                  </label>
+                  {canManage || isAssignee ? (
+                    <label style={{ fontSize: 12, color: "var(--foreground)", display: "flex", alignItems: "center", gap: 6 }}>
+                      <input type="checkbox" checked={internal} onChange={(e) => setInternal(e.target.checked)} /> Internal note
+                    </label>
+                  ) : <span />}
                   <button disabled={busy || isPending || !reply.trim()} onClick={async () => { const r = await run(addTicketComment, id, reply, internal); if (r?.success) setReply(""); }} style={{ background: T.navy, color: "#fff", border: "none", padding: "7px 16px", borderRadius: 7, fontSize: 12.5, fontWeight: 600, cursor: "pointer", opacity: busy || !reply.trim() ? 0.6 : 1 }}>
                     {internal ? "Add note" : "Post reply"}
                   </button>
@@ -466,6 +575,36 @@ function TicketDetail({ id, users, canManage, currentUserId, isPending, act, onC
             <Meta label="Resolution due" value={whenShort(t.resolutionDueAt)} />
             {t.firstResponseAt && <Meta label="First response" value={whenShort(t.firstResponseAt)} />}
             {t.resolvedAt && <Meta label="Resolved" value={whenShort(t.resolvedAt)} />}
+            {t.satisfactionRating ? (
+              <Meta label="Satisfaction" value={`${"★".repeat(t.satisfactionRating)}${"☆".repeat(5 - t.satisfactionRating)}${t.satisfactionComment ? ` — ${t.satisfactionComment}` : ""}`} />
+            ) : null}
+            {t.solutionArticleId && (
+              <Meta label="Solved with" value={articles.find((a) => a.id === t.solutionArticleId)?.title || "Knowledge base article"} />
+            )}
+
+            {/* The requester rates a resolved ticket once. */}
+            {isRequester && ["resolved", "closed"].includes(t.status) && !t.satisfactionRating && (
+              <div style={{ marginTop: 14, background: T.amberL, borderRadius: 8, padding: 10 }}>
+                <label style={{ display: "block", fontSize: 11.5, fontWeight: 700, marginBottom: 5 }}>How did we do?</label>
+                <div style={{ fontSize: 22, letterSpacing: 2 }}>
+                  {[1, 2, 3, 4, 5].map((n) => (
+                    <button key={n} type="button" aria-label={`${n} star${n > 1 ? "s" : ""}`} onClick={() => setStars(n)} style={{ background: "none", border: "none", cursor: "pointer", color: n <= stars ? "#d97706" : "#cbd5e1", fontSize: 22, padding: 0 }}>★</button>
+                  ))}
+                </div>
+                <input value={rateNote} onChange={(e) => setRateNote(e.target.value)} placeholder="Anything to add? (optional)" style={{ ...selStyle, marginTop: 6 }} />
+                <button disabled={busy || !stars} onClick={() => run(rateTicketAction, id, stars, rateNote)} style={{ marginTop: 6, width: "100%", background: T.gold, color: "#fff", border: "none", padding: "7px", borderRadius: 7, fontSize: 12.5, fontWeight: 600, cursor: "pointer", opacity: stars ? 1 : 0.6 }}>Send rating</button>
+              </div>
+            )}
+
+            {(canManage || isAssignee) && articles.length > 0 && !["closed"].includes(t.status) && (
+              <>
+                <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "var(--foreground)", margin: "12px 0 5px" }}>Solution article</label>
+                <select value={t.solutionArticleId || ""} disabled={busy} onChange={(e) => run(linkSolutionArticleAction, id, e.target.value || null)} style={selStyle}>
+                  <option value="">None</option>
+                  {articles.filter((a) => a.status === "published").map((a) => <option key={a.id} value={a.id}>{a.title}</option>)}
+                </select>
+              </>
+            )}
 
             {!canManage && isAssignee && (
               <>
@@ -491,6 +630,11 @@ function TicketDetail({ id, users, canManage, currentUserId, isPending, act, onC
                 <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "var(--foreground)", marginBottom: 5 }}>Status</label>
                 <select value={t.status} disabled={busy} onChange={(e) => run(setTicketStatus, id, e.target.value)} style={selStyle}>
                   {STATUS_FLOW.map((s) => <option key={s} value={s}>{STATUS[s].label}</option>)}
+                </select>
+
+                <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "var(--foreground)", margin: "12px 0 5px" }}>Type</label>
+                <select value={t.ticketType || "incident"} disabled={busy} onChange={(e) => run(setTicketTypeAction, id, e.target.value)} style={selStyle}>
+                  {Object.entries(TICKET_TYPES).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                 </select>
 
                 <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "var(--foreground)", margin: "12px 0 5px" }}>Assign to</label>
@@ -519,6 +663,14 @@ function TicketDetail({ id, users, canManage, currentUserId, isPending, act, onC
                   </div>
                 )}
 
+                {!t.mergedIntoId && t.status !== "closed" && (
+                  <div style={{ marginTop: 14, background: "var(--muted)", borderRadius: 8, padding: 10 }}>
+                    <label style={{ display: "block", fontSize: 11.5, fontWeight: 700, marginBottom: 5 }}>Duplicate? Merge into</label>
+                    <input value={mergeInto} onChange={(e) => setMergeInto(e.target.value)} placeholder="Ticket number, e.g. TKT-00012" style={selStyle} />
+                    <button disabled={busy || !mergeInto.trim()} onClick={async () => { if (confirm(`Close ${t.ticketNumber} as a duplicate of ${mergeInto}?`)) { const r = await run(mergeTicketAction, id, mergeInto); if (r?.success) onClose(); } }} style={{ marginTop: 6, width: "100%", background: T.navy, color: "#fff", border: "none", padding: "7px", borderRadius: 7, fontSize: 12.5, fontWeight: 600, cursor: "pointer", opacity: mergeInto.trim() ? 1 : 0.6 }}>Merge</button>
+                  </div>
+                )}
+
                 <button disabled={busy} onClick={async () => { if (confirm("Delete this ticket permanently?")) { const r = await act(deleteTicket, id); if (r?.success) onClose(); } }} style={{ marginTop: 16, width: "100%", background: "transparent", color: T.red, border: `1px solid ${T.red}`, padding: "7px", borderRadius: 7, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Delete ticket</button>
               </>
             )}
@@ -536,6 +688,156 @@ function Meta({ label, value }) {
     <div style={{ marginBottom: 9 }}>
       <div style={{ fontSize: 10.5, textTransform: "uppercase", letterSpacing: 0.5, color: "var(--muted-foreground)" }}>{label}</div>
       <div style={{ fontSize: 13, color: "var(--foreground)", fontWeight: 500 }}>{value}</div>
+    </div>
+  );
+}
+
+// ── Knowledge base ─────────────────────────────────────────────────────────────
+// Answers written once and found before a ticket is raised. Everyone reads the
+// published ones; the desk writes, drafts and archives them.
+function KnowledgeBase({ articles, categories, desk, act }) {
+  const [q, setQ] = useState("");
+  const [open, setOpen] = useState(null);
+  const [editing, setEditing] = useState(null); // {} new | article
+  const shown = useMemo(() => {
+    const s = q.trim().toLowerCase();
+    return s ? articles.filter((a) => `${a.title} ${a.body}`.toLowerCase().includes(s)) : articles;
+  }, [articles, q]);
+
+  return (
+    <div>
+      <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap", marginBottom: 14 }}>
+        <div style={{ flex: "1 1 280px" }}>
+          <Input label="Search the knowledge base" value={q} onChange={setQ} placeholder="e.g. printer, password, calibration certificate" />
+        </div>
+        {desk && <Btn variant="gold" onClick={() => setEditing({})}>+ New article</Btn>}
+      </div>
+      {shown.length === 0 ? (
+        <p style={{ color: "var(--muted-foreground)", fontSize: 13 }}>
+          {articles.length ? "No article matches." : desk ? "No articles yet. Write the answers you give most often." : "No articles yet."}
+        </p>
+      ) : (
+        <div style={{ display: "grid", gap: 8 }}>
+          {shown.map((a) => (
+            <div key={a.id} style={{ border: "1px solid var(--border)", borderRadius: 10, padding: "10px 14px", background: "var(--card)" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
+                <button onClick={() => setOpen(open === a.id ? null : a.id)} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left", fontWeight: 700, fontSize: 14, color: "var(--foreground)" }}>
+                  {a.title}
+                </button>
+                <span style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 11, color: "var(--muted-foreground)" }}>
+                  {a.status !== "published" && <Badge variant="amber">{a.status}</Badge>}
+                  {a.articleNumber} · {a.views} views · {a.helpful} helpful
+                  {desk && <Btn size="sm" variant="ghost" onClick={() => setEditing(a)}>Edit</Btn>}
+                </span>
+              </div>
+              {open === a.id && (
+                <div style={{ marginTop: 8 }}>
+                  <div style={{ whiteSpace: "pre-wrap", fontSize: 13.5, lineHeight: 1.55 }}>{a.body}</div>
+                  <Btn size="sm" variant="ghost" onClick={() => act(markArticleHelpfulAction, a.id)} style={{ marginTop: 8 }}>👍 This helped</Btn>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+      {editing && <ArticleEditor article={editing} categories={categories} act={act} onClose={() => setEditing(null)} />}
+    </div>
+  );
+}
+
+function ArticleEditor({ article, categories, act, onClose }) {
+  const [title, setTitle] = useState(article.title || "");
+  const [body, setBody] = useState(article.body || "");
+  const [categoryId, setCategoryId] = useState(article.categoryId || "");
+  const [status, setStatus] = useState(article.status || "published");
+  const [busy, setBusy] = useState(false);
+  async function save() {
+    setBusy(true);
+    const r = await act(saveArticleAction, { id: article.id, title, body, categoryId, status });
+    setBusy(false);
+    if (r?.success) onClose();
+  }
+  return (
+    <Modal title={article.id ? `Edit ${article.articleNumber}` : "New article"} onClose={onClose} width={720}>
+      <Input label="Title" value={title} onChange={setTitle} placeholder="The question as people ask it" />
+      <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 5 }}>Answer</label>
+      <textarea value={body} onChange={(e) => setBody(e.target.value)} rows={10} style={{ ...selStyle, resize: "vertical" }} placeholder="Steps, in order. What to check first. When to raise a ticket instead." />
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginTop: 12 }}>
+        <Select label="Category" value={categoryId} onChange={setCategoryId} options={[{ value: "", label: "— None —" }, ...categories.map((c) => ({ value: c.id, label: c.name }))]} />
+        <Select label="Status" value={status} onChange={setStatus} options={[{ value: "published", label: "Published" }, { value: "draft", label: "Draft" }, { value: "archived", label: "Archived" }]} />
+      </div>
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 10 }}>
+        <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
+        <Btn variant="gold" disabled={busy || !title.trim() || !body.trim()} onClick={save}>{busy ? "Saving…" : "Save article"}</Btn>
+      </div>
+    </Modal>
+  );
+}
+
+// ── Desk settings ─────────────────────────────────────────────────────────────
+// What the desk tunes: the SLA per priority, saved replies, and where each
+// category's new tickets land.
+function DeskSettings({ sla, canned, categories, users, act }) {
+  const [rows, setRows] = useState(sla);
+  const [cTitle, setCTitle] = useState("");
+  const [cBody, setCBody] = useState("");
+  useEffect(() => setRows(sla), [sla]);
+  const set = (p, k, v) => setRows((rs) => rs.map((r) => (r.priority === p ? { ...r, [k]: v } : r)));
+
+  return (
+    <div style={{ display: "grid", gap: 22 }}>
+      <section>
+        <h3 style={{ fontSize: 14, fontWeight: 800, margin: "0 0 4px" }}>Service levels</h3>
+        <p style={{ fontSize: 12.5, color: "var(--muted-foreground)", margin: "0 0 10px" }}>
+          Hours to first response and to resolution, by priority. New tickets take these; the clock pauses while a ticket is Pending (waiting on the customer).
+        </p>
+        <DataTable
+          headers={["Priority", "First response (h)", "Resolution (h)", ""]}
+          rows={rows.map((r) => [
+            <span key="p">{PRIORITY[r.priority]?.label || r.priority}{r.custom ? "" : " · default"}</span>,
+            <input key="a" type="number" min="0.25" step="0.25" value={r.responseHours} onChange={(e) => set(r.priority, "responseHours", e.target.value)} style={{ ...selStyle, width: 110 }} />,
+            <input key="b" type="number" min="0.25" step="0.25" value={r.resolutionHours} onChange={(e) => set(r.priority, "resolutionHours", e.target.value)} style={{ ...selStyle, width: 110 }} />,
+            <Btn key="s" size="sm" variant="primary" onClick={() => act(saveSlaPolicy, r.priority, Number(r.responseHours), Number(r.resolutionHours))}>Save</Btn>,
+          ])}
+        />
+      </section>
+
+      <section>
+        <h3 style={{ fontSize: 14, fontWeight: 800, margin: "0 0 4px" }}>Saved replies</h3>
+        <p style={{ fontSize: 12.5, color: "var(--muted-foreground)", margin: "0 0 10px" }}>Inserted into a reply from the ticket, then edited before sending.</p>
+        <div style={{ display: "grid", gap: 6, marginBottom: 10 }}>
+          {canned.length === 0 && <span style={{ fontSize: 13, color: "var(--muted-foreground)" }}>None yet.</span>}
+          {canned.map((c) => (
+            <div key={c.id} style={{ display: "flex", justifyContent: "space-between", gap: 8, border: "1px solid var(--border)", borderRadius: 8, padding: "8px 12px" }}>
+              <div><b style={{ fontSize: 13 }}>{c.title}</b><div style={{ fontSize: 12, color: "var(--muted-foreground)", whiteSpace: "pre-wrap" }}>{c.body.slice(0, 180)}{c.body.length > 180 ? "…" : ""}</div></div>
+              <Btn size="sm" variant="danger" onClick={() => confirm(`Remove "${c.title}"?`) && act(deleteCannedResponseAction, c.id)}>✕</Btn>
+            </div>
+          ))}
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr auto", gap: 8, alignItems: "end" }}>
+          <Input label="Title" value={cTitle} onChange={setCTitle} placeholder="e.g. Waiting for site access" />
+          <Input label="Reply" value={cBody} onChange={setCBody} placeholder="Text inserted into the reply" />
+          <Btn variant="gold" disabled={!cTitle.trim() || !cBody.trim()} onClick={async () => { const r = await act(saveCannedResponse, cTitle, cBody); if (r?.success) { setCTitle(""); setCBody(""); } }} style={{ marginBottom: 14 }}>Add</Btn>
+        </div>
+      </section>
+
+      <section>
+        <h3 style={{ fontSize: 14, fontWeight: 800, margin: "0 0 4px" }}>Where new tickets land</h3>
+        <p style={{ fontSize: 12.5, color: "var(--muted-foreground)", margin: "0 0 10px" }}>
+          A new ticket in a category goes to its default assignee when nobody is named. A Technical-department technician is requested from the technical manager first.
+        </p>
+        <DataTable
+          headers={["Category", "Department", "Default assignee"]}
+          rows={categories.map((c) => [
+            c.name,
+            c.department || "—",
+            <select key="a" value={c.defaultAssigneeId || ""} onChange={(e) => act(setCategoryDefaultAssigneeAction, c.id, e.target.value || null)} style={{ ...selStyle, maxWidth: 260 }}>
+              <option value="">Nobody — the desk triages</option>
+              {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+            </select>,
+          ])}
+        />
+      </section>
     </div>
   );
 }

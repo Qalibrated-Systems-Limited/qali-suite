@@ -279,3 +279,26 @@ export async function getWeeklyWorkDigests() {
   }
   return out;
 }
+
+/**
+ * Help desk: a ticket left RESOLVED for `days` without a reply is closed, as
+ * every service desk does — the requester had their chance to say it is not
+ * fixed (a reply reopens it). Recorded in the ticket's history. Privileged:
+ * the cron has no session; it touches only tickets already resolved.
+ */
+export async function closeStaleResolvedTickets(days = 7) {
+  const rows = (await privilegedDb().execute(sql`
+    WITH closed AS (
+      UPDATE helpdesk_tickets
+         SET status = 'closed', closed_at = now(), updated_at = now(),
+             closure_reason = CASE WHEN closure_reason = '' THEN 'Closed automatically: resolved ' || ${days} || ' days with no reply' ELSE closure_reason END
+       WHERE status = 'resolved' AND resolved_at < now() - make_interval(days => ${days})
+      RETURNING id, company_id
+    )
+    INSERT INTO helpdesk_history (company_id, ticket_id, user_id, user_name, action, from_value, to_value, note)
+    SELECT company_id, id, NULL, 'System', 'status_changed', 'resolved', 'closed', 'Closed automatically after ' || ${days} || ' days resolved'
+      FROM closed
+    RETURNING ticket_id
+  `)) as unknown as Array<{ ticket_id: string }>;
+  return { closed: rows.length };
+}

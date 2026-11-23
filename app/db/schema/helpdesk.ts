@@ -27,6 +27,10 @@ import {
   index,
   uniqueIndex,
   check,
+  smallint,
+  numeric,
+  integer,
+  primaryKey,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { companies } from "./companies";
@@ -59,6 +63,9 @@ export const helpdeskCategories = pgTable(
     requiresEvidence: boolean("requires_evidence").notNull().default(false),
     isComplaint: boolean("is_complaint").notNull().default(false),
     isActive: boolean("is_active").notNull().default(true),
+    /** Where a new ticket in this category lands when nobody is named. */
+    defaultAssigneeId: text("default_assignee_id").references(() => users.id, { onDelete: "set null" }),
+    defaultAssigneeName: text("default_assignee_name").notNull().default(""),
     ...audit,
   },
   (t) => [
@@ -109,6 +116,15 @@ export const helpdeskTickets = pgTable(
     isEscalated: boolean("is_escalated").notNull().default(false),
     escalationLevel: text("escalation_level"),
     closureReason: text("closure_reason").notNull().default(""),
+    /** incident | service_request | question | problem | complaint */
+    ticketType: text("ticket_type").notNull().default("incident"),
+    /** Set while the ticket waits on the customer; the SLA clock is stopped. */
+    slaPausedAt: timestamp("sla_paused_at", { withTimezone: true }),
+    mergedIntoId: uuid("merged_into_id"),
+    satisfactionRating: smallint("satisfaction_rating"),
+    satisfactionComment: text("satisfaction_comment").notNull().default(""),
+    ratedAt: timestamp("rated_at", { withTimezone: true }),
+    solutionArticleId: uuid("solution_article_id"),
     ...audit,
   },
   (t) => [
@@ -168,3 +184,43 @@ export const helpdeskHistory = pgTable(
   },
   (t) => [index("helpdesk_history_ticket_idx").on(t.ticketId, t.occurredAt)],
 );
+
+// ── Service-desk essentials (20261123) ───────────────────────────────────────
+export const helpdeskSlaPolicies = pgTable(
+  "helpdesk_sla_policies",
+  {
+    companyId: uuid("company_id").notNull().references(() => companies.id, { onDelete: "cascade" }),
+    priority: text("priority").notNull(),
+    responseHours: numeric("response_hours", { precision: 6, scale: 2 }).notNull(),
+    resolutionHours: numeric("resolution_hours", { precision: 6, scale: 2 }).notNull(),
+    updatedByName: text("updated_by_name").notNull().default("System"),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.companyId, t.priority] })],
+);
+
+export const helpdeskCannedResponses = pgTable("helpdesk_canned_responses", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id").notNull().references(() => companies.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  body: text("body").notNull(),
+  createdById: text("created_by_id").references(() => users.id, { onDelete: "set null" }),
+  createdByName: text("created_by_name").notNull().default("System"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const helpdeskArticles = pgTable("helpdesk_articles", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id").notNull().references(() => companies.id, { onDelete: "cascade" }),
+  articleNumber: text("article_number").notNull(),
+  title: text("title").notNull(),
+  body: text("body").notNull(),
+  categoryId: uuid("category_id").references(() => helpdeskCategories.id, { onDelete: "set null" }),
+  status: text("status").notNull().default("published"),
+  views: integer("views").notNull().default(0),
+  helpful: integer("helpful").notNull().default(0),
+  createdById: text("created_by_id").references(() => users.id, { onDelete: "set null" }),
+  createdByName: text("created_by_name").notNull().default("System"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});

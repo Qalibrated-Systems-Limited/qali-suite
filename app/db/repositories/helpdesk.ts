@@ -1,8 +1,11 @@
-import { asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, or, sql } from "drizzle-orm";
 import type { Tx } from "../client";
 import {
   helpdeskCategories,
   helpdeskComments,
+  helpdeskSlaPolicies,
+  helpdeskCannedResponses,
+  helpdeskArticles,
   helpdeskHistory,
   helpdeskTickets,
 } from "../schema";
@@ -25,12 +28,54 @@ const SLA_HOURS: Record<string, { resp: number; res: number }> = {
   low: { resp: 8, res: 72 },
 };
 
-function slaDeadlines(priority: string, from = new Date()) {
-  const m = SLA_HOURS[priority] ?? SLA_HOURS.medium;
+/** The company's SLA policy for a priority, or the matrix above if it set none. */
+export async function slaHoursFor(tx: Tx, priority: string) {
+  const [row] = await tx
+    .select()
+    .from(helpdeskSlaPolicies)
+    .where(eq(helpdeskSlaPolicies.priority, priority));
+  if (row) return { resp: Number(row.responseHours), res: Number(row.resolutionHours) };
+  return SLA_HOURS[priority] ?? SLA_HOURS.medium;
+}
+
+async function slaDeadlines(tx: Tx, priority: string, from = new Date()) {
+  const m = await slaHoursFor(tx, priority);
   return {
     responseDueAt: new Date(from.getTime() + m.resp * 3600_000),
     resolutionDueAt: new Date(from.getTime() + m.res * 3600_000),
   };
+}
+
+/** Every priority's policy, the company's own or the default, for Settings. */
+export async function listSlaPolicies(tx: Tx) {
+  const rows = await tx.select().from(helpdeskSlaPolicies);
+  return ["critical", "high", "medium", "low"].map((priority) => {
+    const r = rows.find((x) => x.priority === priority);
+    const d = SLA_HOURS[priority];
+    return {
+      priority,
+      responseHours: r ? Number(r.responseHours) : d.resp,
+      resolutionHours: r ? Number(r.resolutionHours) : d.res,
+      custom: Boolean(r),
+    };
+  });
+}
+
+export async function setSlaPolicy(
+  tx: Tx,
+  companyId: string,
+  priority: string,
+  responseHours: number,
+  resolutionHours: number,
+  byName: string,
+) {
+  await tx
+    .insert(helpdeskSlaPolicies)
+    .values({ companyId, priority, responseHours: String(responseHours), resolutionHours: String(resolutionHours), updatedByName: byName })
+    .onConflictDoUpdate({
+      target: [helpdeskSlaPolicies.companyId, helpdeskSlaPolicies.priority],
+      set: { responseHours: String(responseHours), resolutionHours: String(resolutionHours), updatedByName: byName, updatedAt: new Date() },
+    });
 }
 
 async function nextNumber(tx: Tx, companyId: string, prefix: string) {
@@ -172,6 +217,7 @@ export interface CreateTicketInput {
   assigneeName?: string | null;
   projectId?: string | null;
   dueDate?: string | null;
+  ticketType?: string;
   createdById?: string | null;
   createdByName: string;
 }
@@ -194,7 +240,7 @@ export async function createTicket(tx: Tx, input: CreateTicketInput) {
   }
 
   const assigned = !!input.assignedToUserId;
-  const { responseDueAt, resolutionDueAt } = slaDeadlines(priority);
+  const { responseDueAt, resolutionDueAt } = await slaDeadlines(tx, priority);
 
   const [row] = await tx
     .insert(helpdeskTickets)
@@ -216,6 +262,7 @@ export async function createTicket(tx: Tx, input: CreateTicketInput) {
       assigneeName: input.assigneeName?.trim() ?? "",
       projectId: input.projectId && isUuid(input.projectId) ? input.projectId : null,
       dueDate: input.dueDate || null,
+      ticketType: input.ticketType || "incident",
       responseDueAt,
       resolutionDueAt,
       createdById: input.createdById ?? null,
@@ -256,6 +303,19 @@ export async function setTicketStatus(
   if (extra.rootCause !== undefined) patch.rootCause = extra.rootCause.trim();
   if (extra.closureReason !== undefined) patch.closureReason = extra.closureReason.trim();
 
+  // "Pending" means waiting on the customer: the SLA clock stops, and when
+  // the ticket moves on its deadlines move by the time it waited.
+  if (status === "pending" && existing.status !== "pending" && !existing.slaPausedAt) {
+    patch.slaPausedAt = now;
+  }
+  if (status !== "pending" && existing.slaPausedAt) {
+    const waited = now.getTime() - new Date(existing.slaPausedAt).getTime();
+    patch.slaPausedAt = null;
+    if (existing.resolutionDueAt) patch.resolutionDueAt = new Date(new Date(existing.resolutionDueAt).getTime() + waited);
+    if (existing.responseDueAt && !existing.firstResponseAt) {
+      patch.responseDueAt = new Date(new Date(existing.responseDueAt).getTime() + waited);
+    }
+  }
   if (status === "resolved" && !existing.resolvedAt) patch.resolvedAt = now;
   if (status === "closed") {
     patch.closedAt = now;
@@ -459,4 +519,190 @@ export async function listTicketsForTechnical(tx: Tx, technicalUserIds: string[]
     assignedToUserId: string | null; assigneeName: string | null;
     resolutionDueAt: Date | null; createdAt: Date; breached: boolean;
   }>;
+}
+
+
+// ── Merge, rating ────────────────────────────────────────────────────────────
+
+/**
+ * A duplicate is closed INTO the ticket that carries the work: it points at
+ * it, says so on both threads, and its conversation stays readable.
+ */
+export async function mergeTicket(
+  tx: Tx,
+  duplicateId: string,
+  intoId: string,
+  actor: { id: string | null; name: string },
+) {
+  if (duplicateId === intoId) throw new Error("A ticket cannot be merged into itself.");
+  const dup = await getTicketById(tx, duplicateId);
+  const into = await getTicketById(tx, intoId);
+  if (!dup || !into) throw new Error("Ticket not found");
+  if (into.mergedIntoId) throw new Error(`${into.ticketNumber} was itself merged; merge into ${into.ticketNumber}'s target instead.`);
+  const now = new Date();
+  const [row] = await tx
+    .update(helpdeskTickets)
+    .set({
+      mergedIntoId: into.id,
+      status: "closed",
+      closedAt: now,
+      resolvedAt: dup.resolvedAt ?? now,
+      closureReason: `Merged into ${into.ticketNumber}`,
+      lastModifiedById: actor.id,
+      lastModifiedByName: actor.name,
+      updatedAt: now,
+    })
+    .where(eq(helpdeskTickets.id, dup.id))
+    .returning();
+  for (const [t, text] of [
+    [dup, `Merged into ${into.ticketNumber}. Follow that ticket for updates.`],
+    [into, `${dup.ticketNumber} (${dup.title}) was merged into this ticket.`],
+  ] as const) {
+    await tx.insert(helpdeskComments).values({
+      companyId: t.companyId,
+      ticketId: t.id,
+      authorId: actor.id,
+      authorName: actor.name,
+      content: text,
+      isInternal: false,
+    });
+  }
+  await logHistory(tx, dup.companyId, dup.id, actor, "merged", { to: into.ticketNumber });
+  return { row, into };
+}
+
+export async function rateTicket(tx: Tx, id: string, rating: number, comment: string) {
+  const t = await getTicketById(tx, id);
+  if (!t) return null;
+  if (!["resolved", "closed"].includes(t.status)) throw new Error("A ticket is rated once it is resolved.");
+  if (!(rating >= 1 && rating <= 5)) throw new Error("Rate it from 1 to 5.");
+  const [row] = await tx
+    .update(helpdeskTickets)
+    .set({ satisfactionRating: Math.round(rating), satisfactionComment: comment.trim(), ratedAt: new Date() })
+    .where(eq(helpdeskTickets.id, id))
+    .returning();
+  return row ?? null;
+}
+
+export async function setTicketType(tx: Tx, id: string, ticketType: string, actor: { id: string | null; name: string }) {
+  const t = await getTicketById(tx, id);
+  if (!t) return null;
+  const [row] = await tx
+    .update(helpdeskTickets)
+    .set({ ticketType, lastModifiedById: actor.id, lastModifiedByName: actor.name, updatedAt: new Date() })
+    .where(eq(helpdeskTickets.id, id))
+    .returning();
+  await logHistory(tx, t.companyId, id, actor, "type_changed", { from: t.ticketType, to: ticketType });
+  return row ?? null;
+}
+
+export async function linkSolutionArticle(tx: Tx, id: string, articleId: string | null) {
+  const [row] = await tx
+    .update(helpdeskTickets)
+    .set({ solutionArticleId: articleId && isUuid(articleId) ? articleId : null, updatedAt: new Date() })
+    .where(eq(helpdeskTickets.id, id))
+    .returning();
+  return row ?? null;
+}
+
+/** The tickets a person raised or holds — for those who are not on the desk. */
+export function listTicketsFor(tx: Tx, userId: string) {
+  return tx
+    .select()
+    .from(helpdeskTickets)
+    .where(or(eq(helpdeskTickets.createdById, userId), eq(helpdeskTickets.assignedToUserId, userId)))
+    .orderBy(desc(helpdeskTickets.createdAt));
+}
+
+// ── Saved replies ────────────────────────────────────────────────────────────
+export function listCannedResponses(tx: Tx) {
+  return tx.select().from(helpdeskCannedResponses).orderBy(asc(helpdeskCannedResponses.title));
+}
+
+export async function createCannedResponse(
+  tx: Tx,
+  input: { companyId: string; title: string; body: string; createdById: string | null; createdByName: string },
+) {
+  const [row] = await tx
+    .insert(helpdeskCannedResponses)
+    .values({ ...input, title: input.title.trim(), body: input.body.trim() })
+    .returning();
+  return row;
+}
+
+export async function deleteCannedResponse(tx: Tx, id: string) {
+  if (!isUuid(id)) return;
+  await tx.delete(helpdeskCannedResponses).where(eq(helpdeskCannedResponses.id, id));
+}
+
+// ── Knowledge base ───────────────────────────────────────────────────────────
+export function listArticles(tx: Tx, q = "", includeDrafts = false) {
+  const conds = [] as ReturnType<typeof eq>[];
+  if (!includeDrafts) conds.push(eq(helpdeskArticles.status, "published"));
+  const term = q.trim();
+  const search = term
+    ? or(ilike(helpdeskArticles.title, `%${term}%`), ilike(helpdeskArticles.body, `%${term}%`))
+    : undefined;
+  const where = [...conds, ...(search ? [search] : [])];
+  return tx
+    .select()
+    .from(helpdeskArticles)
+    .where(where.length ? and(...where) : undefined)
+    .orderBy(desc(helpdeskArticles.helpful), desc(helpdeskArticles.views), asc(helpdeskArticles.title))
+    .limit(100);
+}
+
+export async function getArticle(tx: Tx, id: string, countView = false) {
+  if (!isUuid(id)) return null;
+  if (countView) {
+    await tx.update(helpdeskArticles).set({ views: sql`${helpdeskArticles.views} + 1` }).where(eq(helpdeskArticles.id, id));
+  }
+  const [row] = await tx.select().from(helpdeskArticles).where(eq(helpdeskArticles.id, id));
+  return row ?? null;
+}
+
+export async function saveArticle(
+  tx: Tx,
+  input: {
+    id?: string | null;
+    companyId: string;
+    title: string;
+    body: string;
+    categoryId?: string | null;
+    status?: string;
+    actor: { id: string | null; name: string };
+  },
+) {
+  const values = {
+    title: input.title.trim(),
+    body: input.body.trim(),
+    categoryId: input.categoryId && isUuid(input.categoryId) ? input.categoryId : null,
+    status: input.status || "published",
+    updatedAt: new Date(),
+  };
+  if (input.id && isUuid(input.id)) {
+    const [row] = await tx.update(helpdeskArticles).set(values).where(eq(helpdeskArticles.id, input.id)).returning();
+    return row ?? null;
+  }
+  const articleNumber = await nextNumber(tx, input.companyId, "KB");
+  const [row] = await tx
+    .insert(helpdeskArticles)
+    .values({ ...values, companyId: input.companyId, articleNumber, createdById: input.actor.id, createdByName: input.actor.name })
+    .returning();
+  return row;
+}
+
+export async function markArticleHelpful(tx: Tx, id: string) {
+  if (!isUuid(id)) return;
+  await tx.update(helpdeskArticles).set({ helpful: sql`${helpdeskArticles.helpful} + 1` }).where(eq(helpdeskArticles.id, id));
+}
+
+export async function setCategoryDefaultAssignee(tx: Tx, categoryId: string, to: { id: string; name: string } | null) {
+  if (!isUuid(categoryId)) return null;
+  const [row] = await tx
+    .update(helpdeskCategories)
+    .set({ defaultAssigneeId: to?.id ?? null, defaultAssigneeName: to?.name ?? "", updatedAt: new Date() })
+    .where(eq(helpdeskCategories.id, categoryId))
+    .returning();
+  return row ?? null;
 }

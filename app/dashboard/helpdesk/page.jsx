@@ -25,6 +25,10 @@ export default async function HelpdeskPage({ searchParams }) {
         stats={data.stats}
         users={data.users}
         canManage={canManage}
+        desk={data.desk}
+        canned={data.canned}
+        articles={data.articles}
+        sla={data.sla}
         currentUserId={String(session.user.id)}
         openTicketId={typeof sp.ticket === "string" ? sp.ticket : null}
       />
