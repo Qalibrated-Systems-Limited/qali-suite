@@ -137,7 +137,7 @@ async function PayrollRunList({ searchParams }) {
 export default async function PayrollPage({ searchParams }) {
   const session = await auth();
   if (!session?.user) redirect("/login");
-  if (!can(session.user.role, "payroll.prepare")) redirect("/dashboard/hr");
+  if (!can(session.user, "payroll.prepare")) redirect("/dashboard/hr");
 
   const currentYear = new Date().getFullYear();
 
@@ -149,7 +149,7 @@ export default async function PayrollPage({ searchParams }) {
           <p className="hidden sm:block text-sm text-muted-foreground">Monthly payroll runs</p>
         </div>
         <div className="flex items-center gap-2">
-          {can(session.user.role, "payroll.prepare") && (
+          {can(session.user, "payroll.prepare") && (
             <a
               href={`/api/hr/p9a?year=${currentYear}`}
               className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-2 text-sm text-foreground hover:bg-accent transition-colors"

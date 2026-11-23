@@ -23,7 +23,7 @@ function Row({ k, v }) {
 export default async function CasePage({ params }) {
   const session = await auth();
   if (!session?.user) redirect("/login");
-  if (!can(session.user.role, "hr.discipline")) redirect("/dashboard/hr");
+  if (!can(session.user, "hr.discipline")) redirect("/dashboard/hr");
   const { id } = await params;
   const c = await getHrCase(id);
   if (!c) notFound();

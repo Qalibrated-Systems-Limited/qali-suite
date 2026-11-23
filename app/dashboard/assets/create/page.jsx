@@ -116,7 +116,7 @@ export default async function CreateAssetPage({ searchParams }) {
   const session = await auth();
   if (!session?.user) redirect("/login");
   if (
-    !can(session.user.role, "asset.manage") &&
+    !can(session.user, "asset.manage") &&
     session.user.role !== "SuperAdmin"
   ) {
     redirect("/dashboard/assets");

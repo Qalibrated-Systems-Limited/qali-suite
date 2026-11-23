@@ -15,14 +15,14 @@ export const metadata = { title: "KPI Detail" };
 export default async function KpiDetailPage(props) {
   const session = await auth();
   if (!session?.user) redirect("/login");
-  if (!can(session.user.role, "kpi.view")) redirect("/dashboard");
+  if (!can(session.user, "kpi.view")) redirect("/dashboard");
 
   const params = await props.params;
   const kpi = await getKpiWithSnapshotsPg(params.id, { limit: 24 });
   if (!kpi) notFound();
 
-  const canManage = can(session.user.role, "kpi.manage");
-  const canEnter = can(session.user.role, "kpi.enter");
+  const canManage = can(session.user, "kpi.manage");
+  const canEnter = can(session.user, "kpi.enter");
 
   return (
     <div className="space-y-6 p-4 sm:p-6">

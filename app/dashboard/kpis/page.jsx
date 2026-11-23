@@ -52,9 +52,9 @@ async function KpiListLoader({ canManage }) {
 export default async function KpisIndex() {
   const session = await auth();
   if (!session?.user) redirect("/login");
-  if (!can(session.user.role, "kpi.view")) redirect("/dashboard");
+  if (!can(session.user, "kpi.view")) redirect("/dashboard");
 
-  const canManage = can(session.user.role, "kpi.manage");
+  const canManage = can(session.user, "kpi.manage");
 
   return (
     <div className="space-y-6 p-4 sm:p-6">

@@ -12,7 +12,7 @@ export const metadata = { title: "Vacancy | HR" };
 export default async function VacancyPage({ params }) {
   const session = await auth();
   if (!session?.user) redirect("/login");
-  if (!can(session.user.role, "hr.recruit")) redirect("/dashboard/hr");
+  if (!can(session.user, "hr.recruit")) redirect("/dashboard/hr");
   const { id } = await params;
   const v = await getVacancy(id);
   if (!v) notFound();

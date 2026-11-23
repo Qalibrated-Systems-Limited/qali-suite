@@ -1,4 +1,4 @@
-import * as gates from "@/lib/utils/role-gates";
+import { gateKeysFor as sharedGateKeysFor } from "@/lib/permission-keys";
 import { roleAllowed } from "@/lib/permissions";
 import type { Tx } from "./client";
 import {
@@ -24,22 +24,9 @@ import {
  * a plain role check.
  */
 
-const signature = (roles: readonly string[]) =>
-  [...new Set(roles)].sort().join("|");
-
-const GATE_KEYS: Map<string, string[]> = (() => {
-  const map = new Map<string, string[]>();
-  for (const [name, value] of Object.entries(gates)) {
-    if (!Array.isArray(value)) continue;
-    const sig = signature(value as string[]);
-    map.set(sig, [...(map.get(sig) ?? []), name]);
-  }
-  return map;
-})();
-
 /** The permission keys a role array stands for (empty when it is no gate). */
 export function gateKeysFor(allowedRoles: readonly string[]): string[] {
-  return GATE_KEYS.get(signature(allowedRoles)) ?? [];
+  return sharedGateKeysFor(allowedRoles as string[]);
 }
 
 /**

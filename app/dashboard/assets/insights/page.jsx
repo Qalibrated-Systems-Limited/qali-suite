@@ -590,7 +590,7 @@ export default async function FleetInsightsPage({ searchParams }) {
   const session = await auth();
   if (!session?.user) redirect("/login");
   if (
-    !can(session.user.role, "asset.view") &&
+    !can(session.user, "asset.view") &&
     session.user.role !== "SuperAdmin"
   ) {
     redirect("/dashboard");

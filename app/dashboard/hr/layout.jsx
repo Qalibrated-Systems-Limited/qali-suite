@@ -31,7 +31,7 @@ export default async function HRLayout({ children }) {
   return (
     <PlanGate module="hr" feature="Human Resources">
       <div className="flex flex-col">
-        <HRNav role={role} />
+        <HRNav user={{ role, permissionKeys: session.user.permissionKeys ?? null }} />
         <main className="flex-1">{children}</main>
       </div>
     </PlanGate>

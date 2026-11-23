@@ -10,8 +10,8 @@ import { ExitStatusBadge } from "./components/ExitStatusBadge";
 
 export const metadata = { title: "Exits & Final Dues | HR" };
 
-const canSee = (role) =>
-  can(role, "exit.manage") || can(role, "exit.approve") || can(role, "exit.pay");
+const canSee = (user) =>
+  can(user, "exit.manage") || can(user, "exit.approve") || can(user, "exit.pay");
 
 const kes = (n) =>
   `KES ${(n || 0).toLocaleString("en-KE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -136,10 +136,10 @@ async function ExitList({ searchParams }) {
 export default async function ExitsPage({ searchParams }) {
   const session = await auth();
   if (!session?.user) redirect("/login");
-  if (!canSee(session.user.role)) redirect("/dashboard");
+  if (!canSee(session.user)) redirect("/dashboard");
 
   const params = await searchParams;
-  const canManage = can(session.user.role, "exit.manage");
+  const canManage = can(session.user, "exit.manage");
 
   return (
     <div className="space-y-6 p-4 sm:p-6">

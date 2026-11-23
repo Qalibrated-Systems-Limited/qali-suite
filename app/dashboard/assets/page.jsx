@@ -500,7 +500,7 @@ export default async function AssetsPage({ searchParams }) {
     redirect("/dashboard");
   }
 
-  const canAdmin = can(session.user.role, "asset.manage");
+  const canAdmin = can(session.user, "asset.manage");
 
   const params = await searchParams;
   const page = parseInt(params.page || "1", 10);

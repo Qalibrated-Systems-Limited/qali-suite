@@ -48,7 +48,7 @@ export default async function SelectCompanyPage() {
    * were all deactivated. Telling them to "contact your administrator" is
    * telling them to contact themselves.
    */
-  const mayCreate = can(role, "company.create");
+  const mayCreate = can(session?.user, "company.create");
 
   let grants = null;
   try {

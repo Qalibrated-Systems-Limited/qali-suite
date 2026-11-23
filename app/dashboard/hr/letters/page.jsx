@@ -13,7 +13,7 @@ export const metadata = { title: "Letters | HR" };
 export default async function LettersPage({ searchParams }) {
   const session = await auth();
   if (!session?.user) redirect("/login");
-  if (!can(session.user.role, "hr.letters")) redirect("/dashboard/hr");
+  if (!can(session.user, "hr.letters")) redirect("/dashboard/hr");
   const sp = await searchParams;
   const letters = await listHrLetters({ kind: sp?.kind || "", search: sp?.q || "" });
 

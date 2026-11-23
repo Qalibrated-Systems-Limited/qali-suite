@@ -144,7 +144,7 @@ export default async function AdjustmentDetailPage({ params }) {
         {adjustment.status === "draft" && (
           <AdjustmentApprovalActions
             adjustmentId={adjustment._id}
-            canApprove={can(session.user.role, "adjustment.approve")}
+            canApprove={can(session.user, "adjustment.approve")}
           />
         )}
       </div>
@@ -158,7 +158,7 @@ export default async function AdjustmentDetailPage({ params }) {
         <AdjustmentValuationForm
           adjustmentId={adjustment._id}
           lines={adjustment.unvaluedLines ?? []}
-          canValue={can(session.user.role, "product.cost.set")}
+          canValue={can(session.user, "product.cost.set")}
         />
       )}
 

@@ -241,6 +241,57 @@ export async function resolveRoleForCompany(
   return rows.length ? String(rows[0].role) : null;
 }
 
+/**
+ * THE SAVED PERMISSION SET THIS PERSON HOLDS IN THIS COMPANY — for the session.
+ *
+ * Null when the role (and its custom name, if any) was never edited on the
+ * Roles & Permissions page: the code's role lists then apply, unchanged.
+ * Otherwise the keys the role holds — the base role's saved set (or its code
+ * defaults), narrowed by the custom role's own saved set when it has one, so
+ * a custom role never shows more than its base can do.
+ *
+ * Privileged, like the role resolution above: it runs in the auth callbacks,
+ * before any tenant scope exists, so it filters by company explicitly.
+ */
+export async function resolvePermissionKeysForCompany(
+  userId: string,
+  companyId: string | null | undefined,
+): Promise<string[] | null> {
+  if (!userId || !companyId) return null;
+  const rows = (await privilegedDb().execute(sql`
+    WITH raw AS (
+      SELECT COALESCE(a.role, u.role) AS role
+        FROM users u
+        LEFT JOIN user_company_access a
+          ON a.user_id = u.id AND a.status = 'active' AND a.company_id = ${companyId}::uuid
+       WHERE u.id = ${String(userId)}
+    ), resolved AS (
+      SELECT raw.role AS assigned, COALESCE(cr.base_role, raw.role) AS base
+        FROM raw
+        LEFT JOIN custom_roles cr
+          ON cr.company_id = ${companyId}::uuid AND lower(cr.name) = lower(raw.role)
+    )
+    SELECT r.assigned, r.base,
+           (SELECT array_agg(permission_key) FROM role_permissions
+             WHERE company_id = ${companyId}::uuid AND lower(role_name) = lower(r.base)) AS base_keys,
+           (SELECT array_agg(permission_key) FROM role_permissions
+             WHERE company_id = ${companyId}::uuid AND lower(role_name) = lower(r.assigned)
+               AND lower(r.assigned) <> lower(r.base)) AS custom_keys
+      FROM resolved r
+  `)) as unknown as Array<{ assigned: string; base: string; base_keys: string[] | null; custom_keys: string[] | null }>;
+  const row = rows[0];
+  if (!row || (!row.base_keys && !row.custom_keys)) return null;
+
+  const MARKER = "__configured__";
+  const { defaultKeysForRole } = await import("@/lib/permission-catalog");
+  const base = row.base_keys
+    ? row.base_keys.filter((k) => k !== MARKER)
+    : (defaultKeysForRole(row.base) as string[]);
+  if (!row.custom_keys) return base;
+  const custom = new Set(row.custom_keys.filter((k) => k !== MARKER));
+  return base.filter((k) => custom.has(k));
+}
+
 /** The session-freshness check reads this on privileged routes. */
 export async function getTokenVersion(userId: string): Promise<number | null> {
   const rows = (await privilegedDb().execute(sql`

@@ -13,9 +13,9 @@ export const metadata = { title: "Performance reviews | HR" };
 export default async function ReviewsPage({ searchParams }) {
   const session = await auth();
   if (!session?.user) redirect("/login");
-  if (!can(session.user.role, "hr.reviews")) redirect("/dashboard/hr");
+  if (!can(session.user, "hr.reviews")) redirect("/dashboard/hr");
   const sp = await searchParams;
-  const isHr = can(session.user.role, "hr.admin");
+  const isHr = can(session.user, "hr.admin");
   const [reviews, form] = await Promise.all([
     listPerformanceReviews({ status: sp?.status || "" }),
     isHr ? getRecordsFormData() : null,

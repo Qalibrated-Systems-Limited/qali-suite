@@ -28,7 +28,7 @@ export default async function ExitPage({ params }) {
   const session = await auth();
   if (!session?.user) redirect("/login");
   const role = session.user.role;
-  if (!(can(role, "exit.manage") || can(role, "exit.approve") || can(role, "exit.pay"))) {
+  if (!(can(session.user, "exit.manage") || can(session.user, "exit.approve") || can(session.user, "exit.pay"))) {
     redirect("/dashboard");
   }
 

@@ -78,7 +78,7 @@ async function HeadcountByDept() {
   );
 }
 
-function QuickActions({ role }) {
+function QuickActions({ role, user }) {
   const actions = [
     { label: "Add Employee", href: "/dashboard/hr/employees/create", icon: Users },
     { label: "Add Department", href: "/dashboard/hr/departments/create", icon: Building2 },
@@ -92,7 +92,7 @@ function QuickActions({ role }) {
     { label: "Recruitment", href: "/dashboard/hr/recruitment", icon: Briefcase, cap: "hr.recruit" },
     { label: "HR Reports", href: "/dashboard/hr/reports", icon: BarChart3, cap: "hr.reports" },
     { label: "Org Chart", href: "/dashboard/hr/org-chart", icon: Network, cap: "hr.view" },
-  ].filter((a) => !a.cap || can(role, a.cap));
+  ].filter((a) => !a.cap || can(user || role, a.cap));
 
   return (
     <div className="rounded-lg border border-border bg-card p-6 shadow-sm">
@@ -192,7 +192,7 @@ async function ContractExpiryAlerts() {
  * and licences expiring (or expired), open cases, reviews in progress and
  * open vacancies. Each links to where it is dealt with.
  */
-async function RecordAlerts({ role }) {
+async function RecordAlerts({ role, user }) {
   const a = await getHrRecordAlerts().catch(() => null);
   if (!a) return null;
   const items = [
@@ -201,7 +201,7 @@ async function RecordAlerts({ role }) {
     { n: a.open_cases, label: "open disciplinary or grievance cases", href: "/dashboard/hr/cases", cap: "hr.discipline" },
     { n: a.reviews_open, label: "performance reviews in progress", href: "/dashboard/hr/reviews", cap: "hr.reviews" },
     { n: a.open_vacancies, label: "open vacancies", href: "/dashboard/hr/recruitment", cap: "hr.recruit" },
-  ].filter((i) => i.n > 0 && can(role, i.cap));
+  ].filter((i) => i.n > 0 && can(user || role, i.cap));
   if (!items.length && !a.probation.length) return null;
   return (
     <div className="rounded-lg border border-amber-200 bg-amber-500/5 p-4 dark:border-amber-800">
@@ -216,7 +216,7 @@ async function RecordAlerts({ role }) {
           </Link>
         ))}
       </div>
-      {a.probation.length > 0 && can(role, "hr.admin") && (
+      {a.probation.length > 0 && can(user || role, "hr.admin") && (
         <div className="mt-3 space-y-1">
           {a.probation.map((p) => (
             <div key={p.id} className="flex items-center justify-between gap-2 text-sm">
@@ -251,7 +251,7 @@ function StatsCardsSkeleton() {
 export default async function HRPage() {
   const session = await auth();
   if (!session?.user) redirect("/login");
-  if (!can(session.user.role, "hr.write")) redirect("/dashboard");
+  if (!can(session.user, "hr.write")) redirect("/dashboard");
 
   return (
     <div className="space-y-6 p-4 sm:p-6">
@@ -269,7 +269,7 @@ export default async function HRPage() {
       </Suspense>
 
       <Suspense fallback={null}>
-        <RecordAlerts role={session.user.role} />
+        <RecordAlerts role={session.user.role} user={session.user} />
       </Suspense>
 
       <div className="grid gap-6 lg:grid-cols-3">
@@ -279,7 +279,7 @@ export default async function HRPage() {
         <Suspense fallback={<div className="h-48 animate-pulse rounded-lg bg-muted" />}>
           <TodayAttendanceWidget />
         </Suspense>
-        <QuickActions role={session.user.role} />
+        <QuickActions role={session.user.role} user={session.user} />
       </div>
     </div>
   );

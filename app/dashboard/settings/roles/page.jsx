@@ -30,7 +30,7 @@ export const metadata = {
 export default async function RolesPermissionsPage() {
   const session = await auth();
   if (!session?.user) redirect("/login");
-  if (!can(session.user.role, "system.settings")) redirect("/dashboard");
+  if (!can(session.user, "system.settings")) redirect("/dashboard");
 
   const roles = roleSummary();
   const totalPermissions = PERMISSION_GROUPS.length + NAV_PERMISSIONS.length;
@@ -39,6 +39,11 @@ export default async function RolesPermissionsPage() {
     getCustomRoles(),
     getRolePermissionMatrix(),
   ]);
+
+  // A name this company has created as a custom role is assignable, so it is
+  // not dormant here (it acts with its base role's permissions).
+  const customNames = new Set((customRoles || []).map((r) => String(r.name).toLowerCase()));
+  const dormant = NON_CANONICAL_ROLES.filter((r) => !customNames.has(r.role.toLowerCase()));
 
   return (
     <div className="max-w-5xl space-y-6 sm:p-2 lg:p-4">
@@ -64,14 +69,14 @@ export default async function RolesPermissionsPage() {
       </div>
 
       {/* Audit finding: roles referenced but not assignable */}
-      {NON_CANONICAL_ROLES.length > 0 && (
+      {dormant.length > 0 && (
         <Card className="border-amber-500/40 bg-amber-500/5 p-4">
           <div className="flex items-start gap-3">
             <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
             <div className="space-y-1.5 text-sm">
               <p className="font-semibold text-amber-700 dark:text-amber-400">
-                {NON_CANONICAL_ROLES.length} role
-                {NON_CANONICAL_ROLES.length === 1 ? "" : "s"} referenced by a
+                {dormant.length} role
+                {dormant.length === 1 ? "" : "s"} referenced by a
                 permission but not assignable to a user
               </p>
               <p className="text-muted-foreground">
@@ -80,7 +85,7 @@ export default async function RolesPermissionsPage() {
                 dormant. Add the role, or map the gate to an existing one.
               </p>
               <ul className="mt-1 space-y-1">
-                {NON_CANONICAL_ROLES.map((r) => (
+                {dormant.map((r) => (
                   <li key={r.role}>
                     <span className="font-medium">{r.role}</span>
                     <span className="text-muted-foreground">
@@ -101,13 +106,23 @@ export default async function RolesPermissionsPage() {
           <Users className="h-4 w-4" /> Roles
         </h2>
         <div className="grid gap-3 sm:grid-cols-2">
-          {roles.map((role) => (
+          {roles.map((role) => {
+            // What the role holds NOW in this company — its saved set once
+            // edited, otherwise the code defaults — not the defaults alone.
+            const live = matrix.roles.find((r) => r.name === role.value);
+            const count = live ? live.keys.length : role.count;
+            return (
             <Card key={role.value} className="p-3 sm:p-4">
               <div className="flex items-center justify-between gap-2">
                 <h3 className="font-medium">{role.value}</h3>
-                <Badge variant="secondary" className="shrink-0">
-                  {role.count}/{role.total}
-                </Badge>
+                <span className="flex shrink-0 items-center gap-1.5">
+                  <Badge variant="outline" className="text-[10px]">
+                    {live?.explicit ? "edited" : "defaults"}
+                  </Badge>
+                  <Badge variant="secondary">
+                    {count}/{role.total}
+                  </Badge>
+                </span>
               </div>
               {role.description && (
                 <p className="mt-1 text-xs text-muted-foreground sm:text-sm">
@@ -115,7 +130,8 @@ export default async function RolesPermissionsPage() {
                 </p>
               )}
             </Card>
-          ))}
+            );
+          })}
         </div>
       </section>
 

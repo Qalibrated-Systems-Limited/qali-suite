@@ -20,7 +20,7 @@ async function LoanFormLoader() {
 export default async function CreateLoanPage() {
   const session = await auth();
   if (!session?.user) redirect("/login");
-  if (!can(session.user.role, "loan.request")) redirect("/dashboard/hr/loans");
+  if (!can(session.user, "loan.request")) redirect("/dashboard/hr/loans");
 
   return (
     <div className="max-w-2xl space-y-6 p-4 sm:p-6">

@@ -37,7 +37,7 @@ function Table({ cols, rows, empty = "Nothing to show." }) {
 export default async function HrReportsPage({ searchParams }) {
   const session = await auth();
   if (!session?.user) redirect("/login");
-  if (!can(session.user.role, "hr.reports")) redirect("/dashboard/hr");
+  if (!can(session.user, "hr.reports")) redirect("/dashboard/hr");
   const sp = await searchParams;
   const thisYear = new Date().getFullYear();
   const year = Number(sp?.year) || thisYear;

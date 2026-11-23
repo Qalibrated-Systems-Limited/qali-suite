@@ -27,7 +27,7 @@ export default async function SettingsPage({ searchParams }) {
   if (!session?.user) redirect("/login");
 
   const { role, companyPlan } = session.user;
-  if (!can(role, "system.settings")) redirect("/dashboard");
+  if (!can(session.user, "system.settings")) redirect("/dashboard");
 
   const isPlatform = role === "SuperAdmin";
   // The platform operator's plan is a home-tenant hint, not a licence (see
@@ -59,7 +59,7 @@ export default async function SettingsPage({ searchParams }) {
           title="Company Profile"
           description="Company details, logo, bank details and contact information"
         />
-        {can(role, "company.create") && (
+        {can(session.user, "company.create") && (
           <SettingsCard
             href="/dashboard/admin/companies"
             icon={Briefcase}
@@ -72,7 +72,7 @@ export default async function SettingsPage({ searchParams }) {
       </SettingsSection>
 
       <SettingsSection title="Security & Access">
-        {can(role, "admin.manage") && (
+        {can(session.user, "admin.manage") && (
           <SettingsCard
             href="/dashboard/users"
             icon={UserCog}
@@ -98,7 +98,7 @@ export default async function SettingsPage({ searchParams }) {
           title="Approval Thresholds"
           description="When stock adjustments, prices, and payments require approval"
         />
-        {can(role, "licensing.manage") && (
+        {can(session.user, "licensing.manage") && (
           <SettingsCard
             href="/dashboard/licensing"
             icon={KeySquare}
@@ -108,7 +108,7 @@ export default async function SettingsPage({ searchParams }) {
             description="The company's licence and the modules it includes"
           />
         )}
-        {can(role, "integration.manage") && licensed("integration") && (
+        {can(session.user, "integration.manage") && licensed("integration") && (
           <SettingsCard
             href="/dashboard/integrations"
             icon={Plug}

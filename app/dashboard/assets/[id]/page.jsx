@@ -514,7 +514,7 @@ export default async function AssetDetailPage({ params }) {
   const session = await auth();
   if (!session?.user) redirect("/login");
   if (
-    !can(session.user.role, "asset.view")
+    !can(session.user, "asset.view")
   ) {
     redirect("/dashboard");
   }
@@ -531,11 +531,11 @@ export default async function AssetDetailPage({ params }) {
   const costs = costsResult.success ? costsResult : null;
 
   const canDispose =
-can(session.user.role, "asset.admin");
+can(session.user, "asset.admin");
   const canPostDep =
-can(session.user.role, "asset.depreciate");
-  const canTransfer = can(session.user.role, "asset.transfer_local");
-  const canImpair = can(session.user.role, "asset.impair");
+can(session.user, "asset.depreciate");
+  const canTransfer = can(session.user, "asset.transfer_local");
+  const canImpair = can(session.user, "asset.impair");
 
   let accounts = [];
   if (

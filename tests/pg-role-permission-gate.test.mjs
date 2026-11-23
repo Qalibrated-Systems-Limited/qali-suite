@@ -21,6 +21,7 @@ vi.mock("server-only", () => ({}));
 const { permittedBySavedRoles, gateKeysFor } = await import("@/app/db/permissionGate");
 const permRepo = await import("@/app/db/repositories/rolePermissions");
 const gates = await import("@/lib/utils/role-gates");
+const userAdmin = await import("@/app/db/userAdmin");
 
 const FINANCE_WRITE = [...gates.FINANCE_WRITE_ROLES];
 const HR_GATE = [...gates.HR_WRITE_ROLES];
@@ -106,4 +107,21 @@ suite("saved role permissions are enforced", () => {
     await inCo(companyA, (tx) => permRepo.setRoleKeys(tx, companyA, "SuperAdmin", []));
     expect(await check(companyA, "acct", "SuperAdmin", FINANCE_WRITE)).toBe(true);
   });
+
+  it("the session's permission set: null until edited, then the saved keys", async () => {
+    expect(await userAdmin.resolvePermissionKeysForCompany(people.acct, companyA)).toBeNull();
+    await inCo(companyA, (tx) => permRepo.setRoleKeys(tx, companyA, "Accountant", ["HR_ADMIN_ROLES", "See HR"]));
+    const keys = await userAdmin.resolvePermissionKeysForCompany(people.acct, companyA);
+    expect(keys?.sort()).toEqual(["HR_ADMIN_ROLES", "See HR"]);
+  });
+
+  it("a custom role's session set is its own, narrowed to what its base holds", async () => {
+    await admin`INSERT INTO custom_roles (company_id, name, base_role) VALUES (${companyA}, 'Quality Lead', 'Manager')`;
+    await inCo(companyA, (tx) => permRepo.setRoleKeys(tx, companyA, "Quality Lead", ["FINANCE_WRITE_ROLES", "See Projects"]));
+    const keys = await userAdmin.resolvePermissionKeysForCompany(people.qm, companyA);
+    // Manager's defaults include "See Projects" but not FINANCE_WRITE_ROLES.
+    expect(keys).toContain("See Projects");
+    expect(keys).not.toContain("FINANCE_WRITE_ROLES");
+  });
 });
+

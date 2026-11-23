@@ -5,6 +5,7 @@ import { z } from "zod";
 import { withAuthorizedTenant } from "../tenant";
 import {
   INVENTORY_WRITE_ROLES,
+  STOCK_REQUEST_CREATE_ROLES,
   STOCK_REQUEST_APPROVE_ROLES,
 } from "@/lib/utils/role-gates";
 import * as fulfilment from "../repositories/fulfilment";
@@ -148,7 +149,7 @@ export async function createStockRequest(
 
   try {
     const request = await withAuthorizedTenant(
-      [...INVENTORY_WRITE_ROLES],
+      [...STOCK_REQUEST_CREATE_ROLES],
       async (tx, { user, companyId }) =>
         fulfilment.createStockRequest(tx, {
           companyId,
@@ -298,7 +299,7 @@ export async function cancelStockRequest(
 
   try {
     const request = await withAuthorizedTenant(
-      [...INVENTORY_WRITE_ROLES],
+      [...STOCK_REQUEST_CREATE_ROLES],
       (tx, { user }) =>
         fulfilment.cancelStockRequest(tx, requestId, user.id, reason),
     );
@@ -453,7 +454,7 @@ export async function getRequestById(requestId: string) {
  * and drafts already hold — so the form cannot offer stock that is spoken for.
  */
 export async function getRequestFormData() {
-  return withAuthorizedTenant([...INVENTORY_WRITE_ROLES], async (tx) => {
+  return withAuthorizedTenant([...STOCK_REQUEST_CREATE_ROLES], async (tx) => {
     const [customers, products] = await Promise.all([
       partiesRepo.listParties(tx, { role: "customer", limit: 200 }),
       productsRepo.listProducts(tx, { limit: 200 }),

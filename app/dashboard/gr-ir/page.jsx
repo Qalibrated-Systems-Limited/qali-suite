@@ -470,7 +470,7 @@ export default async function GrIrPage({ searchParams }) {
   const params = (await searchParams) ?? {};
   const session = await auth();
   if (!session?.user) redirect("/login");
-  if (!can(session.user.role, "grir.view")) redirect("/dashboard");
+  if (!can(session.user, "grir.view")) redirect("/dashboard");
 
   const view = VIEWS.some((v) => v.value === params.view)
     ? params.view

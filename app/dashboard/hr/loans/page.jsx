@@ -244,10 +244,10 @@ async function LoanList({ searchParams, canAdmin }) {
 export default async function LoansPage({ searchParams }) {
   const session = await auth();
   if (!session?.user) redirect("/login");
-  if (!can(session.user.role, "loan.request")) redirect("/dashboard");
+  if (!can(session.user, "loan.request")) redirect("/dashboard");
 
   const params = await searchParams;
-  const canAdmin = can(session.user.role, "loan.request");
+  const canAdmin = can(session.user, "loan.request");
 
   return (
     <div className="space-y-6 p-4 sm:p-6">

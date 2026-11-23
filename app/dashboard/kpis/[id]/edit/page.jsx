@@ -14,7 +14,7 @@ export const metadata = { title: "Edit KPI" };
 export default async function EditKpiPage(props) {
   const session = await auth();
   if (!session?.user) redirect("/login");
-  if (!can(session.user.role, "kpi.manage")) redirect("/dashboard/kpis");
+  if (!can(session.user, "kpi.manage")) redirect("/dashboard/kpis");
 
   const params = await props.params;
   const [kpi, ownerCandidates] = await Promise.all([

@@ -17,7 +17,7 @@ async function FormLoader({ employeeId }) {
 export default async function CreateExitPage({ searchParams }) {
   const session = await auth();
   if (!session?.user) redirect("/login");
-  if (!can(session.user.role, "exit.manage")) redirect("/dashboard/hr/exits");
+  if (!can(session.user, "exit.manage")) redirect("/dashboard/hr/exits");
   const { employeeId = "" } = await searchParams;
 
   return (

@@ -58,7 +58,7 @@ async function ConfigLoader({ canEdit, canMapGl }) {
 export default async function PayrollConfigPage() {
   const session = await auth();
   if (!session?.user) redirect("/login");
-  if (!can(session.user.role, "payroll.rates.write")) {
+  if (!can(session.user, "payroll.rates.write")) {
     redirect("/dashboard/hr");
   }
 
@@ -70,7 +70,7 @@ export default async function PayrollConfigPage() {
   // hidden rather than disabled-on-submit: `savePayrollGlMapping` refuses
   // anyone outside this list, so offering HR the form would be the original
   // bug wearing the other coat.
-  const canMapGl = can(session.user.role, "payroll.gl.write");
+  const canMapGl = can(session.user, "payroll.gl.write");
 
   return (
     <div className="space-y-6 p-4 sm:p-6 lg:p-8 max-w-4xl">

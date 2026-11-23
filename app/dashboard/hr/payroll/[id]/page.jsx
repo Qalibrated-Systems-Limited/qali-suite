@@ -50,7 +50,7 @@ export default async function PayrollRunDetailPage({ params }) {
   const { id } = await params;
   const session = await auth();
   if (!session?.user) redirect("/login");
-  if (!can(session.user.role, "payroll.prepare")) redirect("/dashboard/hr");
+  if (!can(session.user, "payroll.prepare")) redirect("/dashboard/hr");
 
   const data = await getPayrollRunForPage(id);
   if (!data) notFound();

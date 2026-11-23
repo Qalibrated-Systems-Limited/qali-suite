@@ -15,7 +15,7 @@ const tone = (s) => (s === "open" ? "green" : s === "filled" ? "blue" : s === "o
 export default async function RecruitmentPage() {
   const session = await auth();
   if (!session?.user) redirect("/login");
-  if (!can(session.user.role, "hr.recruit")) redirect("/dashboard/hr");
+  if (!can(session.user, "hr.recruit")) redirect("/dashboard/hr");
   const [vacancies, { departments }] = await Promise.all([listVacancies(), getEmployeeFormData()]);
   return (
     <div className="space-y-4 p-4 sm:p-6">

@@ -84,19 +84,9 @@ import { useCommandPalette } from "./command-palette-provider";
 // PLAN GATING HELPER
 // ============================================
 import { getAllowedModules } from "@/lib/plans";
-import {
-  canSeeInventoryNav,
-  canSeeSalesNav,
-  canSeePurchasesNav,
-  canSeeFinanceNav,
-  canSeeTaxNav,
-  canSeeReportsNav,
-  canSeeProjectsNav,
-  canSeeHRNav,
-  canSeeSettingsNav,
-  canReviewClaims,
-  canSeeApprovalsNav,
-} from "@/lib/permissions";
+import * as navRules from "@/lib/permissions";
+import { holdsNavKey } from "@/lib/permission-keys";
+import { hrNavFor } from "@/lib/nav/hr-nav";
 // `can` rather than another canSeeXNav helper: GR/IR is read by procurement
 // AND finance, which is a capability and not a menu group.
 import { can } from "@/lib/capabilities";
@@ -125,6 +115,28 @@ export { DEPARTMENTS, departmentOf };
 // NAV GROUP CONFIGURATION - ERP FOCUSED
 // ============================================
 export const getNavigationGroups = (user) => {
+  /**
+   * The menu obeys the company's saved Roles & Permissions. Each "See …" rule
+   * is the catalog permission of the same name: when the role was edited, the
+   * saved set answers; otherwise the rule in lib/permissions.js does, as before.
+   * `can(user, …)` below does the same for every capability.
+   */
+  const navRule = (label, rule) => (role) => {
+    const saved = holdsNavKey(user, label);
+    return saved !== null ? saved : rule(role);
+  };
+  const canSeeInventoryNav = navRule("See Inventory", navRules.canSeeInventoryNav);
+  const canSeeSalesNav = navRule("See Sales", navRules.canSeeSalesNav);
+  const canSeePurchasesNav = navRule("See Purchases", navRules.canSeePurchasesNav);
+  const canSeeFinanceNav = navRule("See Finance", navRules.canSeeFinanceNav);
+  const canSeeTaxNav = navRule("See Tax", navRules.canSeeTaxNav);
+  const canSeeReportsNav = navRule("See Reports", navRules.canSeeReportsNav);
+  const canSeeProjectsNav = navRule("See Projects", navRules.canSeeProjectsNav);
+  const canSeeHRNav = navRule("See HR", navRules.canSeeHRNav);
+  const canSeeSettingsNav = navRule("See Settings", navRules.canSeeSettingsNav);
+  const canReviewClaims = navRule("Review claims", navRules.canReviewClaims);
+  const canSeeApprovalsNav = navRule("See Approvals", navRules.canSeeApprovalsNav);
+
   const plan = user?.companyPlan || "free";
   const allowed = new Set(getAllowedModules(plan));
   const hasMod = (id) => user?.role === "SuperAdmin" || allowed.has(id);
@@ -395,7 +407,7 @@ export const getNavigationGroups = (user) => {
         label: "GR/IR Reconciliation",
         id: "gr-ir",
         href: "/dashboard/gr-ir",
-        hidden: !can(user?.role, "grir.view"),
+        hidden: !can(user, "grir.view"),
       },
       {
         icon: Users,
@@ -627,7 +639,7 @@ export const getNavigationGroups = (user) => {
         label: "Finance Settings",
         id: "finance-settings",
         href: "/dashboard/accounts/settings",
-        hidden: !can(user?.role, "finance.write"),
+        hidden: !can(user, "finance.write"),
       },
     ],
   },
@@ -864,95 +876,21 @@ export const getNavigationGroups = (user) => {
     id: "hr",
     defaultOpen: user?.role === "HR Manager",
     hidden: !hasMod("hr"),
-    items: [
-      {
-        icon: LayoutDashboard,
-        label: "HR Overview",
-        id: "hr-overview",
-        href: "/dashboard/hr",
-        hidden: !canSeeHRNav(user?.role),
-      },
-      {
-        icon: Users,
-        label: "Employees",
-        id: "hr-employees",
-        href: "/dashboard/hr/employees",
-        hidden: !canSeeHRNav(user?.role),
-      },
-      {
-        icon: Building2,
-        label: "Departments",
-        id: "hr-departments",
-        href: "/dashboard/hr/departments",
-        hidden: !canSeeHRNav(user?.role),
-      },
-      {
-        icon: Calendar,
-        label: "Leave",
-        id: "hr-leave",
-        href: ["Admin", "HR Manager", "Manager"].includes(user?.role) ? "/dashboard/hr/leave" : "/dashboard/hr/my-leave",
-        hidden: user?.role === "SuperAdmin",
-      },
-      {
-        icon: Calendar,
-        label: "Leave Types",
-        id: "hr-leave-types",
-        href: "/dashboard/hr/leave-types",
-        // Config screen — only Admin / HR (matches the action gate).
-        hidden: !["Admin", "HR Manager"].includes(user?.role),
-      },
-      {
-        icon: Clock,
-        label: "Attendance",
-        id: "hr-attendance",
-        href: ["Admin", "HR Manager", "Manager"].includes(user?.role) ? "/dashboard/hr/attendance" : "/dashboard/hr/my-attendance",
-        hidden: user?.role === "SuperAdmin",
-      },
-      {
-        icon: DollarSign,
-        label: ["Admin", "HR Manager"].includes(user?.role) ? "Payroll" : "My Payslips",
-        id: "hr-payroll",
-        href: ["Admin", "HR Manager"].includes(user?.role) ? "/dashboard/hr/payroll" : "/dashboard/hr/my-payslips",
-        hidden: user?.role === "SuperAdmin",
-      },
-      {
-        icon: Wallet,
-        label: ["Admin", "HR Manager", "Manager"].includes(user?.role) ? "Loans & Advances" : "My Loans",
-        id: "hr-loans",
-        href: "/dashboard/hr/loans",
-        hidden: user?.role === "SuperAdmin",
-      },
-      {
-        icon: LogOut,
-        label: "Exits & Final Dues",
-        id: "hr-exits",
-        href: "/dashboard/hr/exits",
-        hidden:
-          user?.role === "SuperAdmin" ||
-          !(can(user?.role, "exit.manage") || can(user?.role, "exit.approve") || can(user?.role, "exit.pay")),
-      },
-      { icon: FileText, label: "Letters", id: "hr-letters", href: "/dashboard/hr/letters", hidden: !can(user?.role, "hr.letters") },
-      { icon: Gavel, label: "Disciplinary & Grievances", id: "hr-cases", href: "/dashboard/hr/cases", hidden: !can(user?.role, "hr.discipline") },
-      { icon: Award, label: "Training & Certificates", id: "hr-training", href: "/dashboard/hr/training", hidden: !can(user?.role, "hr.training") },
-      { icon: Target, label: "Performance Reviews", id: "hr-reviews", href: "/dashboard/hr/reviews", hidden: !can(user?.role, "hr.reviews") },
-      { icon: Briefcase, label: "Recruitment", id: "hr-recruitment", href: "/dashboard/hr/recruitment", hidden: !can(user?.role, "hr.recruit") },
-      { icon: TrendingUp, label: "HR Reports", id: "hr-reports", href: "/dashboard/hr/reports", hidden: !can(user?.role, "hr.reports") },
-      { icon: Users, label: "Org Chart", id: "hr-org-chart", href: "/dashboard/hr/org-chart", hidden: !can(user?.role, "hr.view") },
-      {
-        icon: Settings,
-        label: "HR Settings",
-        id: "hr-settings",
-        href: "/dashboard/hr/settings",
-        hidden: !can(user?.role, "hr.admin") && !can(user?.role, "payroll.rates.write"),
-      },
-      {
-        icon: Users,
-        label: "User Accounts",
-        id: "hr-users",
-        href: "/dashboard/users",
-        hidden: user?.role !== "HR Manager",
-      },
-    ],
+    // One list for the sidebar and the HR top bar (lib/nav/hr-nav.js), so the
+    // two can never disagree again. Each section is a sub-group here and a tab
+    // there.
+    items: hrNavFor(user, (cap) => can(user, cap)).map((section) => ({
+      type: "group",
+      id: `hr-${section.id}`,
+      label: section.label,
+      icon: section.icon,
+      items: section.items.map((item) => ({
+        icon: item.icon,
+        label: item.label,
+        id: item.id,
+        href: item.href,
+      })),
+    })),
   },
 
   // ============================================
@@ -977,42 +915,42 @@ export const getNavigationGroups = (user) => {
         label: "System Settings",
         id: "settings",
         href: "/dashboard/settings",
-        hidden: !can(user?.role, "system.settings"),
+        hidden: !can(user, "system.settings"),
       },
       {
         icon: Users,
         label: "Users & Access",
         id: "users",
         href: "/dashboard/users",
-        hidden: !can(user?.role, "admin.manage"),
+        hidden: !can(user, "admin.manage"),
       },
       {
         icon: ShieldCheck,
         label: "Roles & Permissions",
         id: "roles",
         href: "/dashboard/settings/roles",
-        hidden: !can(user?.role, "system.settings"),
+        hidden: !can(user, "system.settings"),
       },
       {
         icon: Building2,
         label: "Company Profile",
         id: "company",
         href: "/dashboard/company",
-        hidden: !can(user?.role, "admin.manage"),
+        hidden: !can(user, "admin.manage"),
       },
       {
         icon: Building2,
         label: "Companies",
         id: "companies",
         href: "/dashboard/admin/companies",
-        hidden: !can(user?.role, "company.create"),
+        hidden: !can(user, "company.create"),
       },
       {
         icon: KeyRound,
         label: "Licensing",
         id: "licensing",
         href: "/dashboard/licensing",
-        hidden: !can(user?.role, "licensing.manage"),
+        hidden: !can(user, "licensing.manage"),
       },
     ],
   },
@@ -1558,7 +1496,7 @@ export const SidebarContentGrouped = ({ onItemClick, user, collapsed }) => {
                 </Link>
               </DropdownMenuItem>
 
-              {can(user?.role, "system.settings") && (
+              {can(user, "system.settings") && (
                 <DropdownMenuItem
                   asChild
                   className="cursor-pointer focus:bg-accent focus:text-accent-foreground"

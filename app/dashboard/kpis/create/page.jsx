@@ -14,7 +14,7 @@ export const metadata = { title: "New KPI" };
 export default async function CreateKpiPage() {
   const session = await auth();
   if (!session?.user) redirect("/login");
-  if (!can(session.user.role, "kpi.manage")) redirect("/dashboard/kpis");
+  if (!can(session.user, "kpi.manage")) redirect("/dashboard/kpis");
 
   // Empty array if HR isn't set up — the form falls back to free-text name.
   const ownerCandidates = await getKpiOwnerCandidatesPg();

@@ -352,7 +352,7 @@ export const { auth, signIn, signOut, handlers, unstable_update } = NextAuth({
             // THE ROLE FOLLOWS THE COMPANY. It is per-membership since 0064, so
             // somebody who is an Accountant here and a Store Manager there must
             // not carry the first role into the second company's nav.
-            const { resolveRoleForCompany } = await import(
+            const { resolveRoleForCompany, resolvePermissionKeysForCompany } = await import(
               "@/app/db/userAdmin"
             );
             const role = await resolveRoleForCompany(
@@ -363,6 +363,11 @@ export const { auth, signIn, signOut, handlers, unstable_update } = NextAuth({
               token.role = role;
               if (token.user) token.user = { ...token.user, role };
             }
+            // And the saved permissions of the company being entered.
+            token.permissionKeys = await resolvePermissionKeysForCompany(
+              String(token.id),
+              String(requested),
+            );
           }
         } catch {
           // Leave the token unchanged rather than granting on an error.
@@ -399,12 +404,16 @@ export const { auth, signIn, signOut, handlers, unstable_update } = NextAuth({
         // company being entered.
         token.role = user.role;
         try {
-          const { resolveRoleForCompany } = await import("@/app/db/userAdmin");
+          const { resolveRoleForCompany, resolvePermissionKeysForCompany } = await import("@/app/db/userAdmin");
           const scoped = await resolveRoleForCompany(
             String(user.id),
             user.companyId ? String(user.companyId) : null,
           );
           if (scoped) token.role = scoped;
+          token.permissionKeys = await resolvePermissionKeysForCompany(
+            String(user.id),
+            user.companyId ? String(user.companyId) : null,
+          );
         } catch {
           // The global role is the documented fallback; keep it.
         }
@@ -455,6 +464,13 @@ export const { auth, signIn, signOut, handlers, unstable_update } = NextAuth({
               dbUser.id,
               dbUser.homeCompanyId ?? null,
             ).catch(() => null)) ?? dbUser.role;
+          {
+            const { resolvePermissionKeysForCompany } = await import("@/app/db/userAdmin");
+            token.permissionKeys = await resolvePermissionKeysForCompany(
+              dbUser.id,
+              dbUser.homeCompanyId ?? null,
+            ).catch(() => null);
+          }
           token.id = dbUser.id;
           token.avatar = dbUser.avatar || user.image;
           token.companyId = dbUser.homeCompanyId ?? undefined;
@@ -556,6 +572,7 @@ export const { auth, signIn, signOut, handlers, unstable_update } = NextAuth({
             const {
               getUserStatusAndVersion,
               resolveRoleForCompany,
+              resolvePermissionKeysForCompany,
               countUsableCompanies,
             } = await import("@/app/db/userAdmin");
 
@@ -584,6 +601,12 @@ export const { auth, signIn, signOut, handlers, unstable_update } = NextAuth({
               token.role = scoped;
               if (token.user) token.user = { ...token.user, role: scoped };
             }
+            // The saved Roles & Permissions set, on the same cadence: a box
+            // ticked or unticked reaches what this person sees within a minute.
+            token.permissionKeys = await resolvePermissionKeysForCompany(
+              String(token.id),
+              (token.activeCompanyId ?? token.companyId) ?? null,
+            );
             /**
              * HOW MANY COMPANIES THIS PERSON MAY ENTER, for proxy.ts.
              *
@@ -633,6 +656,9 @@ export const { auth, signIn, signOut, handlers, unstable_update } = NextAuth({
           // Carried through so the freshness check (requireFreshSession)
           // can compare against the User document's current value.
           tokenVersion: token.tokenVersion ?? 0,
+          // Null: the role follows the code's role lists. An array: the role's
+          // saved permission set — lib/permission-keys.js reads it.
+          permissionKeys: Array.isArray(token.permissionKeys) ? token.permissionKeys : null,
         };
       }
       return session;

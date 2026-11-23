@@ -14,7 +14,7 @@ const tone = (s) => (s === "closed" ? "gray" : s === "hearing_scheduled" ? "blue
 export default async function CasesPage({ searchParams }) {
   const session = await auth();
   if (!session?.user) redirect("/login");
-  if (!can(session.user.role, "hr.discipline")) redirect("/dashboard/hr");
+  if (!can(session.user, "hr.discipline")) redirect("/dashboard/hr");
   const sp = await searchParams;
   const status = sp?.status ?? "open";
   const type = sp?.type || "";

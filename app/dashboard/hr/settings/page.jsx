@@ -19,8 +19,8 @@ export default async function HRSettingsPage() {
   if (!session?.user) redirect("/login");
   const { role } = session.user;
 
-  const rates = can(role, "payroll.rates.write");
-  const admin = can(role, "hr.admin");
+  const rates = can(session.user, "payroll.rates.write");
+  const admin = can(session.user, "hr.admin");
   if (!rates && !admin) redirect("/dashboard/hr");
 
   return (

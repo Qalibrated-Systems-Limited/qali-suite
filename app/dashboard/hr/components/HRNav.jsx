@@ -2,76 +2,69 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useMemo } from "react";
+import { hrNavFor, activeHrSection } from "@/lib/nav/hr-nav";
 import { can } from "@/lib/capabilities";
-import {
-  Users,
-  Building2,
-  Calendar,
-  Banknote,
-  LayoutDashboard,
-  Clock,
-  LogOut,
-  Settings,
-  FileText,
-  Gavel,
-  GraduationCap,
-  Star,
-  Briefcase,
-  BarChart3,
-  Network,
-} from "lucide-react";
 
-const ADMIN_NAV = [
-  { label: "Overview", href: "/dashboard/hr", icon: LayoutDashboard, exact: true },
-  { label: "Employees", href: "/dashboard/hr/employees", icon: Users },
-  { label: "Departments", href: "/dashboard/hr/departments", icon: Building2 },
-  { label: "Leave", href: "/dashboard/hr/leave", icon: Calendar },
-  { label: "Attendance", href: "/dashboard/hr/attendance", icon: Clock },
-  { label: "Payroll", href: "/dashboard/hr/payroll", icon: Banknote },
-  { label: "Exits", href: "/dashboard/hr/exits", icon: LogOut, capability: "exit.manage" },
-  { label: "Letters", href: "/dashboard/hr/letters", icon: FileText, capability: "hr.letters" },
-  { label: "Cases", href: "/dashboard/hr/cases", icon: Gavel, capability: "hr.discipline" },
-  { label: "Training", href: "/dashboard/hr/training", icon: GraduationCap, capability: "hr.training" },
-  { label: "Reviews", href: "/dashboard/hr/reviews", icon: Star, capability: "hr.reviews" },
-  { label: "Recruitment", href: "/dashboard/hr/recruitment", icon: Briefcase, capability: "hr.recruit" },
-  { label: "Reports", href: "/dashboard/hr/reports", icon: BarChart3, capability: "hr.reports" },
-  { label: "Org chart", href: "/dashboard/hr/org-chart", icon: Network },
-  { label: "Settings", href: "/dashboard/hr/settings", icon: Settings, capability: "hr.admin" },
-];
-
-const EMPLOYEE_NAV = [
-  { label: "My Leave", href: "/dashboard/hr/my-leave", icon: Calendar },
-  { label: "My Attendance", href: "/dashboard/hr/my-attendance", icon: Clock },
-  { label: "My Payslips", href: "/dashboard/hr/my-payslips", icon: Banknote },
-  { label: "My Reviews", href: "/dashboard/hr/my-reviews", icon: Star },
-  { label: "My Letters", href: "/dashboard/hr/my-letters", icon: FileText },
-];
-
-export default function HRNav({ role }) {
+/**
+ * The HR module's top bar, built from the same list as the sidebar's HR group
+ * (lib/nav/hr-nav.js), so the two always agree.
+ *
+ * Two tiers: the sections (People, Time & leave, Pay, …) as tabs, and under
+ * them the pages of the section you are in. Fifteen pages in one row were a
+ * scroll you could not see the end of; now the bar shows where you are and
+ * the handful of pages next to it.
+ */
+export default function HRNav({ user }) {
   const pathname = usePathname();
-  const isAdmin = can(role, "hr.write");
-  const navItems = (isAdmin ? ADMIN_NAV : EMPLOYEE_NAV).filter(
-    (item) => !item.capability || can(role, item.capability),
-  );
+  // `can(user, …)` honours the company's saved Roles & Permissions.
+  const sections = useMemo(() => hrNavFor(user, (cap) => can(user, cap)), [user]);
+  const active = activeHrSection(sections, pathname);
+  const current = sections.find((s) => s.id === active?.section) || sections[0];
+  if (!current) return null;
 
   return (
-    <nav className="sticky top-14 z-10 border-b border-border bg-card">
-      <div className="flex items-center gap-1 overflow-x-auto px-4 sm:px-6 py-0">
-        {navItems.map((item) => {
-          const active = item.exact
-            ? pathname === item.href
-            : pathname.startsWith(item.href);
+    <nav aria-label="Human resources" className="sticky top-14 z-10 border-b border-border bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/80">
+      <div className="flex items-center gap-1 overflow-x-auto px-4 pt-2 sm:px-6 [scrollbar-width:none]">
+        <span className="mr-2 hidden shrink-0 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground md:inline">
+          Human resources
+        </span>
+        {sections.map((s) => {
+          const on = s.id === current.id;
+          const Icon = s.icon;
           return (
             <Link
-              key={item.href}
-              href={item.href}
-              className={`flex items-center gap-2 whitespace-nowrap border-b-2 px-3 py-3 text-sm transition-colors ${
-                active
-                  ? "border-primary font-medium text-primary"
-                  : "border-transparent text-muted-foreground hover:text-foreground"
+              key={s.id}
+              href={s.items[0].href}
+              aria-current={on ? "page" : undefined}
+              className={`flex shrink-0 items-center gap-1.5 rounded-t-lg px-3 py-2 text-sm transition-colors ${
+                on
+                  ? "bg-muted font-semibold text-foreground"
+                  : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
               }`}
             >
-              <item.icon className="h-4 w-4" />
+              <Icon className="h-4 w-4" />
+              {s.label}
+            </Link>
+          );
+        })}
+      </div>
+      <div className="flex items-center gap-1 overflow-x-auto bg-muted px-4 py-1.5 sm:px-6 [scrollbar-width:none]">
+        {current.items.map((item) => {
+          const on = active?.item === item.id;
+          const Icon = item.icon;
+          return (
+            <Link
+              key={item.id}
+              href={item.href}
+              aria-current={on ? "page" : undefined}
+              className={`flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[13px] transition-colors ${
+                on
+                  ? "bg-card font-medium text-primary shadow-sm ring-1 ring-border"
+                  : "text-muted-foreground hover:bg-card/70 hover:text-foreground"
+              }`}
+            >
+              <Icon className="h-3.5 w-3.5" />
               {item.label}
             </Link>
           );

@@ -11,7 +11,7 @@ export const metadata = { title: "New letter | HR" };
 export default async function NewLetterPage({ searchParams }) {
   const session = await auth();
   if (!session?.user) redirect("/login");
-  if (!can(session.user.role, "hr.letters")) redirect("/dashboard/hr");
+  if (!can(session.user, "hr.letters")) redirect("/dashboard/hr");
   const sp = await searchParams;
   const { employees } = await getRecordsFormData();
   return (

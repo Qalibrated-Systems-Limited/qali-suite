@@ -21,7 +21,7 @@ export default async function FinanceSettingsPage() {
   const session = await auth();
   if (!session?.user) redirect("/login");
   const { role } = session.user;
-  if (!can(role, "finance.write")) redirect("/dashboard");
+  if (!can(session.user, "finance.write")) redirect("/dashboard");
 
   // The same roles the thresholds page admits.
   const thresholds = roleAllowed(role, ["Admin", "CFO"]);
@@ -44,7 +44,7 @@ export default async function FinanceSettingsPage() {
           title="Chart of Accounts"
           description="Account structure and GL account management"
         />
-        {can(role, "fiscal.manage") && (
+        {can(session.user, "fiscal.manage") && (
           <SettingsCard
             href="/dashboard/settings/fiscal-periods"
             icon={Calendar}

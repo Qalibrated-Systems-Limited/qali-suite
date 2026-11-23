@@ -52,7 +52,7 @@ function Node({ node }) {
 export default async function OrgChartPage() {
   const session = await auth();
   if (!session?.user) redirect("/login");
-  if (!can(session.user.role, "hr.view")) redirect("/dashboard/hr");
+  if (!can(session.user, "hr.view")) redirect("/dashboard/hr");
   const people = await getOrgChart();
   const ids = new Set(people.map((p) => p.id));
   const byManager = new Map();

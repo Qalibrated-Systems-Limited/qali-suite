@@ -17,7 +17,7 @@ export default async function OpeningBalancesPage() {
   const session = await auth();
   const user = session?.user;
 
-  if (!user || !can(user.role, "finance.write")) {
+  if (!user || !can(user, "finance.write")) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center p-6">
         <Card className="max-w-md w-full">

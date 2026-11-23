@@ -24,7 +24,7 @@ function Expiry({ days, date }) {
 export default async function TrainingPage({ searchParams }) {
   const session = await auth();
   if (!session?.user) redirect("/login");
-  if (!can(session.user.role, "hr.training")) redirect("/dashboard/hr");
+  if (!can(session.user, "hr.training")) redirect("/dashboard/hr");
   const sp = await searchParams;
   const [expiring, records, { employees }] = await Promise.all([
     listHrTraining({ expiringWithin: 60 }),
