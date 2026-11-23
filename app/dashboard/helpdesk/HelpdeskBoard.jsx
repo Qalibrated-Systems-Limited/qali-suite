@@ -453,6 +453,14 @@ function TicketDetail({ id, users, canManage, currentUserId, isPending, act, onC
             <Meta label="Client" value={t.customerName || "—"} />
             <Meta label="Requester" value={t.requesterName || "—"} />
             <Meta label="Assignee" value={t.assigneeName || "Unassigned"} />
+            {canManage && !["resolved", "closed"].includes(t.status) && (
+              <a
+                href={`/dashboard/technical/resources?source=ticket&sourceId=${t.id}&ref=${encodeURIComponent(t.ticketNumber)}&title=${encodeURIComponent(t.title)}`}
+                style={{ display: "inline-block", fontSize: 12, fontWeight: 700, margin: "2px 0 8px" }}
+              >
+                Request a technician, vehicle or equipment →
+              </a>
+            )}
             <Meta label="Raised" value={whenShort(t.createdAt)} />
             <Meta label="Response due" value={whenShort(t.responseDueAt)} />
             <Meta label="Resolution due" value={whenShort(t.resolutionDueAt)} />

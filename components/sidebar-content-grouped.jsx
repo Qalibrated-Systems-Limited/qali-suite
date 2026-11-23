@@ -23,6 +23,7 @@ import {
   FileText,
   FlaskConical,
   ClipboardList,
+  CalendarCheck,
   FolderKanban,
   FolderTree,
   Gavel,
@@ -811,6 +812,7 @@ export const getNavigationGroups = (user) => {
       { icon: FlaskConical, label: "Calibration (17025)", id: "calibration", href: "/dashboard/calibration" },
       { icon: Search, label: "Inspection (17020)", id: "inspection", href: "/dashboard/inspection" },
       { icon: LifeBuoy, label: "Service tickets", id: "technical-tickets", href: "/dashboard/technical/tickets" },
+      { icon: CalendarCheck, label: "Resources", id: "technical-resources", href: "/dashboard/technical/resources" },
     ],
   },
   {

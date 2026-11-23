@@ -5,6 +5,7 @@ import AccessDenied from "../../projects/components/AccessDenied";
 import { getMyWork, getTechnicalTeam } from "@/app/db/actions/technical-actions";
 import { getMyReports } from "@/app/db/actions/workflow-report-actions";
 import { getMyAssignments } from "@/app/db/actions/tasks-actions";
+import { getResourceRequests } from "@/app/db/actions/resource-actions";
 import { technicalViewer } from "../lib/access";
 import { displaySerial, sheetName } from "../lib/meta";
 import WorkActions, { StatusBadge } from "../components/WorkActions";
@@ -35,6 +36,9 @@ export default async function MyWorkPage() {
     viewer.isManager ? getTechnicalTeam() : Promise.resolve([]),
     getMyAssignments(),
   ]);
+  const resourceQueue = viewer.isManager
+    ? (await getResourceRequests()).requests.filter((r) => r.status === "pending")
+    : [];
   const myTickets = assignments.filter((a) => a.source === "ticket");
   const me = { userId: work.userId, isManager: work.isManager, isTechnician: work.isTechnician };
 
@@ -56,7 +60,7 @@ export default async function MyWorkPage() {
 
   const needsMe =
     returnedReports.length + returnedWork.length + reports.toSign.length + myTickets.length +
-    (me.isManager ? toApprove.length : 0);
+    (me.isManager ? toApprove.length + resourceQueue.length : 0);
 
   return (
     <div className="tech-wrap">
@@ -86,6 +90,19 @@ export default async function MyWorkPage() {
 
       {me.isManager && (
         <>
+          <Section title="Resource requests waiting for you" count={resourceQueue.length}>
+            {resourceQueue.length === 0 ? (
+              <div className="tech-empty2">No technician, vehicle or equipment request is waiting.</div>
+            ) : (
+              <div className="tech-alert" style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+                <span>
+                  {resourceQueue.slice(0, 3).map((r) => `${r.requestNumber} ${r.resourceName} (${r.startDate})`).join(" · ")}
+                  {resourceQueue.length > 3 ? ` · and ${resourceQueue.length - 3} more` : ""}
+                </span>
+                <Link href="/dashboard/technical/resources">Review and decide →</Link>
+              </div>
+            )}
+          </Section>
           <Section title="Reports waiting for your signature" count={reports.toSign.length}>
             <ReportTable rows={reports.toSign} empty="No report is waiting for your signature." showBy />
           </Section>

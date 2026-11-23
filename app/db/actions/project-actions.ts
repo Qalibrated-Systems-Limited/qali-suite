@@ -4,6 +4,8 @@ import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import * as overviewRepo from "../repositories/projectOverview";
+import { sql } from "drizzle-orm";
+import { needsResourceApproval, createResourceRequestIn } from "../resourceRequestsService";
 import { withAuthorizedTenant } from "../tenant";
 import { userMessage } from "../errors";
 import { requirePlanAccess } from "@/lib/plan-gate";
@@ -1547,6 +1549,46 @@ export async function getProjectProgress(projectId: string) {
   return withAuthorizedTenant([], (tx) => repo.getProjectProgress(tx, projectId));
 }
 
+/**
+ * A project task given to a Technical-department technician is a technical
+ * resource: unless a technical manager is assigning, the task is saved
+ * unassigned and the technician is requested from the technical manager, whose
+ * approval assigns it. Returns the message to show, or null.
+ */
+async function routeTechnicianThroughApproval(
+  tx: Parameters<Parameters<typeof withAuthorizedTenant>[1]>[0],
+  user: { id?: string | null; name?: string | null; role?: string | null },
+  companyId: string,
+  task: { id: string; title: string; plannedStart?: string | null; plannedEnd?: string | null },
+  projectNumber: string,
+  partyId: string | null | undefined,
+) {
+  if (!partyId) return null;
+  const [p] = (await tx.execute(sql`
+    SELECT COALESCE(e.user_id, pa.user_id::text) AS user_id
+      FROM parties pa LEFT JOIN employees e ON e.party_id = pa.id
+     WHERE pa.id = ${partyId}::uuid LIMIT 1
+  `)) as unknown as Array<{ user_id: string | null }>;
+  const userId = p?.user_id;
+  if (!userId || !(await needsResourceApproval(tx, user, companyId, userId))) return null;
+  const today = new Date().toISOString().slice(0, 10);
+  const start = task.plannedStart || today;
+  const end = task.plannedEnd && task.plannedEnd >= start ? task.plannedEnd : start;
+  await tx.execute(sql`UPDATE project_tasks SET assigned_party_id = NULL, assigned_name = NULL WHERE id = ${task.id}::uuid`);
+  const req = await createResourceRequestIn(tx, user, companyId, {
+    resourceType: "technician",
+    resourceId: userId,
+    sourceType: "project_task",
+    sourceId: task.id,
+    sourceRef: projectNumber,
+    sourceTitle: task.title,
+    startDate: start,
+    endDate: end,
+    notes: "",
+  });
+  return `${req.requestNumber}: technician requested from the technical manager — the task is assigned when approved`;
+}
+
 export async function createProjectTask(prevState: unknown, formData: FormData) {
   const values = valuesOf(formData);
   const parsed = taskSchema.safeParse(taskFields(formData));
@@ -1563,7 +1605,7 @@ export async function createProjectTask(prevState: unknown, formData: FormData) 
           throw new Error("A closed project's tasks cannot be changed.");
         }
         const actor = actorFrom(user);
-        return repo.createTask(tx, {
+        const created = await repo.createTask(tx, {
           companyId,
           projectId: d.projectId,
           parentTaskId: d.parentTaskId || null,
@@ -1580,10 +1622,16 @@ export async function createProjectTask(prevState: unknown, formData: FormData) 
           createdById: actor.id,
           createdByName: actor.name,
         });
+        const requested = await routeTechnicianThroughApproval(
+          tx, user, companyId,
+          { id: created.id, title: created.title, plannedStart: d.plannedStart, plannedEnd: d.plannedEnd },
+          project.projectNumber, d.assignedPartyId,
+        );
+        return { ...created, _requested: requested };
       },
     );
     revalidateTask(d.projectId);
-    return { success: true, message: "Task added", taskId: task.id };
+    return { success: true, message: task._requested ? `Task added. ${task._requested}` : "Task added", taskId: task.id };
   } catch (error) {
     return { errors: { _form: [userMessage(error)] }, values };
   }
@@ -1600,10 +1648,11 @@ export async function updateProjectTask(
 
   const d = parsed.data;
   try {
-    await withAuthorizedTenant(
+    const updated = await withAuthorizedTenant(
       PROJECT_MANAGE_ROLES as unknown as string[],
-      async (tx, { user }) => {
+      async (tx, { user, companyId }) => {
         const actor = actorFrom(user);
+        const before = await repo.getTaskById(tx, taskId);
         const row = await repo.updateTask(tx, taskId, {
           parentTaskId: d.parentTaskId || null,
           title: d.title,
@@ -1620,11 +1669,22 @@ export async function updateProjectTask(
           lastModifiedByName: actor.name,
         });
         if (!row) throw new Error("Task not found");
-        return row;
+        // Only a CHANGE of assignee is routed; re-saving the same one is not
+        // a new request.
+        let requested: string | null = null;
+        if (d.assignedPartyId && d.assignedPartyId !== before?.assignedPartyId) {
+          const project = await repo.getProjectById(tx, row.projectId);
+          requested = await routeTechnicianThroughApproval(
+            tx, user, companyId,
+            { id: row.id, title: row.title, plannedStart: d.plannedStart, plannedEnd: d.plannedEnd },
+            project?.projectNumber ?? "", d.assignedPartyId,
+          );
+        }
+        return { ...row, _requested: requested };
       },
     );
     revalidateTask(d.projectId);
-    return { success: true, message: "Task updated" };
+    return { success: true, message: updated._requested ? `Task updated. ${updated._requested}` : "Task updated" };
   } catch (error) {
     return { errors: { _form: [userMessage(error)] }, values };
   }

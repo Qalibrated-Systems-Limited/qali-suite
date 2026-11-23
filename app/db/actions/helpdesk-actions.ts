@@ -10,6 +10,7 @@ import * as usersRepo from "../repositories/users";
 import * as notifications from "../repositories/notifications";
 import { holdsGate } from "../assigneeAccess";
 import { technicalStanding, listTechnicalPeople } from "../technicalAccess";
+import { needsResourceApproval, createResourceRequestIn } from "../resourceRequestsService";
 
 /**
  * Help Desk actions — 0089. Same shape as technical-actions.ts: Zod validates,
@@ -168,6 +169,28 @@ export async function assignTicket(id: string, userId: string | null, name: stri
           const u = (await usersRepo.listCompanyUsers(tx)).find((x) => String(x.id) === String(userId));
           if (!u) throw new Error("Choose someone in this company.");
           to = { id: String(u.id), name: String(u.name) };
+          // A technician from the Technical department is a technical
+          // resource: the desk asks the technical manager rather than
+          // assigning them directly. The ticket stays with the desk until the
+          // request is approved, which assigns it.
+          if (await needsResourceApproval(tx, user, companyId, to.id)) {
+            const t = await repo.getTicketById(tx, id);
+            if (!t) throw new Error("Ticket not found");
+            const today = new Date().toISOString().slice(0, 10);
+            const due = t.resolutionDueAt ? new Date(t.resolutionDueAt).toISOString().slice(0, 10) : today;
+            const req = await createResourceRequestIn(tx, user, companyId, {
+              resourceType: "technician",
+              resourceId: to.id,
+              sourceType: "ticket",
+              sourceId: t.id,
+              sourceRef: t.ticketNumber,
+              sourceTitle: t.title,
+              startDate: today,
+              endDate: due < today ? today : due,
+              notes: "",
+            });
+            return { ...t, assigneeName: "", _requested: `${req.requestNumber}: ${to.name} requested from the technical manager` };
+          }
         }
       } else {
         const standing = await technicalStanding(tx, user, companyId);
@@ -202,6 +225,10 @@ export async function assignTicket(id: string, userId: string | null, name: stri
     bump();
     revalidatePath("/dashboard/technical/tickets");
     revalidatePath("/dashboard/tasks");
+    revalidatePath("/dashboard/technical/resources");
+    if ((row as { _requested?: string })._requested) {
+      return { success: true, message: (row as { _requested?: string })._requested };
+    }
     return { success: true, message: row.assigneeName ? `${row.ticketNumber} assigned to ${row.assigneeName}` : `${row.ticketNumber} unassigned` };
   } catch (error) {
     return { error: userMessage(error) };

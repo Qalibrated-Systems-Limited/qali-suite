@@ -988,6 +988,13 @@
       "when": 1795206833811,
       "tag": "20261120T203353_technical_work_is_assigned_and_signed_off",
       "breakpoints": true
+    },
+    {
+      "idx": 141,
+      "version": "7",
+      "when": 1795420276569,
+      "tag": "20261123T075116_technical_resources_are_requested_and_approved",
+      "breakpoints": true
     }
   ]
 }

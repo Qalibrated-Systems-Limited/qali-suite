@@ -16,6 +16,7 @@ const ITEMS = [
   { label: "Calibration", href: "/dashboard/calibration" },
   { label: "Inspection", href: "/dashboard/inspection" },
   { label: "Service tickets", href: "/dashboard/technical/tickets" },
+  { label: "Resources", href: "/dashboard/technical/resources" },
 ];
 
 export default function TechnicalNav() {

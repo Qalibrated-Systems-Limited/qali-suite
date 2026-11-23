@@ -67,3 +67,4 @@ export * from "./compliance";
 export * from "./projectMethodology";
 export * from "./commissions";
 export * from "./projectDocuments";
+export * from "./resourceRequests";

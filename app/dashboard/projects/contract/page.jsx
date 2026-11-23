@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { getWorkspaceContext } from "../lib/workspace";
 import WorkspaceHeader from "../components/WorkspaceHeader";
 import NoProjectsCard from "../components/NoProjectsCard";
@@ -45,6 +46,19 @@ export default async function ContractPage({ searchParams }) {
 
       {project && (
         <>
+          {/* Technicians, vehicles and test equipment for the contract are
+              requested from the technical manager, who approves them. */}
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-card px-4 py-3 text-sm">
+            <span className="text-muted-foreground">
+              Need a technician, a vehicle or test equipment for this contract? The technical manager approves it.
+            </span>
+            <Link
+              className="font-semibold text-primary hover:underline"
+              href={`/dashboard/technical/resources?source=contract&sourceId=${project.id}&ref=${encodeURIComponent(project.projectNumber || "")}&title=${encodeURIComponent(`Contract — ${project.name || ""}`)}`}
+            >
+              Request resources →
+            </Link>
+          </div>
           <ContractDataForm
             project={project}
             canManage={hasRole(user, PROJECT_MANAGE_ROLES) && project.status !== "closed"}
