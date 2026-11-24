@@ -127,6 +127,26 @@ async function DashboardLayout({ children }) {
     redirect("/dashboard/select-company");
   }
 
+  /**
+   * OFFICE-ONLY ACCESS. When the company keeps QaliSuite to its office network
+   * and this request comes from elsewhere without a remote-access token, the
+   * person is shown the waiting page (which takes the token) instead of the
+   * dashboard. withAuthorizedTenant refuses their data requests the same way.
+   */
+  const actingCompanyId = hasUsableActive ? activeId : choosable.length === 1 ? choosable[0].id : null;
+  if (user?.id && actingCompanyId) {
+    let away = false;
+    try {
+      const { judgeCurrentRequest } = await import("@/app/db/networkAccess");
+      away = !(await judgeCurrentRequest(String(user.id), String(actingCompanyId))).allowed;
+    } catch {
+      // A database that cannot answer fails where it can be described: the
+      // data requests below are judged again and will say so.
+      away = false;
+    }
+    if (away) redirect("/away");
+  }
+
   // Bell data — one query, index-backed, capped. Called once per render here,
   // which is where the deduplication belongs: the Mongo version wrapped itself
   // in React cache(), and caching a transaction-scoped read across a request is

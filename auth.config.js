@@ -19,6 +19,10 @@ export const authConfig = {
 
       if (isInvitePage) return true;
 
+      // The office-only waiting page is for signed-in people who are away;
+      // sending them to /dashboard would send them straight back here.
+      if (nextUrl.pathname.startsWith("/away")) return isLoggedIn;
+
       // Redirect logged-in users away from login page to dashboard
       if (isLoggedIn) {
         return Response.redirect(new URL("/dashboard", nextUrl));

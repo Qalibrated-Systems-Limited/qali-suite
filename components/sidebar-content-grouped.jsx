@@ -23,6 +23,7 @@ import {
   FileText,
   FlaskConical,
   ClipboardList,
+  Wifi,
   ReceiptText,
   HandCoins,
   CalendarCheck,
@@ -934,6 +935,13 @@ export const getNavigationGroups = (user) => {
         id: "roles",
         href: "/dashboard/settings/roles",
         hidden: !can(user, "system.settings"),
+      },
+      {
+        icon: Wifi,
+        label: "Remote access",
+        id: "remote-access",
+        href: "/dashboard/settings/remote-access",
+        hidden: !can(user, "admin.manage"),
       },
       {
         icon: Building2,

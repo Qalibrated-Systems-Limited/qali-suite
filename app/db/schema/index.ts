@@ -68,3 +68,4 @@ export * from "./projectMethodology";
 export * from "./commissions";
 export * from "./projectDocuments";
 export * from "./resourceRequests";
+export * from "./networkAccess";

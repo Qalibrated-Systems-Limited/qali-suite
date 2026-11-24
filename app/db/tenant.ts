@@ -529,6 +529,16 @@ export async function withAuthorizedTenant<T>(
   // The role for the ACTIVE company. Null on the grant means the global role,
   // which is what every grant carried over from the single-company model says.
   const actingUser = { ...(user as ActionUser), role: acting.role };
+
+  // Office-only access (app/db/networkAccess.ts): from outside the office
+  // without a remote-access token, nothing is read or written. Loaded lazily,
+  // and a no-op outside a request (cron jobs, scripts, tests).
+  {
+    const { judgeCurrentRequest, AwayFromOfficeError } = await import("./networkAccess");
+    const verdict = await judgeCurrentRequest(String(actingUser.id), acting.companyUuid);
+    if (!verdict.allowed) throw new AwayFromOfficeError();
+  }
+
   const codeAllows =
     !allowedRoles.length || roleAllowed(actingUser.role, allowedRoles);
 

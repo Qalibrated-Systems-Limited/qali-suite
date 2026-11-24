@@ -12,11 +12,17 @@ export default function Error({ error, reset }) {
   useEffect(() => {
     // Log the error to an error reporting service
     // A refusal is the gate working, not a fault to report.
-    if (isAccessDenied(error)) return;
+    if (isAccessDenied(error) || error?.digest === "AWAY_FROM_OFFICE") return;
     console.error("Application Error:", error);
   }, [error]);
 
   if (isAccessDenied(error)) return <AccessDenied />;
+  // Away from the office without a remote-access token (app/db/networkAccess.ts):
+  // the waiting page is where the token goes.
+  if (error?.digest === "AWAY_FROM_OFFICE") {
+    if (typeof window !== "undefined") window.location.replace("/away");
+    return null;
+  }
 
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-4">

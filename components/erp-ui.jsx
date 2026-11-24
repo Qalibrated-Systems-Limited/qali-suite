@@ -229,8 +229,8 @@ export function DataTable({ headers, rows, empty = "No records found.", searchab
 
 export function SectionHeader({ title, sub, action }) {
   return (
-    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
-      <div><h2 style={{ fontSize: 16, fontWeight: 700, color: "var(--foreground)", margin: 0 }}>{title}</h2>{sub && <p style={{ fontSize: 12, color: "var(--muted-foreground)", marginTop: 3, margin: 0 }}>{sub}</p>}</div>
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 10, justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
+      <div style={{ minWidth: 0, flex: "1 1 200px" }}><h2 style={{ fontSize: 16, fontWeight: 700, color: "var(--foreground)", margin: 0 }}>{title}</h2>{sub && <p style={{ fontSize: 12, color: "var(--muted-foreground)", marginTop: 3, margin: 0 }}>{sub}</p>}</div>
       {action}
     </div>
   );
@@ -260,7 +260,9 @@ export function Tabs({ tabs, active, setActive }) {
 // A tidy responsive grid for Stat rows.
 export function StatGrid({ children, min = 210 }) {
   return (
-    <div style={{ display: "grid", gridTemplateColumns: `repeat(auto-fit, minmax(${min}px, 1fr))`, gap: 14, marginBottom: 18 }}>
+    // On a phone, two cards a row (never one under another all the way down);
+    // on a wide screen as many as fit at `min` pixels each.
+    <div style={{ display: "grid", gridTemplateColumns: `repeat(auto-fit, minmax(min(${min}px, calc(50% - 7px)), 1fr))`, gap: 14, marginBottom: 18 }}>
       {children}
     </div>
   );
