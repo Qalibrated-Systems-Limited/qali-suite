@@ -60,7 +60,7 @@ export default function HRNav({ user }) {
               aria-current={on ? "page" : undefined}
               className={`flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[13px] transition-colors ${
                 on
-                  ? "bg-card font-medium text-primary shadow-sm ring-1 ring-border"
+                  ? "bg-card font-semibold text-foreground shadow-sm ring-1 ring-amber-500/70"
                   : "text-muted-foreground hover:bg-card/70 hover:text-foreground"
               }`}
             >

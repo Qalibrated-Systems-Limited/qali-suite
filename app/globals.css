@@ -411,3 +411,38 @@
   --color-yellow-950: #2c2005;
 }
 
+
+
+/* ── Status colours for the components/erp-ui.jsx kit ──────────────────────────
+ * Text and tint per status, light and dark. The tints are translucent in the
+ * dark theme so a badge or an icon box sits IN the navy card rather than as a
+ * bright pastel patch on it; the text colours lift so they read on navy.
+ */
+:root {
+  --erp-green: #1e6b3c; --erp-green-bg: #dcfce7;
+  --erp-red: #c00000; --erp-red-bg: #fee2e2;
+  --erp-amber: #b8600b; --erp-amber-bg: #fef3c7;
+  --erp-blue: #0070c0; --erp-blue-bg: #eff6ff;
+  --erp-purple: #6a0dad; --erp-purple-bg: #f3e8ff;
+  --erp-navy-ink: #1b3a5c; --erp-navy-bg: #dce8f5;
+  --erp-gold-bg: #fbf0d2;
+  --erp-lgrey: #e8ecf0; --erp-dgrey: #334155;
+}
+.dark {
+  --erp-green: #4ade80; --erp-green-bg: rgba(74, 222, 128, 0.14);
+  --erp-red: #f87171; --erp-red-bg: rgba(248, 113, 113, 0.15);
+  --erp-amber: #fbbf24; --erp-amber-bg: rgba(251, 191, 36, 0.14);
+  --erp-blue: #60a5fa; --erp-blue-bg: rgba(96, 165, 250, 0.15);
+  --erp-purple: #c084fc; --erp-purple-bg: rgba(192, 132, 252, 0.15);
+  --erp-navy-ink: #93c5fd; --erp-navy-bg: rgba(96, 165, 250, 0.14);
+  --erp-gold-bg: rgba(200, 150, 12, 0.2);
+  --erp-lgrey: rgba(148, 163, 184, 0.18); --erp-dgrey: #cbd5e1;
+}
+
+/* Primary as a TEXT colour in the dark theme. --primary is a lifted navy so a
+ * filled button reads on the dark canvas, but the same navy as text (links,
+ * the current tab, highlighted figures — `text-primary`, about 300 places) was
+ * ~2:1 against a navy card. Text gets a light blue that reads; fills keep
+ * --primary. Unlayered, so it wins over the Tailwind utility. */
+.dark .text-primary { color: #8fbbe3; }
+.dark .hover\:text-primary:hover { color: #a9cbea; }

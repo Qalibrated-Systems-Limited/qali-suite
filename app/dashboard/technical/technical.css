@@ -698,3 +698,22 @@ table.tech-table { width: 100%; border-collapse: collapse; font-size: 13.5px; mi
   .tech .h1 { font-size: 20px; }
   .tech .app-content { padding-left: 12px; padding-right: 12px; }
 }
+
+/* ── Dark theme: the page around the paper ────────────────────────────────────
+ * The app-shell tokens above (--ink, --mute) are the QSL paper colours, right
+ * on a light page and on the paper cards in either theme — a report reads as a
+ * document. On the DARK page itself they were dark brown on navy: page titles,
+ * eyebrows and lead text all but vanished. Outside a card they follow the
+ * ERP theme; inside a card they stay paper ink.
+ */
+.dark .tech .h1:not(.card .h1) { color: var(--foreground); }
+.dark .tech .eyebrow:not(.card .eyebrow) { color: var(--muted-foreground); }
+.dark .tech .muted:not(.card .muted) { color: var(--muted-foreground); }
+.dark .tech .app-content { color: var(--foreground); }
+.dark .tech .app-content .card { color: var(--ink); }
+.dark .tech .label:not(.card .label) { color: var(--muted-foreground); }
+.dark .tech .reg-row:hover { background: rgba(245, 168, 0, 0.12) !important; }
+.dark .tech .btn:not(.btn-primary):not(.btn-dark):not(.card .btn) {
+  background: var(--card); color: var(--foreground); border-color: var(--border);
+}
+.dark .tech .btn:not(.btn-primary):not(.btn-dark):not(.card .btn):hover { background: var(--muted); }

@@ -618,7 +618,7 @@ function TicketDetail({ id, users, canManage, currentUserId, canned = [], articl
                     <label style={{ display: "block", fontSize: 11.5, fontWeight: 700, color: T.green, marginBottom: 5 }}>Resolve</label>
                     <textarea value={resolveNotes} onChange={(e) => setResolveNotes(e.target.value)} rows={2} placeholder="Resolution notes (what was done)" style={{ ...selStyle, resize: "vertical" }} />
                     <textarea value={rootCause} onChange={(e) => setRootCause(e.target.value)} rows={1} placeholder="Root cause" style={{ ...selStyle, marginTop: 6, resize: "vertical" }} />
-                    <button disabled={busy} onClick={() => run(setTicketStatus, id, "resolved", { resolutionNotes: resolveNotes, rootCause })} style={{ marginTop: 6, width: "100%", background: T.green, color: "#fff", border: "none", padding: "7px", borderRadius: 7, fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>Mark resolved</button>
+                    <button disabled={busy} onClick={() => run(setTicketStatus, id, "resolved", { resolutionNotes: resolveNotes, rootCause })} style={{ marginTop: 6, width: "100%", background: T.greenSolid, color: "#fff", border: "none", padding: "7px", borderRadius: 7, fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>Mark resolved</button>
                   </div>
                 )}
               </>
@@ -648,7 +648,7 @@ function TicketDetail({ id, users, canManage, currentUserId, canned = [], articl
                     <label style={{ display: "block", fontSize: 11.5, fontWeight: 700, color: T.green, marginBottom: 5 }}>Resolve</label>
                     <textarea value={resolveNotes} onChange={(e) => setResolveNotes(e.target.value)} rows={2} placeholder="Resolution notes (what was done)" style={{ ...selStyle, resize: "vertical" }} />
                     <textarea value={rootCause} onChange={(e) => setRootCause(e.target.value)} rows={1} placeholder="Root cause" style={{ ...selStyle, marginTop: 6, resize: "vertical" }} />
-                    <button disabled={busy} onClick={() => run(setTicketStatus, id, "resolved", { resolutionNotes: resolveNotes, rootCause })} style={{ marginTop: 6, width: "100%", background: T.green, color: "#fff", border: "none", padding: "7px", borderRadius: 7, fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>Mark resolved</button>
+                    <button disabled={busy} onClick={() => run(setTicketStatus, id, "resolved", { resolutionNotes: resolveNotes, rootCause })} style={{ marginTop: 6, width: "100%", background: T.greenSolid, color: "#fff", border: "none", padding: "7px", borderRadius: 7, fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>Mark resolved</button>
                   </div>
                 )}
 
@@ -659,7 +659,7 @@ function TicketDetail({ id, users, canManage, currentUserId, canned = [], articl
                       {ESC_LEVELS.map((l) => <option key={l.value} value={l.value}>{l.label}</option>)}
                     </select>
                     <input value={escReason} onChange={(e) => setEscReason(e.target.value)} placeholder="Reason" style={{ ...selStyle, marginTop: 6 }} />
-                    <button disabled={busy} onClick={() => run(escalateTicket, id, escLevel, escReason)} style={{ marginTop: 6, width: "100%", background: T.purple, color: "#fff", border: "none", padding: "7px", borderRadius: 7, fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>Escalate</button>
+                    <button disabled={busy} onClick={() => run(escalateTicket, id, escLevel, escReason)} style={{ marginTop: 6, width: "100%", background: T.purpleSolid, color: "#fff", border: "none", padding: "7px", borderRadius: 7, fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>Escalate</button>
                   </div>
                 )}
 

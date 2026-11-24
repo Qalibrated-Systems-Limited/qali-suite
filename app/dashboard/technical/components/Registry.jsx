@@ -277,7 +277,7 @@ export default function Registry({ reports = [], projects = [], initialProjectId
 
       <div className="muted" style={{ fontSize: 12.5, marginBottom: 8, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
         <span>
-          <b style={{ color: INK }}>{rows.length}</b> record{rows.length === 1 ? "" : "s"}
+          <b>{rows.length}</b> record{rows.length === 1 ? "" : "s"}
           {anyFilter ? " match your filters" : ""} · click a row for full detail
         </span>
         {recentCount > 0 && (

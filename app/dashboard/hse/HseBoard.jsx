@@ -518,7 +518,7 @@ function IncidentDetail({ id, canManage, act, busy, onClose }) {
                 {opts(INC_STATUS).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
               {i.nemaNotificationRequired && !i.nemaNotifiedAt && (
-                <button onClick={() => run(markNemaNotified, id)} disabled={busy} style={{ ...miniBtn, background: T.green, color: "#fff" }}>Mark NEMA notified</button>
+                <button onClick={() => run(markNemaNotified, id)} disabled={busy} style={{ ...miniBtn, background: T.greenSolid, color: "#fff" }}>Mark NEMA notified</button>
               )}
               <button onClick={async () => { if (confirm("Delete this incident?")) { const r = await act(deleteIncident, id); if (r?.success) onClose(); } }} disabled={busy} style={{ ...miniBtn, marginLeft: "auto", color: T.red, border: `1px solid ${T.red}`, background: "transparent" }}>Delete</button>
             </div>

@@ -23,6 +23,8 @@ import {
   FileText,
   FlaskConical,
   ClipboardList,
+  ReceiptText,
+  HandCoins,
   CalendarCheck,
   FolderKanban,
   FolderTree,
@@ -169,7 +171,11 @@ export const getNavigationGroups = (user) => {
     items: [
       { icon: ListChecks, label: "My Tasks", id: "shared-tasks", href: "/dashboard/tasks" },
       { icon: FileText, label: "Requisitions", id: "shared-requisitions", href: "/dashboard/requests" },
-      { icon: Receipt, label: "My Expenses", id: "shared-expenses", href: "/dashboard/my-claims" },
+      // Money for and from work, for everyone: ask for an advance before it is
+      // spent, record what was spent to be paid back, and follow both.
+      { icon: HandCoins, label: "Request an advance", id: "shared-advance", href: "/dashboard/claims/create/advance" },
+      { icon: ReceiptText, label: "Record an expense", id: "shared-expense", href: "/dashboard/claims/create/reimbursement" },
+      { icon: Receipt, label: "My expenses & advances", id: "shared-expenses", href: "/dashboard/my-claims" },
       { icon: Calendar, label: "My Leave", id: "shared-leave", href: "/dashboard/hr/my-leave" },
       { icon: LifeBuoy, label: "Help Desk", id: "shared-helpdesk", href: "/dashboard/helpdesk" },
       {
@@ -444,13 +450,8 @@ export const getNavigationGroups = (user) => {
     id: "expenses",
     defaultOpen: false,
     items: [
-      {
-        icon: Receipt,
-        label: "My Expenses",
-        id: "my-claims",
-        href: "/dashboard/my-claims",
-      },
-
+      // "My expenses & advances" lives under Shared Services with the rest of
+      // what every member of staff does for themselves.
       {
         icon: Wallet,
         label: "Employee Expenses",

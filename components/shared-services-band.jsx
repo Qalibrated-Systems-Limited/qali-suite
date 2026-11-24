@@ -6,6 +6,8 @@ import {
   Calendar,
   LifeBuoy,
   CheckSquare,
+  HandCoins,
+  ReceiptText,
 } from "lucide-react";
 
 /**
@@ -20,7 +22,9 @@ import {
 const SHARED_SERVICES = [
   { icon: ListChecks, label: "My Tasks", href: "/dashboard/tasks", hint: "What's assigned to me" },
   { icon: FileText, label: "Requisitions", href: "/dashboard/requests", hint: "Request items or stores" },
-  { icon: Receipt, label: "My Expenses", href: "/dashboard/my-claims", hint: "Claim a reimbursement" },
+  { icon: HandCoins, label: "Request an advance", href: "/dashboard/claims/create/advance", hint: "Money before you spend it" },
+  { icon: ReceiptText, label: "Record an expense", href: "/dashboard/claims/create/reimbursement", hint: "Get paid back for what you spent" },
+  { icon: Receipt, label: "My expenses & advances", href: "/dashboard/my-claims", hint: "Track your claims" },
   { icon: Calendar, label: "My Leave", href: "/dashboard/hr/my-leave", hint: "Book or track leave" },
   { icon: LifeBuoy, label: "Help Desk", href: "/dashboard/helpdesk", hint: "Log a support ticket" },
   { icon: CheckSquare, label: "Approvals", href: "/dashboard/approvals", hint: "What's waiting on me" },
@@ -32,7 +36,7 @@ export default function SharedServicesBand({ className = "" }) {
       <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
         Shared services
       </h2>
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-8">
         {SHARED_SERVICES.map((s) => {
           const Icon = s.icon;
           return (

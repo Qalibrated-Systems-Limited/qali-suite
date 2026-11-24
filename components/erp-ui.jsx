@@ -11,12 +11,20 @@ import { useState } from "react";
 // ============================================================================
 
 // ── DESIGN TOKENS ───────────────────────────────────────────────────────────
+// Status colours and their tints are CSS variables (app/globals.css, --erp-*),
+// so they have a light and a dark value: the fixed light tints these used to be
+// (#DCFCE7, #FEE2E2, …) sat as bright patches on the dark theme, and the dark
+// text colours were hard to read on a navy card. Brand marks (navy, gold) stay
+// fixed. Where a status colour is a SOLID fill behind white text — a button —
+// use the `*Solid` value, which keeps enough contrast for white in both themes.
 export const T = {
   navy: "#1B3A5C", navyD: "#0D2238", navyL: "#2E5F8A", gold: "#C8960C",
-  white: "#FFFFFF", offwt: "#F0F4F8", lgrey: "#E8ECF0", mgrey: "#94A3B8",
-  dgrey: "#334155", green: "#1E6B3C", greenL: "#DCFCE7", red: "#C00000",
-  redL: "#FEE2E2", amber: "#B8600B", amberL: "#FEF3C7", blue: "#0070C0",
-  blueL: "#EFF6FF", purple: "#6A0DAD", purpleL: "#F3E8FF",
+  white: "#FFFFFF", offwt: "#F0F4F8", lgrey: "var(--erp-lgrey)", mgrey: "#94A3B8",
+  dgrey: "var(--erp-dgrey)", green: "var(--erp-green)", greenL: "var(--erp-green-bg)", red: "var(--erp-red)",
+  redL: "var(--erp-red-bg)", amber: "var(--erp-amber)", amberL: "var(--erp-amber-bg)", blue: "var(--erp-blue)",
+  blueL: "var(--erp-blue-bg)", purple: "var(--erp-purple)", purpleL: "var(--erp-purple-bg)",
+  navyInk: "var(--erp-navy-ink)", navyTint: "var(--erp-navy-bg)", goldTint: "var(--erp-gold-bg)",
+  greenSolid: "#1E6B3C", redSolid: "#C00000", amberSolid: "#B8600B", blueSolid: "#0070C0", purpleSolid: "#6A0DAD",
 };
 
 // ── UTILITY ─────────────────────────────────────────────────────────────────
@@ -43,8 +51,8 @@ export function Badge({ children, variant = "default", size = "sm" }) {
   const map = {
     green: { bg: T.greenL, color: T.green }, red: { bg: T.redL, color: T.red },
     amber: { bg: T.amberL, color: T.amber }, blue: { bg: T.blueL, color: T.blue },
-    navy: { bg: "#DCE8F5", color: T.navy }, purple: { bg: T.purpleL, color: T.purple },
-    gold: { bg: "#FBF0D2", color: T.gold },
+    navy: { bg: T.navyTint, color: T.navyInk }, purple: { bg: T.purpleL, color: T.purple },
+    gold: { bg: T.goldTint, color: T.gold },
     default: { bg: T.lgrey, color: T.dgrey },
   };
   const s = map[variant] || map.default;
@@ -74,7 +82,7 @@ export function Stat({ label, value, sub, icon, variant }) {
           <p style={{ fontSize: 20, fontWeight: 700, color: cols[variant] || "var(--foreground)", lineHeight: 1 }}>{value}</p>
           {sub && <p style={{ fontSize: 11, color: "var(--muted-foreground)", marginTop: 4 }}>{sub}</p>}
         </div>
-        {icon && <div style={{ width: 36, height: 36, background: bgs[variant] || "#DCE8F5", borderRadius: 9, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>{icon}</div>}
+        {icon && <div style={{ width: 36, height: 36, background: bgs[variant] || T.navyTint, borderRadius: 9, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>{icon}</div>}
       </div>
     </Card>
   );
@@ -84,10 +92,10 @@ export function Btn({ children, variant = "primary", onClick, size = "md", disab
   const styles = {
     primary: { bg: T.navy, color: T.white },
     gold: { bg: T.gold, color: T.white },
-    outline: { bg: "transparent", color: T.navy, border: `1.5px solid ${T.navy}` },
-    danger: { bg: T.red, color: T.white },
+    outline: { bg: "transparent", color: T.navyInk, border: `1.5px solid ${T.navyInk}` },
+    danger: { bg: T.redSolid, color: T.white },
     ghost: { bg: "var(--muted)", color: "var(--foreground)", border: "1px solid var(--border)" },
-    green: { bg: T.green, color: T.white },
+    green: { bg: T.greenSolid, color: T.white },
   };
   const s = styles[variant] || styles.primary;
   const pads = { sm: "5px 12px", md: "8px 18px", lg: "11px 24px" };
