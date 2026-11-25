@@ -319,6 +319,12 @@ const CONSTRAINT_MESSAGES: Record<string, string> = {
    * one the constraint stops. The pre-check exists to name the product in the
    * ordinary case; this is what makes overselling impossible in the rare one.
    */
+  /**
+   * Stock would go below zero on a product that does not allow it — an
+   * adjustment, an issue or a sale larger than what is on hand.
+   */
+  products_quantities_non_negative:
+    "Not enough stock: this would take the quantity on hand below zero. Count the item first, or switch on \"Allow negative stock\" for the product if issuing ahead of a receipt is intended.",
   products_commitments_within_on_hand:
     "There is not enough stock left to reserve — somebody else has committed it since this page loaded.",
 };

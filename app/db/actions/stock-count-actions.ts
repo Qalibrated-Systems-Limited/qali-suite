@@ -1,5 +1,7 @@
 "use server";
 
+import { userMessage } from "../errors";
+
 import { revalidatePath } from "next/cache";
 import { eq } from "drizzle-orm";
 import { withAuthorizedTenant } from "../tenant";
@@ -40,7 +42,7 @@ export interface CountActionResult {
 function fail(error: unknown, fallback: string): CountActionResult {
   return {
     success: false,
-    message: error instanceof Error ? error.message : fallback,
+    message: userMessage(error, fallback),
   };
 }
 

@@ -1,5 +1,7 @@
 "use server";
 
+import { sql } from "drizzle-orm";
+
 import { revalidatePath } from "next/cache";
 import { randomUUID } from "node:crypto";
 import bcrypt from "bcryptjs";
@@ -102,6 +104,9 @@ export async function createUserPg(
             error: `"${d.role}" is not a role in this company.`,
           };
         }
+        if (d.role === "SuperAdmin" && user.role !== "SuperAdmin") {
+          return { success: false as const, error: "Only a SuperAdmin can create a SuperAdmin." };
+        }
 
         // Email is a platform-wide identity, so this is checked platform-wide
         // rather than within the company (0043's unique index enforces it too).
@@ -155,7 +160,7 @@ export async function updateUserPg(
   formData: FormData,
 ): Promise<ActionResult> {
   try {
-    return await withAuthorizedTenant([...ADMIN_ROLES], async (_tx, { companyId }) => {
+    return await withAuthorizedTenant([...ADMIN_ROLES], async (_tx, { companyId, user: actor }) => {
       const newRole = (formData.get("role") as string) || null;
       // A role change must name a canonical or company custom role — 0120.
       if (newRole && !(await isAssignableRole(_tx, newRole))) {
@@ -163,6 +168,23 @@ export async function updateUserPg(
           success: false as const,
           error: `"${newRole}" is not a role in this company.`,
         };
+      }
+      /**
+       * SUPERADMIN IS GRANTED ONLY BY A SUPERADMIN.
+       *
+       * The form hid the option from a company Admin, but this action took any
+       * role it was sent: a crafted request could make anyone — the Admin
+       * themselves included — a platform SuperAdmin. Nor may an Admin change
+       * a SuperAdmin's account. Company Admins may appoint other Admins.
+       */
+      if (actor.role !== "SuperAdmin") {
+        const [target] = (await _tx.execute(sql`SELECT role FROM users WHERE id = ${userId}`)) as unknown as Array<{ role: string }>;
+        if (newRole === "SuperAdmin" || target?.role === "SuperAdmin") {
+          return {
+            success: false as const,
+            error: "Only a SuperAdmin can grant the SuperAdmin role or change a SuperAdmin's account.",
+          };
+        }
       }
       const result = await adminUpdateUser({
         id: userId,

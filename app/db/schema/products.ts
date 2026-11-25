@@ -119,6 +119,8 @@ export const products = pgTable(
       .default("0"),
     location: text("location"),
     binNumber: text("bin_number"),
+    /** May on hand go below zero (selling ahead of a receipt)? Off by default. */
+    allowNegativeStock: boolean("allow_negative_stock").notNull().default(false),
 
     isActive: boolean("is_active").notNull().default(true),
 
@@ -141,7 +143,7 @@ export const products = pgTable(
       .where(sql`${t.isActive} = true`),
     check(
       "products_quantities_non_negative",
-      sql`${t.quantityOnHand} >= 0 AND ${t.quantityCommitted} >= 0 AND ${t.quantityOnHold} >= 0`,
+      sql`(${t.allowNegativeStock} OR ${t.quantityOnHand} >= 0) AND ${t.quantityCommitted} >= 0 AND ${t.quantityOnHold} >= 0`,
     ),
     check(
       "products_prices_non_negative",
@@ -150,7 +152,7 @@ export const products = pgTable(
     // Cannot commit or hold more than is physically on hand.
     check(
       "products_commitments_within_on_hand",
-      sql`${t.quantityCommitted} + ${t.quantityOnHold} <= ${t.quantityOnHand}`,
+      sql`${t.allowNegativeStock} OR ${t.quantityCommitted} + ${t.quantityOnHold} <= ${t.quantityOnHand}`,
     ),
   ],
 );

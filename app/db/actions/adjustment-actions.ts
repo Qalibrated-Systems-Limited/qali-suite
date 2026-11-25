@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { eq } from "drizzle-orm";
+import { userMessage } from "../errors";
 import { withAuthorizedTenant } from "../tenant";
 import * as adjustmentsRepo from "../repositories/stockAdjustments";
 import { products } from "../schema";
@@ -243,9 +244,7 @@ export async function createStockAdjustmentPg(
     return {
       success: false,
       message:
-        error instanceof Error
-          ? error.message
-          : "Could not create the stock adjustment.",
+        userMessage(error, "Could not create the stock adjustment."),
     };
   }
 }
@@ -298,7 +297,7 @@ export async function applyApprovedStockAdjustmentPg(
     return {
       success: false,
       message:
-        error instanceof Error ? error.message : "Could not approve the adjustment.",
+        userMessage(error, "Could not approve the adjustment."),
     };
   }
 }
@@ -349,7 +348,7 @@ export async function valueStockAdjustmentPg(
     return {
       success: false,
       message:
-        error instanceof Error ? error.message : "Could not value the adjustment.",
+        userMessage(error, "Could not value the adjustment."),
     };
   }
 }
@@ -396,7 +395,7 @@ export async function voidDraftStockAdjustmentPg(
     return {
       success: false,
       message:
-        error instanceof Error ? error.message : "Could not cancel the adjustment.",
+        userMessage(error, "Could not cancel the adjustment."),
     };
   }
 }

@@ -697,7 +697,7 @@ export function AllowNegativeStockField({
         </p>
       </div>
       <Switch
-        onChange={(checked) => onChange(checked)}
+        onCheckedChange={(checked) => onChange(checked)}
         id="allowNegativeStock"
         name="allowNegativeStock"
         checked={defaultChecked}

@@ -46,14 +46,14 @@ const userUpdateSchema = z.object({
 
 const DEPARTMENTS = userDepartments;
 
-// Filter roles based on user type - Admin can't assign SuperAdmin or Admin roles,
-// then append this company's custom roles (0120).
-const getAvailableRoles = (isSuperAdmin, customRoles = []) => {
+// Roles on offer: a company Admin assigns any role but SuperAdmin (the server
+// refuses that too), then this company's custom roles (0120). The user's
+// CURRENT role is always listed: an Admin editing another Admin saw an empty
+// Role box, because Admin was filtered out and the select had nothing to show.
+const getAvailableRoles = (isSuperAdmin, customRoles = [], currentRole = "") => {
   const base = isSuperAdmin
     ? userRolesMapping
-    : userRolesMapping.filter(
-        (r) => r.value !== "SuperAdmin" && r.value !== "Admin",
-      );
+    : userRolesMapping.filter((r) => r.value !== "SuperAdmin" || r.value === currentRole);
   const custom = customRoles.map((r) => ({
     value: r.name,
     label: `${r.name} — acts as ${r.baseRole}`,
@@ -61,7 +61,11 @@ const getAvailableRoles = (isSuperAdmin, customRoles = []) => {
   // De-duplicate by value (case-insensitively) so an option — and its React
   // key — is never repeated.
   const seen = new Set();
-  return [...base, ...custom].filter((r) => {
+  const current =
+    currentRole && ![...base, ...custom].some((r) => r.value.toLowerCase() === currentRole.toLowerCase())
+      ? [{ value: currentRole, label: `${currentRole} (current)` }]
+      : [];
+  return [...current, ...base, ...custom].filter((r) => {
     const k = r.value.toLowerCase();
     if (seen.has(k)) return false;
     seen.add(k);
@@ -78,7 +82,7 @@ export function EditUserForm({ user, isSuperAdmin = false, customRoles = [] }) {
     initialState
   );
 
-  const availableRoles = getAvailableRoles(isSuperAdmin, customRoles);
+  const availableRoles = getAvailableRoles(isSuperAdmin, customRoles, user.role);
 
   const form = useForm({
     resolver: zodResolver(userUpdateSchema),

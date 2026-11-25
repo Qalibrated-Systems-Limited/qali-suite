@@ -123,6 +123,33 @@ function parseFormData(formData: FormData) {
   }
   // Removing a row leaves a hole in the indices.
   data.items = items.filter(Boolean);
+  /**
+   * CreateRequestForm posts its items as ONE JSON field (`items`), not the
+   * indexed fields above. Read that way, every request arrived with no items
+   * and was refused with "Add at least one item" while the form plainly
+   * listed them. Both shapes are accepted.
+   */
+  if (!(data.items as unknown[]).length && typeof data.items === "object") {
+    const json = formData.get("items");
+    if (typeof json === "string" && json.trim().startsWith("[")) {
+      try {
+        const parsed = JSON.parse(json);
+        if (Array.isArray(parsed)) {
+          data.items = parsed.map((it: Record<string, unknown>) => ({
+            productId: String(it.productId ?? it.product ?? ""),
+            requestedQuantity: it.requestedQuantity ?? it.quantity,
+            unitPrice: it.unitPrice ?? 0,
+            unit: it.unit ?? undefined,
+            purpose: it.purpose ?? undefined,
+            purposeDetails: it.purposeDetails ?? undefined,
+            notes: it.notes ?? undefined,
+          }));
+        }
+      } catch {
+        // Malformed: left empty, and the schema says so.
+      }
+    }
+  }
   return data;
 }
 

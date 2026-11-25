@@ -1,5 +1,7 @@
 "use server";
 
+import { userMessage } from "../errors";
+
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
@@ -355,7 +357,7 @@ export async function createCompany(
     return {
       errors: {
         _form: [
-          error instanceof Error ? error.message : "Failed to create the company",
+          userMessage(error, "Failed to create the company"),
         ],
       },
       values,
@@ -462,7 +464,7 @@ export async function updateCompany(
     return {
       errors: {
         _form: [
-          error instanceof Error ? error.message : "Failed to update the company",
+          userMessage(error, "Failed to update the company"),
         ],
       },
       values,

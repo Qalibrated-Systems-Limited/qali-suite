@@ -140,6 +140,10 @@ export async function sendInvitePg(
     return await withAuthorizedTenant(
       [...ADMIN_ROLES],
       async (tx, { user, companyId }) => {
+        // SuperAdmin is platform authority, granted only by a SuperAdmin.
+        if (String(d.role) === "SuperAdmin" && user.role !== "SuperAdmin") {
+          return { success: false as const, error: "Only a SuperAdmin can invite a SuperAdmin." };
+        }
         if (await emailExists(d.email)) {
           return {
             success: false as const,

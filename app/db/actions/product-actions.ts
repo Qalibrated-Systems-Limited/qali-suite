@@ -173,6 +173,7 @@ export async function addProductPg(
           : undefined,
         location: (formData.get("location") as string) || null,
         binNumber: (formData.get("binNumber") as string) || null,
+        allowNegativeStock: String(formData.get("allowNegativeStock")) === "true",
         isActive: formData.get("isActive") !== "false",
         createdById: user?.id ?? null,
         // Zero on purpose — the opening entry below is what puts stock on the
@@ -324,6 +325,9 @@ export async function updateProductPg(
           : null,
         location: (formData.get("location") as string) ?? undefined,
         binNumber: (formData.get("binNumber") as string) ?? undefined,
+        allowNegativeStock: formData.has("allowNegativeStock")
+          ? String(formData.get("allowNegativeStock")) === "true"
+          : undefined,
         isActive: formData.get("isActive")
           ? formData.get("isActive") !== "false"
           : null,
@@ -704,6 +708,7 @@ function shapeProduct(r: Record<string, unknown>) {
     /** Present in the table and previously unmapped, so the page showed blanks. */
     location: (r.location as string) ?? null,
     binNumber: (r.bin_number ?? r.binNumber ?? null) as string | null,
+    allowNegativeStock: Boolean(r.allow_negative_stock ?? r.allowNegativeStock),
     taxInfo: { defaultTaxRate: num(r.default_tax_rate ?? r.defaultTaxRate) },
     createdAt: (r.created_at ?? r.createdAt) ?? null,
     updatedAt: (r.updated_at ?? r.updatedAt) ?? null,

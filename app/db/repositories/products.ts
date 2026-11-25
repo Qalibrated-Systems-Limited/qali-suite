@@ -31,6 +31,7 @@ export interface CreateProductInput {
   defaultTaxRate?: string;
   location?: string | null;
   binNumber?: string | null;
+  allowNegativeStock?: boolean;
   /** Derived from the column, so a new method in the enum cannot be missed here. */
   costingMethod?: (typeof products.costingMethod)["_"]["data"];
   isActive?: boolean;
@@ -63,6 +64,7 @@ export async function createProduct(tx: Tx, input: CreateProductInput) {
       defaultTaxRate: input.defaultTaxRate ?? "16",
       location: input.location ?? null,
       binNumber: input.binNumber ?? null,
+      allowNegativeStock: Boolean(input.allowNegativeStock),
       costingMethod: input.costingMethod ?? "average",
       isActive: input.isActive ?? true,
       quantityOnHand: input.quantityOnHand ?? "0",
@@ -649,6 +651,7 @@ export async function updateProduct(
     defaultTaxRate?: string | null;
     location?: string | null;
     binNumber?: string | null;
+    allowNegativeStock?: boolean;
     costingMethod?: (typeof products.costingMethod)["_"]["data"] | null;
     isActive?: boolean | null;
     lastModifiedById?: string | null;
@@ -667,6 +670,7 @@ export async function updateProduct(
   if (input.defaultTaxRate != null) set.defaultTaxRate = input.defaultTaxRate;
   if (input.location !== undefined) set.location = input.location;
   if (input.binNumber !== undefined) set.binNumber = input.binNumber;
+  if (input.allowNegativeStock !== undefined) set.allowNegativeStock = input.allowNegativeStock;
   if (input.costingMethod != null) set.costingMethod = input.costingMethod;
   if (input.isActive != null) set.isActive = input.isActive;
   if (input.lastModifiedById !== undefined) {
