@@ -216,7 +216,7 @@ export async function createStockAdjustmentPg(
         targetRef: {
           kind: "InventoryAdjustment",
           id: adjustment.id,
-          label: `${adjustment.adjustmentNumber} — ${adjustmentType} — KES ${routing.totalValue.toLocaleString("en-KE", { maximumFractionDigits: 0 })}`,
+          label: `${adjustment.adjustmentNumber} — ${adjustmentType.replace(/_/g, " ")} — KES ${routing.totalValue.toLocaleString("en-KE", { maximumFractionDigits: 0 })}`,
         },
         payload: { adjustmentId: adjustment.id },
         reason: routing.reason,
