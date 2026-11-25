@@ -36,12 +36,12 @@ export function CreateButton({ user }) {
 
     // Requests (everyone can create)
     "/dashboard/requests": {
-      href: "/dashboard/requests/create",
+      href: "/dashboard/requests/new",
       label: "Request",
       roles: ["*"], // Everyone
     },
     "/dashboard/checkout": {
-      href: "/dashboard/requests/create",
+      href: "/dashboard/requests/new",
       label: "Request",
       roles: ["*"],
     },

@@ -10,6 +10,7 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { CreateStockRequestForm } from "../components/CreateRequestForm";
 import { getActiveProjects, getAllCostCodes } from "@/app/db/actions/project-actions";
+import { stockRequestTypes, stockRequestTypeConfig } from "@/lib/utils";
 
 export const metadata = {
   title: "Create Stock Request",
@@ -18,7 +19,9 @@ export const metadata = {
 
 
 
-export default async function CreateRequestPage() {
+export default async function CreateRequestPage({ searchParams }) {
+  const sp = (await searchParams) || {};
+  const initialType = stockRequestTypes.includes(sp.type) ? sp.type : "";
   const session = await auth();
 
   if (!session?.user) {
@@ -39,9 +42,9 @@ export default async function CreateRequestPage() {
       <div className="mb-6">
         <div className="flex items-center justify-between mb-4">
           <Button variant="ghost" size="sm" asChild>
-            <Link href="/dashboard/requests">
+            <Link href="/dashboard/requests/new">
               <IconArrowLeft className="w-4 h-4 mr-2" />
-              Back to Requests
+              All requisition types
             </Link>
           </Button>
         </div>
@@ -52,7 +55,9 @@ export default async function CreateRequestPage() {
           </div>
           <div>
             <h1 className="text-xl sm:text-2xl font-semibold text-foreground">
-              Create Stock Request
+              {initialType
+                ? `Stores requisition — ${stockRequestTypeConfig[initialType]?.label ?? initialType}`
+                : "Stores requisition"}
             </h1>
             <p className="text-muted-foreground">
               Request items from the warehouse for your department
@@ -69,6 +74,7 @@ export default async function CreateRequestPage() {
         projects={projects}
         user={session.user}
         createRequestAction={createStockRequest}
+        initialType={initialType}
       />
     </div>
   );

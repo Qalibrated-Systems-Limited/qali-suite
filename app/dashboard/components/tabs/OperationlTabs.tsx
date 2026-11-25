@@ -147,7 +147,7 @@ function QuickActionsBar() {
   const actions = [
     {
       label: "New Request",
-      href: "/dashboard/requests/create",
+      href: "/dashboard/requests/new",
       icon: FileText,
       color: "bg-blue-500 hover:bg-blue-600 text-white",
     },

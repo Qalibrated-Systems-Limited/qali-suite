@@ -31,6 +31,7 @@ export default async function HelpdeskPage({ searchParams }) {
         sla={data.sla}
         currentUserId={String(session.user.id)}
         openTicketId={typeof sp.ticket === "string" ? sp.ticket : null}
+        openNew={sp.new === "1"}
       />
     </div>
   );

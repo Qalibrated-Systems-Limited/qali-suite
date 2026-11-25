@@ -214,6 +214,7 @@ export function CreateStockRequestForm({
   projects = [],
   user,
   createRequestAction,
+  initialType = "",
 }) {
   const router = useRouter();
   const [state, formAction, isPending] = useActionState(createRequestAction, null);
@@ -223,7 +224,7 @@ export function CreateStockRequestForm({
   const formError = state?.error || null;
 
   // Form state
-  const [requestType, setRequestType] = useState(state?.values?.requestType || "");
+  const [requestType, setRequestType] = useState(state?.values?.requestType || initialType || "");
   const [selectedCustomer, setSelectedCustomer] = useState(() => {
     // Restore customer from state if available
     if (state?.values?.customerId && state?.values?.customerName) {

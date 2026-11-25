@@ -184,7 +184,7 @@ const ACTIONS = [
   { label: "Create Bill", href: "/dashboard/bills/create", icon: Plus },
   { label: "Create Product", href: "/dashboard/stocks/create", icon: Plus },
   { label: "Create Expense", href: "/dashboard/expenses/create", icon: Plus },
-  { label: "Create Request", href: "/dashboard/requests/create", icon: Plus },
+  { label: "Create Request", href: "/dashboard/requests/new", icon: Plus },
   { label: "Request Advance", href: "/dashboard/claims/create/advance", icon: Plus },
   { label: "Submit Reimbursement", href: "/dashboard/claims/create/reimbursement", icon: Plus },
   { label: "Create Project", href: "/dashboard/projects/create", icon: Plus },

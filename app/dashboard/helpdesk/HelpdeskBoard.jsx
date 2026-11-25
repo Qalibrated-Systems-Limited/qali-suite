@@ -97,7 +97,7 @@ function whenShort(d) {
 }
 
 export default function HelpdeskBoard({
-  tickets = [], categories = [], stats, users = [], canManage, currentUserId = null, openTicketId = null,
+  tickets = [], categories = [], stats, users = [], canManage, currentUserId = null, openTicketId = null, openNew = false,
   desk = canManage, canned = [], articles = [], sla = [],
 }) {
   const router = useRouter();
@@ -105,7 +105,8 @@ export default function HelpdeskBoard({
   const [tab, setTab] = useState(desk ? "overview" : "tickets");
   const [isPending, startTransition] = useTransition();
 
-  const [showNew, setShowNew] = useState(false);
+  // Opened from New requisition (?new=1): start on the new-ticket form.
+  const [showNew, setShowNew] = useState(openNew);
   // A link from Tasks or a notification (?ticket=…) opens that ticket.
   const [detailId, setDetailId] = useState(openTicketId);
 

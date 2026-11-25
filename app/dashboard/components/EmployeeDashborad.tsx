@@ -136,7 +136,7 @@ function QuickActionsGrid() {
     {
       title: "Request Stock",
       description: "Request items from store",
-      href: "/dashboard/requests/create",
+      href: "/dashboard/requests/new",
       icon: Plus,
       color: "bg-card hover:bg-accent border border-border",
     },
@@ -342,7 +342,7 @@ async function MyRecentRequestsCard({ userId }: { userId: string }) {
           description="Request stock items when needed"
           action={{
             label: "Create Request",
-            href: "/dashboard/requests/create",
+            href: "/dashboard/requests/new",
           }}
         />
       }

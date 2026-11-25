@@ -18,7 +18,7 @@ export function QuickActionsCard() {
       title: "New Request",
       description: "Create stock request",
       icon: FileText,
-      href: "/dashboard/requests/create",
+      href: "/dashboard/requests/new",
       color: "bg-blue-500/10 text-blue-600 dark:text-blue-400",
     },
     {
