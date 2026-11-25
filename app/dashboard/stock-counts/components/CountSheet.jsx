@@ -8,13 +8,14 @@ import {
   submitCountForReviewPg,
   postStockCountPg,
   cancelStockCountPg,
+  requestRecountPg,
 } from "@/app/db/actions/stock-count-actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import { Check, EyeOff, Info, Loader2 } from "lucide-react";
+import { Check, EyeOff, Info, Loader2, RotateCcw } from "lucide-react";
 import { formatCurrency } from "@/lib/utils/erp-utils";
 
 /**
@@ -35,6 +36,15 @@ export function CountSheet({ count }) {
   const [error, setError] = useState(null);
   const [savingLine, setSavingLine] = useState(null);
   const [drafts, setDrafts] = useState({});
+  // Lines the reviewer is sending back for a recount.
+  const [recount, setRecount] = useState(() => new Set());
+  const [recountReason, setRecountReason] = useState("");
+  const toggleRecount = (id) =>
+    setRecount((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
 
   const status = count.status;
   const isCounting = status === "counting";
@@ -135,6 +145,11 @@ export function CountSheet({ count }) {
           <table className="w-full min-w-[44rem]">
             <thead>
               <tr className="border-b border-border bg-muted/30">
+                {isReview && (
+                  <th className="w-10 p-3 text-xs font-medium text-muted-foreground" title="Send back for a recount">
+                    <RotateCcw className="h-3.5 w-3.5" />
+                  </th>
+                )}
                 <th className="text-left p-3 text-xs font-medium text-muted-foreground">
                   Product
                 </th>
@@ -167,6 +182,17 @@ export function CountSheet({ count }) {
                     key={line.id}
                     className="border-b border-border hover:bg-muted/20 transition-colors"
                   >
+                    {isReview && (
+                      <td className="p-3">
+                        <input
+                          type="checkbox"
+                          aria-label={`Recount ${line.productNameAtCount}`}
+                          checked={recount.has(line.id)}
+                          onChange={() => toggleRecount(line.id)}
+                          className="h-4 w-4 accent-amber-600"
+                        />
+                      </td>
+                    )}
                     <td className="p-3">
                       <p className="text-sm font-medium text-foreground">
                         {line.productNameAtCount}
@@ -174,6 +200,19 @@ export function CountSheet({ count }) {
                       <p className="text-xs text-muted-foreground">
                         {line.productSkuAtCount} · {line.productUnitAtCount}
                       </p>
+                      {line.recountRound > 0 && (
+                        <p className="mt-1 inline-flex flex-wrap items-center gap-1 rounded bg-amber-500/10 px-1.5 py-0.5 text-[11px] text-amber-700 dark:text-amber-400">
+                          <RotateCcw className="h-3 w-3" /> Recount {line.recountRound}
+                          {line.recountReason ? ` — ${line.recountReason}` : ""}
+                          {/* Earlier rounds only once counting is done: a blind
+                              recount must not show what the last count said. */}
+                          {!hideExpected && Array.isArray(line.countHistory) && line.countHistory.length > 0 && (
+                            <span className="text-muted-foreground">
+                              · earlier: {line.countHistory.map((h) => Number(h.quantity)).join(", ")}
+                            </span>
+                          )}
+                        </p>
+                      )}
                     </td>
 
                     {!hideExpected && (
@@ -271,6 +310,46 @@ export function CountSheet({ count }) {
               </span>
             )}
           </>
+        )}
+
+        {isReview && (
+          <div className="flex w-full flex-col gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 sm:flex-row sm:items-center">
+            <span className="text-xs font-medium">
+              Recount {recount.size} line{recount.size === 1 ? "" : "s"}
+            </span>
+            <Input
+              value={recountReason}
+              onChange={(e) => setRecountReason(e.target.value)}
+              placeholder="Why — e.g. variance too large, check bin B4 and the overflow shelf"
+              className="h-8 flex-1 text-sm"
+            />
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={pending}
+                onClick={() =>
+                  setRecount(new Set(count.lines.filter((l) => Number(l.varianceQuantity ?? 0) !== 0).map((l) => l.id)))
+                }
+              >
+                Select all variances
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                disabled={pending || recount.size === 0 || !recountReason.trim()}
+                onClick={() =>
+                  run(() => requestRecountPg(count.id, [...recount], recountReason), () => {
+                    setRecount(new Set());
+                    setRecountReason("");
+                  })
+                }
+              >
+                <RotateCcw className="mr-1.5 h-3.5 w-3.5" /> Send for recount
+              </Button>
+            </div>
+          </div>
         )}
 
         {isReview && (

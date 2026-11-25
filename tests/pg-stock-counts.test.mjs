@@ -288,6 +288,33 @@ suite("stocktake sessions", () => {
       return opened.countId;
     };
 
+    it("sends variance lines back for a recount, keeps the first count, and posts the recount", async () => {
+      const countId = await finish({ [widget]: 80, [gadget]: 100 });
+      const wline = (await linesOf(countId)).find((l) => l.product_id === widget);
+
+      expect((await counts.requestRecountPg(countId, [wline.id], "")).success).toBe(false);
+      const sent = await counts.requestRecountPg(countId, [wline.id], "20 short is too many — check overflow");
+      expect(sent.success).toBe(true);
+
+      const [c] = await admin`SELECT status::text AS status FROM stock_counts WHERE id = ${countId}`;
+      expect(c.status).toBe("counting");
+      const [line] = await admin`
+        SELECT counted_quantity, recount_round, recount_reason, count_history
+          FROM stock_count_lines WHERE id = ${wline.id}`;
+      expect(line.counted_quantity).toBeNull();
+      expect(line.recount_round).toBe(1);
+      expect(line.count_history[0].quantity).toBe(80);
+
+      // Cannot go back to review until the recount is in.
+      expect((await counts.submitCountForReviewPg(countId)).success).toBe(false);
+      expect((await counts.recordCountPg(countId, wline.id, "98")).success).toBe(true);
+      expect((await counts.submitCountForReviewPg(countId)).success).toBe(true);
+
+      const posted = await postAndApprove(countId);
+      expect(posted.success).toBe(true);
+      expect(await onHand(widget)).toBe(98);
+    });
+
     it("raises one adjustment for the lines that disagree", async () => {
       const countId = await finish({ [widget]: 95, [gadget]: 100 });
       const posted = await postAndApprove(countId);

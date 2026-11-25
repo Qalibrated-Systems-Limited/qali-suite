@@ -300,6 +300,40 @@ export async function postStockCountPg(
   }
 }
 
+/**
+ * A reviewer sends lines back to be counted again. Reviewing is the posting
+ * set's job, so the same roles; the counters then recount as normal.
+ */
+export async function requestRecountPg(
+  countId: string,
+  lineIds: string[],
+  reason: string,
+): Promise<CountActionResult> {
+  const why = String(reason ?? "").trim();
+  if (!why) return { success: false, message: "Say why these lines need recounting." };
+  try {
+    return await withAuthorizedTenant(POST_ROLES, async (tx, { user }) => {
+      const r = await countsRepo.requestRecount(
+        tx,
+        countId,
+        (Array.isArray(lineIds) ? lineIds : []).map(String),
+        why.slice(0, 500),
+        user.name || user.email || "Reviewer",
+      );
+      revalidatePath(`/dashboard/stock-counts/${countId}`);
+      revalidatePath("/dashboard/stock-counts");
+      return {
+        success: true,
+        message: `${r.lines} line${r.lines === 1 ? "" : "s"} sent back for a recount — ${r.countNumber} is open for counting again`,
+        countId,
+        countNumber: r.countNumber,
+      };
+    });
+  } catch (error) {
+    return fail(error, "Could not request the recount.");
+  }
+}
+
 export async function cancelStockCountPg(
   countId: string,
   reason: string,

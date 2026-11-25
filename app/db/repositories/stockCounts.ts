@@ -171,6 +171,58 @@ export async function recordCount(
   return line;
 }
 
+/**
+ * Send lines back to be counted again (a_reviewer_may_send_count_lines_back_for_a_recount).
+ *
+ * The first count is kept in `count_history`, the line is cleared so it must
+ * be counted afresh, and the sheet returns to `counting` — so it cannot be
+ * posted until every recount is in.
+ */
+export async function requestRecount(
+  tx: Tx,
+  countId: string,
+  lineIds: string[],
+  reason: string,
+  byName: string,
+) {
+  const [count] = await tx
+    .select({ status: stockCounts.status, countNumber: stockCounts.countNumber })
+    .from(stockCounts)
+    .where(eq(stockCounts.id, countId));
+  if (!count) throw new Error("Stock count not found");
+  if (count.status !== "review" && count.status !== "counting") {
+    throw new Error(`Only a sheet being counted or in review can be recounted. Current status: ${count.status}`);
+  }
+  if (!lineIds.length) throw new Error("Choose the lines to recount.");
+
+  const rows = (await tx.execute(sql`
+    UPDATE stock_count_lines
+       SET count_history = count_history || jsonb_build_array(jsonb_build_object(
+             'round', recount_round + 1,
+             'quantity', counted_quantity,
+             'countedById', counted_by_id,
+             'countedAt', counted_at,
+             'notes', notes)),
+           counted_quantity = NULL, counted_at = NULL, counted_by_id = NULL,
+           recount_round = recount_round + 1,
+           recount_reason = ${reason},
+           recount_requested_by_name = ${byName},
+           recount_requested_at = now()
+     WHERE count_id = ${countId}::uuid
+       AND id = ANY(${sql`ARRAY[${sql.join(lineIds.map((l) => sql`${l}::uuid`), sql`, `)}]`})
+       AND counted_quantity IS NOT NULL
+    RETURNING id
+  `)) as unknown as Array<{ id: string }>;
+  if (!rows.length) throw new Error("None of those lines has a count to repeat.");
+
+  await tx
+    .update(stockCounts)
+    .set({ status: "counting", updatedAt: new Date() })
+    .where(eq(stockCounts.id, countId));
+
+  return { countNumber: count.countNumber, lines: rows.length };
+}
+
 /** Progress and variance, summed from the lines. */
 export async function summariseCount(tx: Tx, countId: string) {
   const [row] = (await tx.execute(sql`

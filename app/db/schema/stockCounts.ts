@@ -30,6 +30,8 @@ import {
   index,
   uniqueIndex,
   check,
+  integer,
+  jsonb,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { companies } from "./companies";
@@ -167,6 +169,13 @@ export const stockCountLines = pgTable(
     }),
     countedAt: timestamp("counted_at", { withTimezone: true }),
     notes: text("notes"),
+
+    /* a_reviewer_may_send_count_lines_back_for_a_recount */
+    recountRound: integer("recount_round").notNull().default(0),
+    recountReason: text("recount_reason"),
+    recountRequestedByName: text("recount_requested_by_name"),
+    recountRequestedAt: timestamp("recount_requested_at", { withTimezone: true }),
+    countHistory: jsonb("count_history").notNull().default([]),
 
     /**
      * GENERATED, and NULL while uncounted. That is the useful behaviour: a
