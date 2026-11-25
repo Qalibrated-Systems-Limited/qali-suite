@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  SlidersHorizontal,
   Activity,
   Archive,
   ArrowLeftRight,
@@ -91,6 +92,7 @@ import { getAllowedModules } from "@/lib/plans";
 import * as navRules from "@/lib/permissions";
 import { holdsNavKey } from "@/lib/permission-keys";
 import { hrNavFor } from "@/lib/nav/hr-nav";
+import { reportModulesFor } from "@/lib/reports/catalog";
 // `can` rather than another canSeeXNav helper: GR/IR is read by procurement
 // AND finance, which is a capability and not a menu group.
 import { can } from "@/lib/capabilities";
@@ -698,8 +700,16 @@ export const getNavigationGroups = (user) => {
     icon: BarChart3,
     id: "reports",
     defaultOpen: false,
-    hidden: !canSeeReportsNav(user?.role),
+    hidden: !canSeeReportsNav(user?.role) && reportModulesFor(user?.role).length === 0,
     items: [
+      // The report builder: every module's activity, the user's own way.
+      {
+        icon: SlidersHorizontal,
+        label: "Report builder",
+        id: "report-builder",
+        href: "/dashboard/reports/custom",
+        hidden: reportModulesFor(user?.role).length === 0,
+      },
       // Financial Reports — finance roles only (P&L, Balance Sheet, etc.)
       {
         icon: TrendingUp,

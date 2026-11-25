@@ -69,3 +69,4 @@ export * from "./commissions";
 export * from "./projectDocuments";
 export * from "./resourceRequests";
 export * from "./networkAccess";
+export * from "./reportDefinitions";

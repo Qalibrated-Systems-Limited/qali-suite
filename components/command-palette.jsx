@@ -41,6 +41,7 @@ import {
   ScrollText,
   Scale,
   CheckSquare,
+  BarChart3,
   ShieldCheck,
   ShieldAlert,
   Archive,
@@ -60,6 +61,7 @@ const PAGES = [
   { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { label: "Executive Overview", href: "/dashboard/executive", icon: TrendingUp, aliases: ["ceo", "exec", "overview", "snapshot"] },
   { label: "Approvals", href: "/dashboard/approvals", icon: CheckSquare },
+  { label: "Report builder", href: "/dashboard/reports/custom", icon: BarChart3 },
 
   // Departments no longer have landing dashboards of their own — there is one
   // overall dashboard. Projects keeps a palette entry because /dashboard/projects
