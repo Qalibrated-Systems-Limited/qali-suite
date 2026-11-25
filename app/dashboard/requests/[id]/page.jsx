@@ -1,3 +1,4 @@
+import DocumentsPanel from "@/components/inventory/DocumentsPanel";
 import { auth } from "@/auth";
 import { notFound, redirect } from "next/navigation";
 import { getRequestById } from "@/app/db/actions/request-actions";
@@ -41,11 +42,14 @@ export default async function RequestDetailPage(props) {
   }
 
   return (
-    <RequestDetail
-      request={request}
-      userRole={userRole}
-      userId={session.user.id}
-      company={company}
-    />
+    <div className="space-y-6">
+      <RequestDetail
+        request={request}
+        userRole={userRole}
+        userId={session.user.id}
+        company={company}
+      />
+      <DocumentsPanel entityType="stock_request" entityId={params.id} title="Requisition documents — quotations, approvals, specifications" />
+    </div>
   );
 }

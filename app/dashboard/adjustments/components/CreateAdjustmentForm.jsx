@@ -36,6 +36,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { FileUpload } from "@/components/file-upload";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   Plus,
@@ -74,6 +75,8 @@ export function CreateAdjustmentForm({ user, products }) {
   const [description, setDescription] = useState("");
   const [notes, setNotes] = useState("");
   const [items, setItems] = useState([]);
+  // Evidence the approvers will see: photos, damage reports, police abstract.
+  const [attachments, setAttachments] = useState([]);
 
   // Item being added
   const [selectedProduct, setSelectedProduct] = useState(null);
@@ -169,6 +172,14 @@ export function CreateAdjustmentForm({ user, products }) {
         description,
         notes,
         items,
+        attachments: attachments.map((a) => ({
+          name: a.filename,
+          url: a.url,
+          publicId: a.publicId,
+          mimeType: a.mimeType,
+          size: a.size,
+          category: a.mimeType?.startsWith("image/") ? "evidence_photo" : "damage_report",
+        })),
       })
     );
 
@@ -268,6 +279,14 @@ export function CreateAdjustmentForm({ user, products }) {
               placeholder="Provide any additional details..."
               className="bg-background border-input text-foreground min-h-20 text-sm sm:text-base"
             />
+          </div>
+
+          <div className="grid gap-2">
+            <Label className="text-foreground text-sm sm:text-base">Evidence (optional)</Label>
+            <p className="text-xs text-muted-foreground">
+              Photos of damage, an incident report, a police abstract for theft — the approvers see them at every step.
+            </p>
+            <FileUpload value={attachments} onChange={setAttachments} folder="inventory" maxFiles={10} />
           </div>
         </CardContent>
       </Card>

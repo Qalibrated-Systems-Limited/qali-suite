@@ -1,3 +1,4 @@
+import DocumentsPanel from "@/components/inventory/DocumentsPanel";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { auth } from "@/auth";
@@ -109,6 +110,7 @@ export default async function StockCountDetailPage({ params }) {
       )}
 
       <CountSheet count={count} />
+      <DocumentsPanel entityType="stock_count" entityId={id} title="Count documents — signed sheets, photos" />
     </div>
   );
 }

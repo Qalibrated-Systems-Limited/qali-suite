@@ -1,3 +1,4 @@
+import DocumentsPanel from "@/components/inventory/DocumentsPanel";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { format } from "date-fns";
@@ -258,6 +259,7 @@ export default async function NCRDetailPage({ params }) {
           )}
         </CardContent>
       </Card>
+      <DocumentsPanel entityType="nonconformance" entityId={id} title="NCR evidence and supplier correspondence" />
     </div>
   );
 }

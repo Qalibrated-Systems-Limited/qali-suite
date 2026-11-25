@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { eq } from "drizzle-orm";
 import { userMessage } from "../errors";
 import { raiseApprovalIn } from "../approvalService";
+import { insertDocuments, type NewDocument } from "../inventoryDocumentsService";
 import { notifyApprovalSubmitted } from "@/lib/notifications/approval-notify";
 import { withAuthorizedTenant } from "../tenant";
 import * as adjustmentsRepo from "../repositories/stockAdjustments";
@@ -77,13 +78,14 @@ export async function createStockAdjustmentPg(
         return { success: false, message: "No adjustment was submitted." };
       }
 
-      const { adjustmentDate, adjustmentType, description, notes, items } =
+      const { adjustmentDate, adjustmentType, description, notes, items, attachments } =
         JSON.parse(raw) as {
           adjustmentDate?: string;
           adjustmentType?: string;
           description?: string;
           notes?: string;
           items?: FormItem[];
+          attachments?: NewDocument[];
         };
 
       if (!adjustmentDate || !adjustmentType) {
@@ -168,6 +170,10 @@ export async function createStockAdjustmentPg(
         createdById: user.id ?? null,
         createdByName: user.name || user.email || "Unknown User",
       });
+
+      if (attachments?.length) {
+        await insertDocuments(tx, companyId, user, "stock_adjustment", adjustment.id, attachments);
+      }
 
       const routing = await adjustmentsRepo.decideRouting(
         tx,

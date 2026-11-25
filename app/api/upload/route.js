@@ -10,6 +10,11 @@ const ALLOWED_TYPES = [
   "image/webp",
   "image/heic",
   "application/pdf",
+  // Inventory documents: data sheets, quotations, reports.
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/msword",
+  "application/vnd.ms-excel",
 ];
 
 export async function POST(request) {
@@ -21,7 +26,7 @@ export async function POST(request) {
 
     const formData = await request.formData();
     const file = formData.get("file");
-    const folder = formData.get("folder") || "receipts";
+    const folder = String(formData.get("folder") || "receipts").replace(/[^a-z0-9_-]/gi, "").slice(0, 40) || "receipts";
 
     if (!file || typeof file === "string") {
       return NextResponse.json({ error: "No file provided" }, { status: 400 });
@@ -29,7 +34,7 @@ export async function POST(request) {
 
     if (!ALLOWED_TYPES.includes(file.type)) {
       return NextResponse.json(
-        { error: "File type not allowed. Use JPEG, PNG, WebP, HEIC, or PDF." },
+        { error: "File type not allowed. Use a photo (JPEG, PNG, WebP, HEIC), PDF, Word or Excel file." },
         { status: 400 }
       );
     }
@@ -46,7 +51,7 @@ export async function POST(request) {
     const buffer = Buffer.from(bytes);
     const base64 = `data:${file.type};base64,${buffer.toString("base64")}`;
 
-    const isPdf = file.type === "application/pdf";
+    const isPdf = !file.type.startsWith("image/"); // PDFs and office files are stored as-is
 
     const result = await cloudinary.uploader.upload(base64, {
       folder: `qalisuite/${folder}`,

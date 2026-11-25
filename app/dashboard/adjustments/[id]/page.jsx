@@ -1,3 +1,4 @@
+import DocumentsPanel from "@/components/inventory/DocumentsPanel";
 import { auth } from "@/auth";
 import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
@@ -300,6 +301,7 @@ export default async function AdjustmentDetailPage({ params }) {
           </p>
         </Card>
       )}
+      <DocumentsPanel entityType="stock_adjustment" entityId={id} title="Evidence — photos, reports, disposal certificates" />
     </div>
   );
 }

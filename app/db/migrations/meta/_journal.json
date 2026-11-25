@@ -1044,6 +1044,13 @@
       "when": 1795604322119,
       "tag": "20261125T105842_each_module_keeps_saved_custom_reports",
       "breakpoints": true
+    },
+    {
+      "idx": 149,
+      "version": "7",
+      "when": 1795611270484,
+      "tag": "20261125T125430_inventory_records_carry_attached_documents",
+      "breakpoints": true
     }
   ]
 }

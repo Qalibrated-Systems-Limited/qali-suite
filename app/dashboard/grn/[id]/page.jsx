@@ -1,3 +1,4 @@
+import DocumentsPanel from "@/components/inventory/DocumentsPanel";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { format } from "date-fns";
@@ -308,6 +309,7 @@ export default async function GRNDetailPage({ params }) {
           </CardContent>
         </Card>
       )}
+      <DocumentsPanel entityType="goods_receipt" entityId={id} title="Receipt documents — delivery note, invoice, certificates, photos" />
     </div>
   );
 }

@@ -1,3 +1,4 @@
+import DocumentsPanel from "@/components/inventory/DocumentsPanel";
 // app/(dashboard)/products/[id]/page.jsx
 // Server Component - Product Detail Page
 // Uses existing Qalibrated design system
@@ -1169,6 +1170,7 @@ export default async function ProductDetailPage({ params, searchParams }) {
           </div>
         </div>
       </div>
+      <DocumentsPanel entityType="product" entityId={id} title="Product documents — data sheets, SDS, certificates" />
     </div>
   );
 }

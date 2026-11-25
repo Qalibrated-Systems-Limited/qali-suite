@@ -6,6 +6,7 @@ import { CheckCircle2, Circle, Clock, Loader2, XCircle, ShieldCheck } from "luci
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { approveApproval, rejectApproval } from "@/app/db/actions/approval-actions";
+import DocumentsPanel from "@/components/inventory/DocumentsPanel";
 
 /**
  * A stock change passing its approval chain.
@@ -199,6 +200,10 @@ export default function StepApprovalPanel({ approval }) {
             </table>
           </div>
         </div>
+      )}
+
+      {approval.targetRef?.kind === "InventoryAdjustment" && approval.targetRef?.id && (
+        <DocumentsPanel entityType="stock_adjustment" entityId={approval.targetRef.id} readOnly compact title="Evidence attached" />
       )}
 
       {approval.status === "submitted" && !signing && chain?.blockedBecause && (

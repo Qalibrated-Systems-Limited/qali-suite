@@ -10,6 +10,8 @@ import {
   createNonconformancePg,
   createNonconformanceFromReceiptPg,
 } from "@/app/db/actions/ncr-actions";
+import { attachInventoryDocuments } from "@/app/db/actions/inventory-document-actions";
+import { FileUpload } from "@/components/file-upload";
 
 const input =
   "w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40";
@@ -26,7 +28,29 @@ export default function RaiseNCRForm({ options, initialReceiptId = "" }) {
   const [impact, setImpact] = useState("");
   const [requiresCar, setRequiresCar] = useState(false);
   const [lines, setLines] = useState([blankLine()]);
+  const [files, setFiles] = useState([]);
   const [busy, start] = useTransition();
+
+  /** Attach the evidence to the new NCR, then open it. */
+  const finish = async (res) => {
+    if (files.length) {
+      const a = await attachInventoryDocuments(
+        "nonconformance",
+        res.nonconformanceId,
+        files.map((f) => ({
+          name: f.filename,
+          url: f.url,
+          publicId: f.publicId,
+          mimeType: f.mimeType,
+          size: f.size,
+          category: f.mimeType?.startsWith("image/") ? "evidence_photo" : "inspection",
+        })),
+      );
+      if (!a.success) toast.error(`NCR raised, but the files were not attached: ${a.error}`);
+    }
+    toast.success(res.message);
+    router.push(`/dashboard/ncr/${res.nonconformanceId}`);
+  };
 
   const reasons = useMemo(
     () => (mode === "receipt" ? NCR_REASONS.filter((r) => r.supplier || r.value === "other") : NCR_REASONS),
@@ -48,8 +72,7 @@ export default function RaiseNCRForm({ options, initialReceiptId = "" }) {
           requiresCar,
         });
         if (!res.success) return toast.error(res.error);
-        toast.success(res.message);
-        router.push(`/dashboard/ncr/${res.nonconformanceId}`);
+        await finish(res);
       });
       return;
     }
@@ -88,8 +111,7 @@ export default function RaiseNCRForm({ options, initialReceiptId = "" }) {
         const first = res.fieldErrors ? Object.values(res.fieldErrors).flat()[0] : null;
         return toast.error(first || res.error);
       }
-      toast.success(res.message);
-      router.push(`/dashboard/ncr/${res.nonconformanceId}`);
+      await finish(res);
     });
   };
 
@@ -238,6 +260,12 @@ export default function RaiseNCRForm({ options, initialReceiptId = "" }) {
           <input type="checkbox" checked={requiresCar} onChange={(e) => setRequiresCar(e.target.checked)} className="h-4 w-4" />
           Needs a corrective action request (CAR)
         </label>
+      </section>
+
+      <section className="space-y-1">
+        <h2 className="text-sm font-semibold">Evidence (optional)</h2>
+        <p className="text-xs text-muted-foreground">Photos of the goods, test reports, the delivery note.</p>
+        <FileUpload value={files} onChange={setFiles} folder="inventory" maxFiles={10} />
       </section>
 
       <div className="flex justify-end">
