@@ -60,6 +60,8 @@ export interface CreateNonconformanceInput {
   photoUrls?: string[];
   estimatedImpact?: string | null;
   requiresCar?: boolean;
+  /** Why it was raised — one of NCR_REASONS. */
+  reasonCode?: string | null;
   lines?: NonconformanceLineInput[];
   createdById?: string | null;
   createdByName?: string | null;
@@ -145,6 +147,7 @@ export async function createNonconformance(
       estimatedImpact: input.estimatedImpact ?? null,
       requiresCar: input.requiresCar ?? false,
       carRaisedAt: input.requiresCar ? new Date() : null,
+      reasonCode: input.reasonCode || "other",
       createdById: input.createdById ?? null,
       createdByName: input.createdByName ?? null,
     })
@@ -191,6 +194,7 @@ export async function createFromGoodsReceipt(
     createdById?: string | null;
     createdByName?: string | null;
     requiresCar?: boolean;
+    reasonCode?: string | null;
   } = {},
 ) {
   const [grn] = (await tx.execute(sql`
@@ -220,6 +224,12 @@ export async function createFromGoodsReceipt(
   const damaged = lines.some(
     (l) => l.packaging_condition !== "good" || l.physical_condition !== "good",
   );
+  const short = lines.some((l) => Number(l.received_quantity) < Number(l.expected_quantity));
+  const over = lines.some((l) => Number(l.received_quantity) > Number(l.expected_quantity));
+  const packaging = lines.some((l) => l.packaging_condition !== "good" && l.physical_condition === "good");
+  const reasonCode =
+    input.reasonCode ||
+    (packaging ? "packaging_damaged" : damaged ? "damaged_in_transit" : short ? "short_delivery" : over ? "over_delivery" : "quality_failure");
 
   return createNonconformance(tx, {
     companyId: grn.company_id,
@@ -234,6 +244,7 @@ export async function createFromGoodsReceipt(
       input.description ??
       `Inspection of ${grn.grn_number} found ${lines.length} line(s) that do not conform. See line detail for the disposition decision.`,
     requiresCar: input.requiresCar ?? false,
+    reasonCode,
     createdById: input.createdById ?? null,
     createdByName: input.createdByName ?? null,
     lines: lines.map((l) => ({
@@ -383,6 +394,30 @@ export async function getNonconformanceForDisplay(
       unitCost: l.unit_cost === null ? null : Number(l.unit_cost),
       receiptLineStatus: l.receipt_line_status,
     })),
+
+    reasonCode: detail.reasonCode,
+    handling: {
+      containment: detail.containmentAt
+        ? { text: detail.containmentAction, by: detail.containmentByName, at: detail.containmentAt }
+        : null,
+      rootCause: detail.rootCauseAt
+        ? { text: detail.rootCause, by: detail.rootCauseByName, at: detail.rootCauseAt }
+        : null,
+      corrective: detail.correctiveAt
+        ? { text: detail.correctiveAction, by: detail.correctiveByName, at: detail.correctiveAt }
+        : null,
+    },
+    supplierNotice: detail.supplierNotifiedAt
+      ? {
+          at: detail.supplierNotifiedAt,
+          to: detail.supplierNotifiedTo,
+          by: detail.supplierNotifiedByName,
+          via: detail.supplierNotifiedVia,
+          text: detail.supplierNotice,
+          response: detail.supplierResponse,
+          responseAt: detail.supplierResponseAt,
+        }
+      : null,
 
     cancelledAt: detail.cancelledAt,
     cancellationReason: detail.cancellationReason,
@@ -809,4 +844,91 @@ export async function cancelNonconformance(
     cancellationReason: reason,
     lastModifiedById: cancelledById,
   });
+}
+
+
+// ── Handling record (ncrs_carry_a_reason_a_handling_record_and_a_supplier_notice)
+
+export type HandlingStep = "containment" | "root_cause" | "corrective";
+
+/**
+ * Record one part of how the NCR was handled. May be revised until the NCR is
+ * closed or cancelled; each write says who and when.
+ */
+export async function recordHandling(tx: Tx, nonconformanceId: string, step: HandlingStep, text: string, byName: string) {
+  const col = {
+    containment: sql`containment_action = ${text}, containment_by_name = ${byName}, containment_at = now()`,
+    root_cause: sql`root_cause = ${text}, root_cause_by_name = ${byName}, root_cause_at = now()`,
+    corrective: sql`corrective_action = ${text}, corrective_by_name = ${byName}, corrective_at = now()`,
+  }[step];
+  const rows = (await tx.execute(sql`
+    UPDATE nonconformances SET ${col}, updated_at = now()
+     WHERE id = ${nonconformanceId}::uuid AND status NOT IN ('closed', 'cancelled')
+    RETURNING ncr_number AS "ncrNumber"
+  `)) as unknown as Array<{ ncrNumber: string }>;
+  if (!rows.length) throw new Error("This NCR is closed or cancelled, or does not exist.");
+  return rows[0];
+}
+
+export async function recordSupplierNotice(
+  tx: Tx,
+  nonconformanceId: string,
+  input: { to: string; via: string; text: string; byName: string },
+) {
+  const rows = (await tx.execute(sql`
+    UPDATE nonconformances
+       SET supplier_notified_at = now(), supplier_notified_to = ${input.to},
+           supplier_notified_via = ${input.via}, supplier_notice = ${input.text},
+           supplier_notified_by_name = ${input.byName}, updated_at = now()
+     WHERE id = ${nonconformanceId}::uuid AND status <> 'cancelled'
+    RETURNING ncr_number AS "ncrNumber"
+  `)) as unknown as Array<{ ncrNumber: string }>;
+  if (!rows.length) throw new Error("NCR not found, or cancelled.");
+  return rows[0];
+}
+
+export async function recordSupplierResponse(tx: Tx, nonconformanceId: string, text: string) {
+  const rows = (await tx.execute(sql`
+    UPDATE nonconformances SET supplier_response = ${text}, supplier_response_at = now(), updated_at = now()
+     WHERE id = ${nonconformanceId}::uuid AND supplier_notified_at IS NOT NULL
+    RETURNING ncr_number AS "ncrNumber"
+  `)) as unknown as Array<{ ncrNumber: string }>;
+  if (!rows.length) throw new Error("Tell the supplier first, then record their answer.");
+  return rows[0];
+}
+
+/** What is still missing before this NCR may close. Empty: ready. */
+export async function closeBlockers(tx: Tx, nonconformanceId: string): Promise<string[]> {
+  const [n] = (await tx.execute(sql`
+    SELECT containment_at, root_cause_at, corrective_at, supplier_id, supplier_name, supplier_notified_at
+      FROM nonconformances WHERE id = ${nonconformanceId}::uuid
+  `)) as unknown as Array<Record<string, unknown>>;
+  if (!n) return ["NCR not found"];
+  const missing: string[] = [];
+  if (!n.containment_at) missing.push("the containment action");
+  if (!n.root_cause_at) missing.push("the root cause");
+  if (!n.corrective_at) missing.push("the corrective action");
+  if ((n.supplier_id || n.supplier_name) && !n.supplier_notified_at) missing.push("notice to the supplier");
+  return missing;
+}
+
+/** The supplier's email address, for the notice. */
+export async function supplierContact(tx: Tx, nonconformanceId: string) {
+  const [r] = (await tx.execute(sql`
+    SELECT n.ncr_number AS "ncrNumber", n.title, n.description, n.reason_code AS "reasonCode",
+           n.source_reference AS "sourceReference", n.supplier_name AS "supplierName",
+           p.email, COALESCE(p.display_name, p.name, n.supplier_name) AS "partyName"
+      FROM nonconformances n LEFT JOIN parties p ON p.id = n.supplier_id
+     WHERE n.id = ${nonconformanceId}::uuid
+  `)) as unknown as Array<{
+    ncrNumber: string; title: string; description: string; reasonCode: string;
+    sourceReference: string | null; supplierName: string | null; email: string | null; partyName: string | null;
+  }>;
+  if (!r) return null;
+  const lines = (await tx.execute(sql`
+    SELECT COALESCE(description, product_name, '') AS description, product_sku AS sku, unit,
+           expected_quantity::float8 AS expected, actual_quantity::float8 AS actual, notes
+      FROM nonconformance_lines WHERE nonconformance_id = ${nonconformanceId}::uuid ORDER BY line_number
+  `)) as unknown as Array<{ description: string; sku: string | null; unit: string | null; expected: number; actual: number; notes: string | null }>;
+  return { ...r, lines };
 }

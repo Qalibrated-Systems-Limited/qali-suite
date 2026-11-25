@@ -1,3 +1,4 @@
+import { NCR_REASON_VALUES } from "@/lib/ncr/reasons";
 import { z } from "zod";
 
 /**
@@ -297,6 +298,7 @@ export const nonconformanceSchema = z.object({
   photoUrls: z.array(z.string()).default([]),
   estimatedImpact: z.coerce.number().min(0).optional().nullable(),
   requiresCar: z.coerce.boolean().default(false),
+  reasonCode: z.enum(NCR_REASON_VALUES as [string, ...string[]]).default("other"),
   lines: z
     .array(
       z.object({
@@ -333,6 +335,7 @@ export function toNonconformanceInput(data: NonconformancePayload) {
         ? null
         : money(data.estimatedImpact),
     requiresCar: data.requiresCar,
+    reasonCode: data.reasonCode,
     lines: data.lines.map((l) => ({
       goodsReceiptLineId: l.goodsReceiptLineId || null,
       productId: l.productId || null,

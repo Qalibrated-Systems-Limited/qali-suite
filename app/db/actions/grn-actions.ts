@@ -147,7 +147,7 @@ export async function submitGoodsReceiptPg(
   goodsReceiptId: string,
 ): Promise<ActionResult> {
   try {
-    const { grn, ncrNumber } = await withAuthorizedTenant(
+    const { grn, ncrNumber, ncrId, hasSupplier } = await withAuthorizedTenant(
       [...GRN_RECEIVE_ROLES],
       async (tx, { user }) => {
         const grn = await goodsReceipts.submitGoodsReceipt(
@@ -173,28 +173,37 @@ export async function submitGoodsReceiptPg(
           1,
           1,
         );
-        if (existing.length) return { grn, ncrNumber: null };
+        if (existing.length) return { grn, ncrNumber: null, ncrId: null as string | null, hasSupplier: false };
 
         const [state] = (await tx.execute(sql`
           SELECT has_discrepancy FROM goods_receipt_state
            WHERE goods_receipt_id = ${goodsReceiptId}::uuid
         `)) as unknown as Array<{ has_discrepancy: boolean }>;
-        if (!state?.has_discrepancy) return { grn, ncrNumber: null };
+        if (!state?.has_discrepancy) return { grn, ncrNumber: null, ncrId: null as string | null, hasSupplier: false };
 
         const ncr = await nonconformance.createFromGoodsReceipt(tx, goodsReceiptId, {
           createdById: user.id,
           createdByName: user.name,
         });
-        return { grn, ncrNumber: ncr.ncrNumber };
+        return { grn, ncrNumber: ncr.ncrNumber, ncrId: ncr.id as string | null, hasSupplier: Boolean(ncr.supplierId || ncr.supplierName) };
       },
     );
+
+    // Every discrepancy with a supplier on it goes to the supplier. Best
+    // effort: if it cannot be emailed, the NCR shows it still needs telling.
+    let forwarded = "";
+    if (ncrId && hasSupplier) {
+      const { notifyNcrSupplierPg } = await import("./ncr-actions");
+      const f = await notifyNcrSupplierPg(ncrId, { via: "email" });
+      forwarded = f.success ? " and sent to the supplier" : " (supplier not yet told — see the NCR)";
+    }
 
     revalidateReceipt(goodsReceiptId, ["/dashboard/stocks", "/dashboard/ncr"]);
     return {
       success: true,
       grnNumber: grn.grnNumber,
       message: ncrNumber
-        ? `${grn.grnNumber} submitted — ${ncrNumber} raised for the discrepancy`
+        ? `${grn.grnNumber} submitted — ${ncrNumber} raised for the discrepancy${forwarded}`
         : `${grn.grnNumber} submitted for acceptance`,
     };
   } catch (err) {

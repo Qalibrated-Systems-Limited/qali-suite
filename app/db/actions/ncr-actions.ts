@@ -11,6 +11,9 @@ import {
 } from "@/lib/utils/role-gates";
 import * as nonconformance from "../repositories/nonconformance";
 import * as accountsRepo from "../repositories/accounts";
+import { sql } from "drizzle-orm";
+import { ncrReasonLabel } from "@/lib/ncr/reasons";
+import { sendSupplierDiscrepancyEmail } from "@/lib/email";
 import {
   nonconformanceSchema,
   toNonconformanceInput,
@@ -111,12 +114,13 @@ export async function createNonconformancePg(
         }),
     );
 
+    const forwarded = ncr.supplierId || ncr.supplierName ? await forwardToSupplier(ncr.id) : null;
     revalidateNcr();
     return {
       success: true,
       nonconformanceId: ncr.id,
       ncrNumber: ncr.ncrNumber,
-      message: `Nonconformance ${ncr.ncrNumber} raised`,
+      message: `Nonconformance ${ncr.ncrNumber} raised${forwardedText(forwarded)}`,
     };
   } catch (err) {
     return { success: false, error: userMessage(err, "Could not raise the nonconformance.") };
@@ -133,7 +137,7 @@ export async function createNonconformancePg(
  */
 export async function createNonconformanceFromReceiptPg(
   goodsReceiptId: string,
-  input: { title?: string | null; description?: string | null; requiresCar?: boolean } = {},
+  input: { title?: string | null; description?: string | null; requiresCar?: boolean; reasonCode?: string | null } = {},
 ): Promise<ActionResult> {
   try {
     const ncr = await withAuthorizedTenant([...NCR_RAISE_ROLES], (tx, { user }) =>
@@ -144,12 +148,13 @@ export async function createNonconformanceFromReceiptPg(
       }),
     );
 
+    const forwarded = ncr.supplierId || ncr.supplierName ? await forwardToSupplier(ncr.id) : null;
     revalidateNcr(undefined, [`/dashboard/grn/${goodsReceiptId}`]);
     return {
       success: true,
       nonconformanceId: ncr.id,
       ncrNumber: ncr.ncrNumber,
-      message: `Nonconformance ${ncr.ncrNumber} raised against the receipt`,
+      message: `Nonconformance ${ncr.ncrNumber} raised against the receipt${forwardedText(forwarded)}`,
     };
   } catch (err) {
     return { success: false, error: userMessage(err, "Could not raise the nonconformance.") };
@@ -217,6 +222,12 @@ export async function executeNonconformanceDispositionPg(
     const result = await withAuthorizedTenant(
       [...NCR_PROPOSE_ROLES],
       async (tx, { user }) => {
+        // HANDLED BEFORE CLOSED: containment, root cause, corrective action,
+        // and — when a supplier is involved — the notice to them.
+        const missing = await nonconformance.closeBlockers(tx, nonconformanceId);
+        if (missing.length) {
+          throw new Error(`Before closing, record ${missing.join(", ")}.`);
+        }
         const accounts = await resolveDispositionAccounts(tx);
         return nonconformance.executeDisposition(tx, nonconformanceId, {
           ...accounts,
@@ -399,4 +410,144 @@ export async function getNonconformanceStatsForDisplayPg() {
 
 export async function getNonconformanceStatsPg() {
   return withAuthorizedTenant([], (tx) => nonconformance.getNonconformanceStats(tx));
+}
+
+
+// ── Handling and the supplier (ncrs_carry_a_reason_a_handling_record_and_a_supplier_notice)
+
+const HANDLING_ROLES = Array.from(
+  new Set([...NCR_RAISE_ROLES, ...NCR_PROPOSE_ROLES, ...NCR_AUTHORIZE_ROLES]),
+) as string[];
+
+function forwardedText(f: { ok: boolean; to?: string; error?: string } | null) {
+  if (!f) return "";
+  return f.ok ? ` and forwarded to the supplier (${f.to})` : ` — not yet sent to the supplier: ${f.error}`;
+}
+
+/**
+ * Email the supplier the discrepancy and record that it went. Used straight
+ * after raising, and from the NCR page. Never throws: a mail that could not go
+ * leaves the NCR showing "supplier not yet told", with a button to retry or
+ * record another way.
+ */
+async function forwardToSupplier(nonconformanceId: string, message = "", toOverride = "") {
+  try {
+    return await withAuthorizedTenant(HANDLING_ROLES, async (tx, { user }) => {
+      const c = await nonconformance.supplierContact(tx, nonconformanceId);
+      if (!c) return { ok: false, error: "NCR not found" };
+      const to = (toOverride || c.email || "").trim();
+      if (!to) return { ok: false, error: "the supplier has no email address on file" };
+      const [co] = (await tx.execute(sql`
+        SELECT c.name FROM companies c WHERE c.id = NULLIF(current_setting('app.company_id', true), '')::uuid
+      `)) as unknown as Array<{ name: string }>;
+      const reasonLabel = ncrReasonLabel(c.reasonCode);
+      await sendSupplierDiscrepancyEmail({
+        to,
+        replyTo: (user as { email?: string }).email || undefined,
+        supplierName: c.partyName || c.supplierName || "Supplier",
+        senderCompany: co?.name,
+        ncrNumber: String(c.ncrNumber),
+        reasonLabel,
+        reference: c.sourceReference || "",
+        title: String(c.title ?? ""),
+        message: message || String(c.description ?? ""),
+        lines: c.lines,
+      });
+      await nonconformance.recordSupplierNotice(tx, nonconformanceId, {
+        to,
+        via: "email",
+        text: message || String(c.description ?? ""),
+        byName: user.name || "Staff",
+      });
+      return { ok: true, to };
+    });
+  } catch (err) {
+    return { ok: false, error: userMessage(err, "the email could not be sent") };
+  }
+}
+
+export async function recordNcrHandlingPg(
+  nonconformanceId: string,
+  step: "containment" | "root_cause" | "corrective",
+  text: string,
+): Promise<ActionResult> {
+  if (!["containment", "root_cause", "corrective"].includes(step)) {
+    return { success: false, error: "Unknown step." };
+  }
+  const t = String(text ?? "").trim();
+  if (t.length < 5) return { success: false, error: "Write a sentence or two — what was done, by whom." };
+  try {
+    const r = await withAuthorizedTenant(HANDLING_ROLES, (tx, { user }) =>
+      nonconformance.recordHandling(tx, nonconformanceId, step, t.slice(0, 4000), user.name || "Staff"),
+    );
+    revalidateNcr(nonconformanceId);
+    return { success: true, ncrNumber: r.ncrNumber, message: "Recorded" };
+  } catch (err) {
+    return { success: false, error: userMessage(err, "Could not record it.") };
+  }
+}
+
+/**
+ * Tell the supplier. By email (sent from here), or record that they were told
+ * another way — a call, a letter, at the gate — with what was said.
+ */
+export async function notifyNcrSupplierPg(
+  nonconformanceId: string,
+  input: { via: "email" | "phone" | "letter" | "in_person"; to?: string; message?: string },
+): Promise<ActionResult> {
+  const via = input?.via;
+  if (!["email", "phone", "letter", "in_person"].includes(via)) return { success: false, error: "Choose how they were told." };
+  const message = String(input?.message ?? "").trim().slice(0, 4000);
+  if (via === "email") {
+    const f = await forwardToSupplier(nonconformanceId, message, String(input?.to ?? ""));
+    revalidateNcr(nonconformanceId);
+    return f.ok
+      ? { success: true, message: `Sent to ${f.to}` }
+      : { success: false, error: `Not sent: ${f.error}.` };
+  }
+  if (!message) return { success: false, error: "Say what the supplier was told." };
+  const to = String(input?.to ?? "").trim();
+  if (!to) return { success: false, error: "Say who at the supplier was told." };
+  try {
+    await withAuthorizedTenant(HANDLING_ROLES, (tx, { user }) =>
+      nonconformance.recordSupplierNotice(tx, nonconformanceId, { to, via, text: message, byName: user.name || "Staff" }),
+    );
+    revalidateNcr(nonconformanceId);
+    return { success: true, message: "Recorded that the supplier was told" };
+  } catch (err) {
+    return { success: false, error: userMessage(err, "Could not record it.") };
+  }
+}
+
+export async function recordNcrSupplierResponsePg(nonconformanceId: string, text: string): Promise<ActionResult> {
+  const t = String(text ?? "").trim();
+  if (!t) return { success: false, error: "What did the supplier answer?" };
+  try {
+    await withAuthorizedTenant(HANDLING_ROLES, (tx) =>
+      nonconformance.recordSupplierResponse(tx, nonconformanceId, t.slice(0, 4000)),
+    );
+    revalidateNcr(nonconformanceId);
+    return { success: true, message: "Supplier's answer recorded" };
+  } catch (err) {
+    return { success: false, error: userMessage(err, "Could not record it.") };
+  }
+}
+
+/** Suppliers, products and recent receipts, for the raise form. */
+export async function getNcrRaiseOptionsPg() {
+  return withAuthorizedTenant([...NCR_RAISE_ROLES], async (tx) => {
+    const suppliers = (await tx.execute(sql`
+      SELECT id::text AS id, COALESCE(display_name, name) AS name, email
+        FROM parties WHERE is_supplier AND COALESCE(is_active, true) ORDER BY 2 LIMIT 1000
+    `)) as unknown as Array<{ id: string; name: string; email: string | null }>;
+    const products = (await tx.execute(sql`
+      SELECT id::text AS id, name, sku, unit, cost_price::float8 AS cost
+        FROM products ORDER BY name LIMIT 2000
+    `)) as unknown as Array<{ id: string; name: string; sku: string; unit: string; cost: number }>;
+    const receipts = (await tx.execute(sql`
+      SELECT g.id::text AS id, g.grn_number AS number, g.supplier_name AS supplier, g.status
+        FROM goods_receipts g ORDER BY g.created_at DESC LIMIT 50
+    `)) as unknown as Array<{ id: string; number: string; supplier: string | null; status: string }>;
+    return { suppliers, products, receipts };
+  });
 }

@@ -25,6 +25,8 @@ import NCRStatusBadge, {
   DispositionLabel,
 } from "../components/NCRStatusBadge";
 import NCRActions from "../components/NCRActions";
+import NCRHandling from "../components/NCRHandling";
+import { ncrReasonLabel } from "@/lib/ncr/reasons";
 
 export const metadata = { title: "Nonconformance" };
 
@@ -75,6 +77,10 @@ export default async function NCRDetailPage({ params }) {
               <span>•</span>
               <NCRCategoryLabel category={ncr.category} />
               <span>•</span>
+              <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-700 dark:text-amber-400">
+                {ncrReasonLabel(ncr.reasonCode)}
+              </span>
+              <span>•</span>
               <span>Raised {fmt(ncr.createdAt)}</span>
             </div>
           </div>
@@ -88,6 +94,8 @@ export default async function NCRDetailPage({ params }) {
           <p className="text-muted-foreground whitespace-pre-line">{ncr.description}</p>
         </CardContent>
       </Card>
+
+      <NCRHandling ncr={{ ...ncr, reasonLabel: ncrReasonLabel(ncr.reasonCode) }} />
 
       <div className="grid gap-4 lg:grid-cols-3">
         <Card className="bg-card border-border">

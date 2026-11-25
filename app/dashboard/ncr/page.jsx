@@ -127,11 +127,18 @@ async function NCRList({ searchParams }) {
 export default async function NCRIndexPage(props) {
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Nonconformance Register</h1>
-        <p className="text-sm text-muted-foreground">
-          Track and resolve quality and quantity issues across receipts, stock counts, and tool returns
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Nonconformance Register</h1>
+          <p className="text-sm text-muted-foreground">
+            Track and resolve quality and quantity issues across receipts, stock counts, and tool returns
+          </p>
+        </div>
+        <Button asChild>
+          <Link href="/dashboard/ncr/new">
+            <ShieldAlert className="mr-2 h-4 w-4" /> Raise NCR
+          </Link>
+        </Button>
       </div>
 
       {/* @ts-expect-error Async Server Component */}

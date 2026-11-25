@@ -98,6 +98,12 @@ export default async function GRNDetailPage({ params }) {
                   <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400">
                     <AlertTriangle className="h-3.5 w-3.5" /> Discrepancy
                   </span>
+                  <Link
+                    href={`/dashboard/ncr/new?grn=${grn._id}`}
+                    className="rounded-md border border-amber-500/40 px-2 py-0.5 text-xs font-medium text-amber-700 hover:bg-amber-500/10 dark:text-amber-400"
+                  >
+                    Raise NCR &amp; tell supplier
+                  </Link>
                 </>
               )}
             </div>

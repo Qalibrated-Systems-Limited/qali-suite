@@ -321,6 +321,45 @@ suite("procurement actions (end to end)", () => {
       expect(listed).toHaveLength(1);
     });
 
+    it("gives the NCR a reason, and will not close it until it is handled and the supplier told", async () => {
+      const { purchaseOrderId, lineId } = await openOrderWithLine();
+      asRole("Storekeeper");
+      const created = await grnActions.createGoodsReceiptPg(
+        null,
+        receiptForm(receiptBody({ purchaseOrderId, lineId, receivedQty: 40 })),
+      );
+      await grnActions.submitGoodsReceiptPg(created.goodsReceiptId);
+      const [ncr] = await ncrActions.listNonconformancesForDisplayPg({ goodsReceiptId: created.goodsReceiptId });
+      const [row] = await admin`SELECT reason_code FROM nonconformances WHERE id = ${ncr._id}::uuid`;
+      expect(row.reason_code).toBe("short_delivery");
+
+      asRole("Store Manager");
+      const early = await ncrActions.executeNonconformanceDispositionPg(ncr._id);
+      expect(early.success).toBe(false);
+      expect(early.error).toMatch(/before closing, record the containment action, the root cause, the corrective action/i);
+
+      for (const step of ["containment", "root_cause", "corrective"]) {
+        expect((await ncrActions.recordNcrHandlingPg(ncr._id, step, `Did the ${step} work`)).success).toBe(true);
+      }
+      const stillSupplier = await ncrActions.executeNonconformanceDispositionPg(ncr._id);
+      expect(stillSupplier.error).toMatch(/notice to the supplier/i);
+
+      const told = await ncrActions.notifyNcrSupplierPg(ncr._id, {
+        via: "phone",
+        to: "Jane at the supplier",
+        message: "60 short; they will send the balance Friday",
+      });
+      expect(told.success).toBe(true);
+      expect((await ncrActions.recordNcrSupplierResponsePg(ncr._id, "Balance dispatched")).success).toBe(true);
+
+      const ready = await ncrActions.executeNonconformanceDispositionPg(ncr._id);
+      expect(ready.error ?? "").not.toMatch(/before closing/i);
+
+      const detail = await ncrActions.getNonconformanceForDisplayPg(ncr._id);
+      expect(detail.handling.rootCause.text).toBe("Did the root_cause work");
+      expect(detail.supplierNotice).toMatchObject({ via: "phone", to: "Jane at the supplier", response: "Balance dispatched" });
+    });
+
     /**
      * The path the buttons actually take.
      *

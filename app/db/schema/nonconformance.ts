@@ -102,6 +102,25 @@ export const nonconformances = pgTable(
     carRaisedAt: timestamp("car_raised_at", { withTimezone: true }),
     carNotes: text("car_notes"),
 
+    /* ncrs_carry_a_reason_a_handling_record_and_a_supplier_notice */
+    reasonCode: text("reason_code").notNull().default("other"),
+    containmentAction: text("containment_action"),
+    containmentByName: text("containment_by_name"),
+    containmentAt: timestamp("containment_at", { withTimezone: true }),
+    rootCause: text("root_cause"),
+    rootCauseByName: text("root_cause_by_name"),
+    rootCauseAt: timestamp("root_cause_at", { withTimezone: true }),
+    correctiveAction: text("corrective_action"),
+    correctiveByName: text("corrective_by_name"),
+    correctiveAt: timestamp("corrective_at", { withTimezone: true }),
+    supplierNotifiedAt: timestamp("supplier_notified_at", { withTimezone: true }),
+    supplierNotifiedTo: text("supplier_notified_to"),
+    supplierNotifiedByName: text("supplier_notified_by_name"),
+    supplierNotifiedVia: text("supplier_notified_via"),
+    supplierNotice: text("supplier_notice"),
+    supplierResponse: text("supplier_response"),
+    supplierResponseAt: timestamp("supplier_response_at", { withTimezone: true }),
+
     journalEntryId: uuid("journal_entry_id").references(
       () => journalEntries.id,
       { onDelete: "restrict" },
