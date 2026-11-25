@@ -1,6 +1,8 @@
 import "../technical/technical.css";
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
+import { roleAllowed } from "@/lib/permissions";
+import { INVOICE_WRITE_ROLES } from "@/lib/utils/role-gates";
 import InspectionBoard from "./InspectionBoard";
 import {
   getInspectionData,
@@ -31,6 +33,7 @@ export default async function InspectionPage() {
         inspectors={data.inspectors}
         stats={data.stats}
         me={me}
+        canBill={roleAllowed(session.user.role, [...INVOICE_WRITE_ROLES])}
         team={team}
       />
     </div>

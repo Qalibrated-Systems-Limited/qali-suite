@@ -73,6 +73,7 @@ export const calibrationJobs = pgTable(
     /** CERT-00001, stamped when a passed job issues its certificate. */
     certNumber: text("cert_number").notNull().default(""),
     billingStatus: text("billing_status").notNull().default("pending"),
+    invoiceId: uuid("invoice_id"),
     notes: text("notes").notNull().default(""),
     submittedAt: timestamp("submitted_at", { withTimezone: true }),
     approvedById: text("approved_by_id").references(() => users.id, { onDelete: "set null" }),
@@ -121,6 +122,8 @@ export const inspections = pgTable(
     ruling: text("ruling").notNull().default("pending"),
     appealStatus: text("appeal_status").notNull().default("none"),
     authorityExpiry: date("authority_expiry"),
+    billingStatus: text("billing_status").notNull().default("pending"),
+    invoiceId: uuid("invoice_id"),
     notes: text("notes").notNull().default(""),
     submittedAt: timestamp("submitted_at", { withTimezone: true }),
     approvedById: text("approved_by_id").references(() => users.id, { onDelete: "set null" }),

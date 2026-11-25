@@ -71,6 +71,7 @@ export const shopOrders = pgTable(
     customerEmail: text("customer_email").notNull().default(""),
     itemCount: integer("item_count").notNull().default(0),
     total: doublePrecision("total").notNull().default(0),
+    invoiceId: uuid("invoice_id"),
     status: text("status").notNull().default("awaiting_payment"),
     placedAt: timestamp("placed_at", { withTimezone: true }).notNull().defaultNow(),
     notes: text("notes").notNull().default(""),

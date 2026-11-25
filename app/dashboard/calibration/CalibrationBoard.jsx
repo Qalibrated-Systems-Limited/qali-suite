@@ -13,6 +13,7 @@ import {
 } from "@/app/db/actions/technical-actions";
 import { fmtDate } from "../technical/lib/meta";
 import PdfPreviewButton from "@/components/pdf/PdfPreviewButton";
+import BillJobButton from "@/components/finance/BillJobButton";
 import WorkActions, { StatusBadge, WORK_STATUS } from "../technical/components/WorkActions";
 
 const JOB_STATUS = WORK_STATUS;
@@ -40,7 +41,7 @@ function standardStatus(nextCal) {
   return { cls: "green", label: "Valid" };
 }
 
-export default function CalibrationBoard({ jobs = [], standards = [], stats, me, team = [] }) {
+export default function CalibrationBoard({ jobs = [], standards = [], stats, me, team = [], canBill = false }) {
   // Technical managers keep standards, billing and deletion; technicians run
   // the jobs assigned to them and can log one found on site.
   const canManage = Boolean(me?.isManager);
@@ -195,6 +196,7 @@ export default function CalibrationBoard({ jobs = [], standards = [], stats, me,
                 ) : <Badge cls={cfg(BILLING, j.billingStatus).cls}>{cfg(BILLING, j.billingStatus).label}</Badge>,
                 <span style={{ display: "inline-flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
                   <WorkActions kind="job" item={j} me={me} team={team} />
+                  <BillJobButton kind="calibration" job={j} canBill={canBill} />
                   {canManage && j.status !== "approved" ? (
                     <button className="tech-rowbtn" onClick={() => confirm(`Delete ${j.jobNumber}?`) && act(deleteCalibrationJob, j.id)} disabled={isPending} aria-label="Delete"><Trash2 size={14} /></button>
                   ) : null}

@@ -11,6 +11,7 @@ import {
 } from "@/app/db/actions/technical-actions";
 import { fmtDate } from "../technical/lib/meta";
 import PdfPreviewButton from "@/components/pdf/PdfPreviewButton";
+import BillJobButton from "@/components/finance/BillJobButton";
 import WorkActions, { StatusBadge } from "../technical/components/WorkActions";
 
 const RULING = [
@@ -31,7 +32,7 @@ function Badge({ cls, children }) {
   return <span className={`tech-b ${cls}`}>{children}</span>;
 }
 
-export default function InspectionBoard({ inspections = [], inspectors = [], stats, me, team = [] }) {
+export default function InspectionBoard({ inspections = [], inspectors = [], stats, me, team = [], canBill = false }) {
   const canManage = Boolean(me?.isManager);
   const canCreate = Boolean(me?.isTechnician);
   const router = useRouter();
@@ -125,6 +126,7 @@ export default function InspectionBoard({ inspections = [], inspectors = [], sta
                 <Badge cls={cfg(RULING, i.ruling).cls}>{cfg(RULING, i.ruling).label}</Badge>,
                 <span style={{ display: "inline-flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
                   <WorkActions kind="inspection" item={i} me={me} team={team} />
+                  <BillJobButton kind="inspection" job={i} canBill={canBill} />
                   <PdfPreviewButton
                     href={`/api/technical/inspection/${i.id}/report`}
                     title={`Inspection report ${i.inspectionNumber}`}

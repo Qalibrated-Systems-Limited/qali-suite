@@ -1,6 +1,8 @@
 import "../technical/technical.css";
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
+import { roleAllowed } from "@/lib/permissions";
+import { INVOICE_WRITE_ROLES } from "@/lib/utils/role-gates";
 import AccessDenied from "../projects/components/AccessDenied";
 import CalibrationBoard from "./CalibrationBoard";
 import {
@@ -32,6 +34,7 @@ export default async function CalibrationPage() {
         standards={data.standards}
         stats={data.stats}
         me={me}
+        canBill={roleAllowed(session.user.role, [...INVOICE_WRITE_ROLES])}
         team={team}
       />
     </div>

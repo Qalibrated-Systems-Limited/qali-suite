@@ -2,6 +2,7 @@
 
 import {
   SlidersHorizontal,
+  Workflow,
   Activity,
   Archive,
   ArrowLeftRight,
@@ -328,8 +329,17 @@ export const getNavigationGroups = (user) => {
     hidden: !canSeeSalesNav(user?.role),
     items: [
       {
+        icon: Users,
+        label: "Customers",
+        step: 1,
+        id: "customers",
+        href: "/dashboard/customers",
+        hidden: !canSeeSalesNav(user?.role),
+      },
+      {
         icon: FileText,
         label: "Quotes",
+        step: 2,
         id: "quotes",
         href: "/dashboard/quotes",
         hidden: !canSeeSalesNav(user?.role),
@@ -337,6 +347,7 @@ export const getNavigationGroups = (user) => {
       {
         icon: ClipboardCheck,
         label: "Sales Orders",
+        step: 3,
         id: "sales-orders",
         href: "/dashboard/sales-orders",
         hidden: !canSeeSalesNav(user?.role),
@@ -344,34 +355,31 @@ export const getNavigationGroups = (user) => {
       {
         icon: Receipt,
         label: "Invoices",
+        step: 4,
         id: "invoices",
         href: "/dashboard/invoices",
         hidden: !canSeeSalesNav(user?.role),
       },
       {
-        icon: Receipt,
-        label: "Credit Notes",
-        id: "credit-notes",
-        href: "/dashboard/credit-notes",
-        hidden: !canSeeSalesNav(user?.role),
-      },
-      {
-        icon: Users,
-        label: "Customers",
-        id: "customers",
-        href: "/dashboard/customers",
-        hidden: !canSeeSalesNav(user?.role),
-      },
-      {
         icon: CreditCard,
         label: "Payments Received",
+        step: 5,
         id: "payments-received",
         href: "/dashboard/payments/received",
         hidden: !canSeeFinanceNav(user?.role),
       },
       {
+        icon: Receipt,
+        label: "Credit Notes",
+        step: 6,
+        id: "credit-notes",
+        href: "/dashboard/credit-notes",
+        hidden: !canSeeSalesNav(user?.role),
+      },
+      {
         icon: FileText,
         label: "Statements",
+        step: 7,
         id: "statements",
         href: "/dashboard/statements",
         hidden: !canSeeFinanceNav(user?.role),
@@ -391,18 +399,52 @@ export const getNavigationGroups = (user) => {
     hidden: !canSeePurchasesNav(user?.role) || !hasMod("purchases"),
     items: [
       {
+        icon: Users,
+        label: "Suppliers",
+        step: 1,
+        id: "suppliers",
+        href: "/dashboard/suppliers",
+        hidden: !canSeePurchasesNav(user?.role),
+      },
+      {
         icon: FileText,
         label: "Purchase Orders",
+        step: 2,
         id: "purchase-orders",
         href: "/dashboard/purchase-orders",
         hidden: !canSeePurchasesNav(user?.role),
       },
       {
+        icon: ClipboardCheck,
+        label: "Goods Receipts",
+        step: 3,
+        id: "purchases-grn",
+        href: "/dashboard/grn",
+        hidden: !canSeeInventoryNav(user?.role) && !canSeePurchasesNav(user?.role),
+      },
+      {
         icon: Receipt,
         label: "Bills",
+        step: 4,
         id: "bills",
         href: "/dashboard/bills",
         hidden: !canSeeFinanceNav(user?.role) && user?.role !== "Procurement Officer",
+      },
+      {
+        icon: Wallet,
+        label: "Payments Made",
+        step: 5,
+        id: "payments-made",
+        href: "/dashboard/payments/made",
+        hidden: !canSeeFinanceNav(user?.role),
+      },
+      {
+        icon: FileText,
+        label: "Supplier Statements",
+        step: 6,
+        id: "supplier-statements",
+        href: "/dashboard/supplier-statements",
+        hidden: !canSeeFinanceNav(user?.role),
       },
       {
         /*
@@ -415,30 +457,10 @@ export const getNavigationGroups = (user) => {
         */
         icon: Scale,
         label: "GR/IR Reconciliation",
+        step: 7,
         id: "gr-ir",
         href: "/dashboard/gr-ir",
         hidden: !can(user, "grir.view"),
-      },
-      {
-        icon: Users,
-        label: "Suppliers",
-        id: "suppliers",
-        href: "/dashboard/suppliers",
-        hidden: !canSeePurchasesNav(user?.role),
-      },
-      {
-        icon: Wallet,
-        label: "Payments Made",
-        id: "payments-made",
-        href: "/dashboard/payments/made",
-        hidden: !canSeeFinanceNav(user?.role),
-      },
-      {
-        icon: FileText,
-        label: "Supplier Statements",
-        id: "supplier-statements",
-        href: "/dashboard/supplier-statements",
-        hidden: !canSeeFinanceNav(user?.role),
       },
     ],
   },
@@ -583,6 +605,13 @@ export const getNavigationGroups = (user) => {
     defaultOpen: false,
     hidden: !canSeeFinanceNav(user?.role) || !hasMod("finance"),
     items: [
+      // Start here: every money process in order, with what is waiting.
+      {
+        icon: Workflow,
+        label: "Processes",
+        id: "finance-processes",
+        href: "/dashboard/finance/processes",
+      },
       {
         icon: Briefcase, // or Building2 or Users
         label: "Parties",
@@ -661,8 +690,17 @@ export const getNavigationGroups = (user) => {
     hidden: !canSeeTaxNav(user?.role) || !hasMod("tax"),
     items: [
       {
+        icon: FileSpreadsheet,
+        label: "Tax Transactions",
+        step: 1,
+        id: "tax-transactions",
+        href: "/dashboard/tax/transactions",
+        hidden: !canSeeTaxNav(user?.role),
+      },
+      {
         icon: Receipt,
         label: "VAT Returns",
+        step: 2,
         id: "vat-returns",
         href: "/dashboard/tax/vat",
         hidden: !canSeeTaxNav(user?.role),
@@ -670,20 +708,15 @@ export const getNavigationGroups = (user) => {
       {
         icon: FileText,
         label: "WHT Reports",
+        step: 3,
         id: "wht-reports",
         href: "/dashboard/tax/wht",
         hidden: !canSeeTaxNav(user?.role),
       },
       {
-        icon: FileSpreadsheet,
-        label: "Tax Transactions",
-        id: "tax-transactions",
-        href: "/dashboard/tax/transactions",
-        hidden: !canSeeTaxNav(user?.role),
-      },
-      {
         icon: Building2,
         label: "KRA Filings",
+        step: 4,
         id: "kra-filings",
         href: "/dashboard/tax/kra",
         hidden: !canSeeTaxNav(user?.role),
@@ -1205,11 +1238,24 @@ const NavItem = ({ item, onItemClick, collapsed }) => {
         }
       )}
     >
-      <item.icon
-        className={clsx("w-4 h-4 transition-transform group-hover:scale-110", {
-          "text-black": active,
-        })}
-      />
+      {item.step ? (
+        // A step in a process: the number says what comes first.
+        <span
+          className={clsx(
+            "flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[10px] font-bold",
+            active ? "bg-black/15 text-black" : "bg-muted-foreground/15 text-muted-foreground",
+          )}
+          aria-label={`Step ${item.step}`}
+        >
+          {item.step}
+        </span>
+      ) : (
+        <item.icon
+          className={clsx("w-4 h-4 transition-transform group-hover:scale-110", {
+            "text-black": active,
+          })}
+        />
+      )}
       <span
         className={clsx("font-medium", {
           "text-black": active,

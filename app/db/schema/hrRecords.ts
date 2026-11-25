@@ -156,6 +156,8 @@ export const hrTrainingRecords = pgTable(
     expiresOn: date("expires_on"),
     status: text("status").notNull().default("completed"),
     cost: numeric("cost", { precision: 19, scale: 4 }),
+    /** The draft expense its cost raised for finance (other_modules_hand_their_money_to_finance). */
+    expenseId: uuid("expense_id"),
     notes: text("notes"),
     ...audit,
   },

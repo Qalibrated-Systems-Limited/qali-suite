@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { sql } from "drizzle-orm";
+import { trainingToExpense, releaseTrainingExpense } from "../financeHandoff";
 import { withAuthorizedTenant } from "../tenant";
 import { userMessage } from "../errors";
 import { rolesFor } from "@/lib/capabilities";
@@ -220,13 +221,16 @@ const trainingInput = (fd: FormData): hr.TrainingInput => ({
 export async function saveTraining(_prev: unknown, fd: FormData): Promise<ActionResult> {
   try {
     const id = str(fd, "id");
-    const row = await withAuthorizedTenant(TRAINING_ROLES, (tx, { user, companyId }) =>
-      id
-        ? hr.updateTraining(tx, id, trainingInput(fd))
-        : hr.createTraining(tx, { ...trainingInput(fd), companyId, actor: actorOf(user) }),
-    );
-    touch("/dashboard/hr/training", `/dashboard/hr/employees/${row.employeeId}`, "/dashboard/hr");
-    return { success: true, id: row.id, message: id ? "Training record updated" : "Training recorded" };
+    const { row, handed } = await withAuthorizedTenant(TRAINING_ROLES, async (tx, { user, companyId }) => {
+      const row = id
+        ? await hr.updateTraining(tx, id, trainingInput(fd))
+        : await hr.createTraining(tx, { ...trainingInput(fd), companyId, actor: actorOf(user) });
+      // A cost goes to finance as a draft expense (other_modules_hand_their_money_to_finance).
+      const handed = await trainingToExpense(tx, companyId, row.id, user.id ? String(user.id) : null);
+      return { row, handed };
+    });
+    touch("/dashboard/hr/training", `/dashboard/hr/employees/${row.employeeId}`, "/dashboard/hr", "/dashboard/expenses");
+    return { success: true, id: row.id, message: (id ? "Training record updated." : "Training recorded.") + handed };
   } catch (e) {
     return fail(e);
   }
@@ -234,7 +238,11 @@ export async function saveTraining(_prev: unknown, fd: FormData): Promise<Action
 
 export async function deleteTraining(id: string): Promise<ActionResult> {
   try {
-    const row = await withAuthorizedTenant(TRAINING_ROLES, (tx) => hr.deleteTraining(tx, id));
+    const row = await withAuthorizedTenant(TRAINING_ROLES, async (tx) => {
+      const deleted = await hr.deleteTraining(tx, id);
+      await releaseTrainingExpense(tx, (deleted as { expenseId?: string | null }).expenseId ?? null);
+      return deleted;
+    });
     touch("/dashboard/hr/training", `/dashboard/hr/employees/${row.employeeId}`);
     return { success: true, message: "Training record deleted" };
   } catch (e) {

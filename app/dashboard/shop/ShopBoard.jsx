@@ -17,6 +17,8 @@ import {
   fmt,
 } from "@/components/erp-ui";
 import { createOrder, setOrderStatus, deleteOrder, setListing } from "@/app/db/actions/shop-actions";
+import { invoiceShopOrderPg } from "@/app/db/actions/finance-handoff-actions";
+import Link from "next/link";
 
 const ORDER_STATUS = {
   awaiting_payment: { label: "Awaiting Payment", variant: "amber" },
@@ -64,7 +66,14 @@ export default function ShopBoard({ orders, catalog, stats, canManage }) {
       </select>
     ) : pill(ORDER_STATUS, o.status),
     fmt.date(o.placedAt),
-    canManage ? <Btn key="x" size="sm" variant="danger" onClick={() => confirm(`Delete ${o.orderNumber}?`) && run(deleteOrder, o._id)}>✕</Btn> : "",
+    <span key="a" style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+      {o.invoiceId ? (
+        <Link href={`/dashboard/invoices/${o.invoiceId}`} style={{ fontSize: 12, fontWeight: 600, textDecoration: "underline" }}>Invoice</Link>
+      ) : canManage && ["paid", "shipped", "delivered"].includes(o.status) ? (
+        <Btn size="sm" onClick={() => run(invoiceShopOrderPg, o._id)}>Invoice it</Btn>
+      ) : null}
+      {canManage ? <Btn size="sm" variant="danger" onClick={() => confirm(`Delete ${o.orderNumber}?`) && run(deleteOrder, o._id)}>✕</Btn> : null}
+    </span>,
   ]);
 
   const catalogRows = catalog.map((p) => [
