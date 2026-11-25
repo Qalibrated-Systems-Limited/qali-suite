@@ -242,19 +242,38 @@ export async function acceptGoodsReceiptPg(
   goodsReceiptId: string,
   side: "sales" | "finance",
   notes?: string | null,
+  confirmedLineIds?: string[] | null,
 ): Promise<ActionResult> {
   const roles =
     side === "sales" ? GRN_ACCEPT_SALES_ROLES : GRN_ACCEPT_FINANCE_ROLES;
 
   try {
     const result = await withAuthorizedTenant([...roles], async (tx, { user }) => {
+      /*
+       * EVERY LINE IS TICKED BEFORE A SIGNATURE. The signer confirms each
+       * line's received quantity and condition in the preview; a signature
+       * that skipped a line is refused.
+       */
+      const lineRows = (await tx.execute(
+        sql`SELECT id::text AS id FROM goods_receipt_lines WHERE goods_receipt_id = ${goodsReceiptId}::uuid`,
+      )) as unknown as Array<{ id: string }>;
+      const ticked = new Set((confirmedLineIds ?? []).map(String));
+      const missing = lineRows.filter((l) => !ticked.has(l.id)).length;
+      if (missing) {
+        throw new Error(
+          `Tick every line to confirm it before signing — ${missing} of ${lineRows.length} not confirmed yet.`,
+        );
+      }
+      const signedNote = [notes?.trim(), `Confirmed ${lineRows.length} line(s) line by line.`]
+        .filter(Boolean)
+        .join(" ");
       const grn = await goodsReceipts.signAcceptance(
         tx,
         goodsReceiptId,
         side,
         user.id,
         user.name,
-        notes ?? null,
+        signedNote,
       );
 
       if (!grn.salesAcceptedAt || !grn.financeAcceptedAt) {

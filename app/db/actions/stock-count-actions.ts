@@ -9,6 +9,8 @@ import * as countsRepo from "../repositories/stockCounts";
 import * as adjustmentsRepo from "../repositories/stockAdjustments";
 import { products, stockCounts } from "../schema";
 import { rolesFor } from "@/lib/capabilities";
+import { raiseApprovalIn } from "../approvalService";
+import { notifyApprovalSubmitted } from "@/lib/notifications/approval-notify";
 
 /**
  * Stocktakes — the action layer.
@@ -254,9 +256,25 @@ export async function postStockCountPg(
           lines,
         );
 
-        if (routing.autoApprove) {
-          await adjustmentsRepo.approveAdjustment(tx, adjustment.id, actor);
-        }
+        // Variances are stock changes like any other: they pass the approval
+        // chain, each approver ticking every line, before the book moves.
+        const approval = await raiseApprovalIn(tx, user, companyId, {
+          type: routing.needsValuation
+            ? "stock_valuation"
+            : routing.isHighRisk
+              ? "stock_writeoff"
+              : "stock_adjustment",
+          targetRef: {
+            kind: "InventoryAdjustment",
+            id: adjustment.id,
+            label: `${adjustment.adjustmentNumber} — count ${count.countNumber} — KES ${routing.totalValue.toLocaleString("en-KE", { maximumFractionDigits: 0 })}`,
+          },
+          payload: { adjustmentId: adjustment.id },
+          reason: routing.reason || `Variances found on ${count.countNumber}`,
+          context: { amount: routing.totalValue, threshold: routing.threshold, countId },
+        });
+        if (routing.needsValuation) await adjustmentsRepo.holdForValuation(tx, adjustment.id);
+        await notifyApprovalSubmitted(approval);
 
         const posted = await countsRepo.markPosted(
           tx,
@@ -270,9 +288,7 @@ export async function postStockCountPg(
 
         return {
           success: true,
-          message: routing.autoApprove
-            ? `${posted.countNumber} posted. Adjustment ${adjustment.adjustmentNumber} applied for ${lines.length} product${lines.length === 1 ? "" : "s"}.`
-            : `${posted.countNumber} posted. Adjustment ${adjustment.adjustmentNumber} is waiting for approval — ${routing.reason}.`,
+          message: `${posted.countNumber} posted. Adjustment ${adjustment.adjustmentNumber} for ${lines.length} product${lines.length === 1 ? "" : "s"} is waiting for approval (${approval.requestNumber}).`,
           countId,
           countNumber: posted.countNumber,
           adjustmentId: adjustment.id,

@@ -29,6 +29,7 @@ vi.mock("@/lib/utils/tenant-utils", () => ({ getTenantContext: vi.fn() }));
 
 const { getTenantContext } = await import("@/lib/utils/tenant-utils");
 const counts = await import("@/app/db/actions/stock-count-actions");
+const approvalActions = await import("@/app/db/actions/approval-actions");
 
 suite("stocktake sessions", () => {
   let admin;
@@ -45,6 +46,31 @@ suite("stocktake sessions", () => {
       user: { id: randomUUID(), name: `${role} User`, role },
       companyId: mongoCompanyId,
     });
+
+  /** Drive the variance adjustment's approval chain: a different Admin per step. */
+  const approveChain = async (adjustmentId) => {
+    const [a] = await admin`
+      SELECT id::text AS id, total_steps FROM approval_requests
+       WHERE target_id = ${adjustmentId} ORDER BY created_at DESC LIMIT 1`;
+    const lines = (await admin`
+      SELECT id::text AS id FROM stock_adjustment_lines WHERE adjustment_id = ${adjustmentId}::uuid`).map((l) => l.id);
+    let res;
+    for (let i = 0; i < a.total_steps; i++) {
+      asRole("Admin");
+      const fd = new FormData();
+      fd.append("confirmedLines", JSON.stringify(lines));
+      res = await approvalActions.approveApproval(a.id, null, fd);
+      if (!res.success) break;
+    }
+    return res;
+  };
+
+  /** Post, then approve the variances through the chain. */
+  const postAndApprove = async (countId) => {
+    const posted = await counts.postStockCountPg(countId);
+    if (posted.success && posted.adjustmentId) await approveChain(posted.adjustmentId);
+    return posted;
+  };
 
   const openSheet = async (over = {}) => {
     const fd = new FormData();
@@ -264,7 +290,7 @@ suite("stocktake sessions", () => {
 
     it("raises one adjustment for the lines that disagree", async () => {
       const countId = await finish({ [widget]: 95, [gadget]: 100 });
-      const posted = await counts.postStockCountPg(countId);
+      const posted = await postAndApprove(countId);
 
       expect(posted.success).toBe(true);
       expect(posted.adjustmentId).toEqual(expect.any(String));
@@ -321,7 +347,7 @@ suite("stocktake sessions", () => {
 
       await countAll(opened.countId, { [widget]: 95, [gadget]: 100 });
       await counts.submitCountForReviewPg(opened.countId);
-      const posted = await counts.postStockCountPg(opened.countId);
+      const posted = await postAndApprove(opened.countId);
       expect(posted.success).toBe(true);
 
       // The shelf wins: stock is what was counted.
@@ -343,7 +369,7 @@ suite("stocktake sessions", () => {
 
     it("posts a journal entry through the adjustment, not around it", async () => {
       const countId = await finish({ [widget]: 95, [gadget]: 100 });
-      const posted = await counts.postStockCountPg(countId);
+      const posted = await postAndApprove(countId);
 
       const entry = await admin`
         SELECT a.account_code, l.debit::float8 AS debit, l.credit::float8 AS credit
@@ -373,16 +399,25 @@ suite("stocktake sessions", () => {
     it("inherits the adjustment module's segregation of duties", async () => {
       const countId = await finish({ [widget]: 95, [gadget]: 100 });
 
-      // Store Manager may post, and the adjustment beneath is small and
-      // low-risk, so it applies.
+      // Store Manager may post; the variances then wait for the three-step
+      // approval chain, however small, and apply only after the last step.
       asRole("Store Manager");
       const posted = await counts.postStockCountPg(countId);
       expect(posted.success).toBe(true);
+      expect(posted.message).toMatch(/waiting for approval/i);
 
+      const [held] = await admin`
+        SELECT status::text AS status FROM stock_adjustments
+         WHERE id = ${posted.adjustmentId}`;
+      expect(held.status).toBe("draft");
+      expect(await onHand(widget)).toBe(100);
+
+      expect((await approveChain(posted.adjustmentId)).success).toBe(true);
       const [adj] = await admin`
         SELECT status::text AS status FROM stock_adjustments
          WHERE id = ${posted.adjustmentId}`;
       expect(adj.status).toBe("approved");
+      expect(await onHand(widget)).toBe(95);
     });
 
     it("routes rather than applies when the adjustment is above the threshold", async () => {

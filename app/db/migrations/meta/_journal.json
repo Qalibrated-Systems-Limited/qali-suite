@@ -1016,6 +1016,13 @@
       "when": 1795602701194,
       "tag": "20261125T103141_a_product_may_be_allowed_to_go_below_zero",
       "breakpoints": true
+    },
+    {
+      "idx": 145,
+      "version": "7",
+      "when": 1795603036875,
+      "tag": "20261125T103716_stock_changes_pass_three_approvers_who_tick_every_line",
+      "breakpoints": true
     }
   ]
 }

@@ -71,6 +71,10 @@ function toScreenApproval(r: Record<string, unknown>) {
     appliedRef: r.applied_kind
       ? { kind: r.applied_kind as string, id: String(r.applied_id) }
       : null,
+    currentStep: Number(r.current_step ?? 1),
+    totalSteps: Number(r.total_steps ?? 1),
+    currentStepLabel: (r.current_step_label as string) ?? "",
+    currentStepRoles: (r.current_step_roles as string[]) ?? [],
     createdAt: iso(r.created_at),
     updatedAt: iso(r.updated_at),
   };
@@ -92,6 +96,8 @@ export interface SubmitApprovalInput {
   submittedById: string;
   submittedByName: string;
   submittedByRole?: string | null;
+  /** A chain of steps; omitted or one step = the single-signature engine. */
+  steps?: Array<{ label: string; roles: string[] }>;
 }
 
 export async function submitApproval(tx: Tx, input: SubmitApprovalInput) {
@@ -108,7 +114,8 @@ export async function submitApproval(tx: Tx, input: SubmitApprovalInput) {
       company_id, request_number, type, status,
       target_kind, target_id, target_label,
       payload, context, reason, requester_note, required_approver_roles,
-      submitted_by_id, submitted_by_name, submitted_by_role
+      submitted_by_id, submitted_by_name, submitted_by_role,
+      total_steps, current_step_label, current_step_roles
     ) VALUES (
       ${input.companyId}::uuid, ${request_number},
       ${input.type}::approval_type, 'submitted',
@@ -122,12 +129,38 @@ export async function submitApproval(tx: Tx, input: SubmitApprovalInput) {
         sql`, `,
       )}]::text[]`},
       ${input.submittedById}, ${input.submittedByName},
-      ${input.submittedByRole ?? null}
+      ${input.submittedByRole ?? null},
+      ${Math.max(1, input.steps?.length ?? 1)},
+      ${input.steps?.[0]?.label ?? ""},
+      ${textArray(input.steps?.[0]?.roles ?? [])}
     )
     RETURNING *
   `)) as unknown as Array<Record<string, unknown>>;
 
   return toScreenApproval(row);
+}
+
+function textArray(values: string[]) {
+  return values.length
+    ? sql`ARRAY[${sql.join(values.map((v) => sql`${v}`), sql`, `)}]::text[]`
+    : sql`'{}'::text[]`;
+}
+
+/**
+ * What this viewer may decide: single-step requests by type, and chained ones
+ * whose CURRENT step names the viewer's role (Admin and SuperAdmin: any step).
+ * For other statuses (history), the chains the role takes part in at all.
+ */
+function visibleTo(types: string[], role: string | null | undefined, status: string) {
+  const byType = types.length ? sql`(total_steps = 1 AND type = ${anyOf(types, "approval_type[]")})` : sql`false`;
+  if (!role) return byType;
+  const always = role === "SuperAdmin" || role === "Admin";
+  const chained = always
+    ? sql`total_steps > 1`
+    : status === "submitted"
+      ? sql`(total_steps > 1 AND current_step_roles @> ARRAY[${role}]::text[])`
+      : sql`(total_steps > 1 AND required_approver_roles @> ARRAY[${role}]::text[])`;
+  return sql`(${byType} OR ${chained})`;
 }
 
 // ── Reads ───────────────────────────────────────────────────────────────────
@@ -152,12 +185,13 @@ export async function listQueue(
   types: string[],
   status: ApprovalStatus = "submitted",
   limit = 100,
+  role?: string | null,
 ) {
-  if (types.length === 0) return [];
+  if (types.length === 0 && !role) return [];
   const rows = (await tx.execute(sql`
     SELECT * FROM approval_requests
      WHERE status = ${status}::approval_status
-       AND type = ${anyOf(types, "approval_type[]")}
+       AND ${visibleTo(types, role, status)}
      ORDER BY created_at DESC
      LIMIT ${Math.min(Math.max(limit, 1), 500)}
   `)) as unknown as Array<Record<string, unknown>>;
@@ -165,12 +199,12 @@ export async function listQueue(
 }
 
 /** How many are waiting that this role may decide. */
-export async function countQueue(tx: Tx, types: string[]) {
-  if (types.length === 0) return 0;
+export async function countQueue(tx: Tx, types: string[], role?: string | null) {
+  if (types.length === 0 && !role) return 0;
   const [row] = (await tx.execute(sql`
     SELECT COUNT(*)::int AS n FROM approval_requests
      WHERE status = 'submitted'
-       AND type = ${anyOf(types, "approval_type[]")}
+       AND ${visibleTo(types, role, "submitted")}
   `)) as unknown as Array<Record<string, unknown>>;
   return Number(row?.n ?? 0);
 }

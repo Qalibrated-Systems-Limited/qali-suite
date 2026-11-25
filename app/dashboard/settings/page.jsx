@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { Building2, Users, ShieldCheck, KeyRound, UserCog, KeySquare, Plug, Briefcase, Landmark, Lock, Wifi } from "lucide-react";
+import { Building2, Users, ShieldCheck, KeyRound, UserCog, KeySquare, Plug, Briefcase, Landmark, Lock, Wifi, ListChecks } from "lucide-react";
 import { auth } from "@/auth";
 import { can } from "@/lib/capabilities";
 import { planIncludes } from "@/lib/plans";
@@ -98,6 +98,16 @@ export default async function SettingsPage({ searchParams }) {
             iconBg="bg-sky-500/10"
             title="Remote access"
             description="Keep QaliSuite to the office network, and issue tokens to people working away"
+          />
+        )}
+        {can(session.user, "admin.manage") && (
+          <SettingsCard
+            href="/dashboard/settings/approval-steps"
+            icon={ListChecks}
+            iconColor="text-emerald-500"
+            iconBg="bg-emerald-500/10"
+            title="Approval steps"
+            description="The steps every stock change passes, and which roles sign each"
           />
         )}
         <SettingsCard

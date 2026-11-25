@@ -30,6 +30,21 @@ export default function GRNActions({ grn, currentUser }) {
   const [success, setSuccess] = useState("");
   const [confirmingReject, setConfirmingReject] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
+  // The side being signed, while its line-by-line preview is open.
+  const [signing, setSigning] = useState(null);
+  const [ticked, setTicked] = useState(() => new Set());
+  const lines = grn.lines ?? [];
+  const allTicked = lines.length > 0 && ticked.size === lines.length;
+  const openSign = (side) => {
+    setTicked(new Set());
+    setSigning(side);
+  };
+  const toggle = (id) =>
+    setTicked((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
 
   /**
    * Which sign-off buttons to OFFER. Not authorization — the action gates on
@@ -100,12 +115,7 @@ export default function GRNActions({ grn, currentUser }) {
         <div className="flex flex-wrap gap-2">
           {!grn.salesAccepted && isSales && (
             <Button
-              onClick={() =>
-                flash(
-                  () => acceptGoodsReceiptPg(grn._id, "sales"),
-                  "Sales acceptance recorded",
-                )
-              }
+              onClick={() => openSign("sales")}
               disabled={isPending}
               className="gap-1.5 bg-emerald-600 hover:bg-emerald-700"
             >
@@ -115,12 +125,7 @@ export default function GRNActions({ grn, currentUser }) {
           )}
           {!grn.financeAccepted && isFinance && (
             <Button
-              onClick={() =>
-                flash(
-                  () => acceptGoodsReceiptPg(grn._id, "finance"),
-                  "Finance acceptance recorded",
-                )
-              }
+              onClick={() => openSign("finance")}
               disabled={isPending}
               className="gap-1.5 bg-emerald-600 hover:bg-emerald-700"
             >
@@ -140,6 +145,87 @@ export default function GRNActions({ grn, currentUser }) {
             </Button>
           )}
         </div>
+
+        {signing && (
+          <div className="space-y-2 rounded-lg border border-emerald-500/40 bg-emerald-500/5 p-3">
+            <p className="text-sm font-medium">
+              {signing === "sales" ? "Sales" : "Finance"} acceptance — tick each line to confirm what was received
+            </p>
+            <div className="overflow-x-auto rounded-md border border-border bg-card">
+              <table className="w-full min-w-[480px] text-xs">
+                <thead className="bg-muted/40 text-left text-muted-foreground">
+                  <tr>
+                    <th className="w-10 px-3 py-1.5">
+                      <input
+                        type="checkbox"
+                        aria-label="Confirm all lines"
+                        checked={allTicked}
+                        onChange={(e) => setTicked(e.target.checked ? new Set(lines.map((l) => l._id)) : new Set())}
+                        className="h-4 w-4 accent-emerald-600"
+                      />
+                    </th>
+                    <th className="px-3 py-1.5">Item</th>
+                    <th className="px-3 py-1.5 text-right">Expected</th>
+                    <th className="px-3 py-1.5 text-right">Received</th>
+                    <th className="px-3 py-1.5">Condition</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {lines.map((l) => {
+                    const v = Number(l.receivedQty) - Number(l.expectedQty);
+                    return (
+                      <tr key={l._id} onClick={() => toggle(l._id)} className={`cursor-pointer ${ticked.has(l._id) ? "bg-emerald-500/5" : ""}`}>
+                        <td className="px-3 py-1.5">
+                          <input
+                            type="checkbox"
+                            aria-label={`Confirm ${l.description}`}
+                            checked={ticked.has(l._id)}
+                            onChange={() => toggle(l._id)}
+                            onClick={(e) => e.stopPropagation()}
+                            className="h-4 w-4 accent-emerald-600"
+                          />
+                        </td>
+                        <td className="px-3 py-1.5 font-medium">{l.description}</td>
+                        <td className="px-3 py-1.5 text-right tabular-nums">{l.expectedQty} {l.unit}</td>
+                        <td className={`px-3 py-1.5 text-right tabular-nums ${v < 0 ? "text-red-600 dark:text-red-400" : v > 0 ? "text-amber-600 dark:text-amber-400" : ""}`}>
+                          {l.receivedQty} {l.unit}
+                          {v !== 0 && ` (${v > 0 ? "+" : ""}${v})`}
+                        </td>
+                        <td className="px-3 py-1.5 capitalize text-muted-foreground">
+                          {[l.packagingCondition, l.physicalCondition].filter(Boolean).join(" · ") || "—"}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="mr-auto text-xs text-muted-foreground">
+                {ticked.size} of {lines.length} confirmed
+              </span>
+              <Button variant="outline" size="sm" onClick={() => setSigning(null)} disabled={isPending}>
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                className="bg-emerald-600 hover:bg-emerald-700"
+                disabled={isPending || !allTicked}
+                onClick={() => {
+                  const side = signing;
+                  flash(
+                    () => acceptGoodsReceiptPg(grn._id, side, null, [...ticked]),
+                    `${side === "sales" ? "Sales" : "Finance"} acceptance recorded`,
+                  );
+                  setSigning(null);
+                }}
+              >
+                {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-1.5 h-4 w-4" />}
+                Sign acceptance
+              </Button>
+            </div>
+          </div>
+        )}
 
         {confirmingReject && (
           <div className="rounded-lg border border-red-200 bg-red-50 dark:bg-red-900/10 p-3 space-y-2">

@@ -28,6 +28,7 @@ vi.mock("@/lib/utils/tenant-utils", () => ({ getTenantContext: vi.fn() }));
 
 const { getTenantContext } = await import("@/lib/utils/tenant-utils");
 const adjustments = await import("@/app/db/actions/adjustment-actions");
+const approvalActions = await import("@/app/db/actions/approval-actions");
 
 suite("stock adjustments", () => {
   let admin;
@@ -38,14 +39,40 @@ suite("stock adjustments", () => {
   let widget;
   let gadget;
 
-  const asRole = (role) =>
-    getTenantContext.mockResolvedValue({
+  let currentRole = "Admin";
+  const asRole = (role) => {
+    currentRole = role;
+    return getTenantContext.mockResolvedValue({
       user: { id: randomUUID(), name: `${role} User`, role },
       companyId: mongoCompanyId,
     });
+  };
+
+  /**
+   * Drive an adjustment's approval chain to the end: one different person per
+   * step, each ticking every line. Returns the last step's result.
+   */
+  const approveChain = async (adjustmentId, role = "Admin") => {
+    const before = currentRole;
+    const [a] = await admin`
+      SELECT id::text AS id, total_steps FROM approval_requests
+       WHERE target_id = ${adjustmentId} ORDER BY created_at DESC LIMIT 1`;
+    const lines = (await admin`
+      SELECT id::text AS id FROM stock_adjustment_lines WHERE adjustment_id = ${adjustmentId}::uuid`).map((l) => l.id);
+    let res;
+    for (let i = 0; i < a.total_steps; i++) {
+      asRole(role);
+      const fd = new FormData();
+      fd.append("confirmedLines", JSON.stringify(lines));
+      res = await approvalActions.approveApproval(a.id, null, fd);
+      if (!res.success) break;
+    }
+    asRole(before);
+    return res;
+  };
 
   /** The form's payload: one JSON field, items in increase/decrease terms. */
-  const submit = (items, over = {}) => {
+  const submit = async (items, over = {}) => {
     const fd = new FormData();
     fd.append(
       "adjustmentData",
@@ -58,7 +85,15 @@ suite("stock adjustments", () => {
         ...over,
       }),
     );
-    return adjustments.createStockAdjustmentPg(null, fd);
+    const r = await adjustments.createStockAdjustmentPg(null, fd);
+    // Every change now passes the three-step chain. As an Admin (the old
+    // fully-authorised path) the tests below drive it to the end, so what
+    // they assert is what an approved adjustment does.
+    if (r.success && currentRole === "Admin") {
+      const [row] = await admin`SELECT status FROM stock_adjustments WHERE id = ${r.adjustmentId}`;
+      if (row?.status === "draft") await approveChain(r.adjustmentId);
+    }
+    return r;
   };
 
   const item = (productId, type, quantity, reason = "Counted") => ({
@@ -330,16 +365,21 @@ suite("stock adjustments", () => {
       expect((await levels(widget)).on_hand).toBe(100);
     });
 
-    it("still lets a Store Manager apply a small, low-risk one", async () => {
-      // The other half of the same rule — closing the hole must not close the
-      // path its policy header actually grants.
+    it("holds even a Store Manager's small one until all three steps approve", async () => {
       asRole("Store Manager");
       const r = await submit([item(widget, "decrease", 10, "Damaged")]);
       expect(r.success).toBe(true);
 
       const [row] = await admin`
         SELECT status FROM stock_adjustments WHERE id = ${r.adjustmentId}`;
-      expect(row.status).toBe("approved");
+      expect(row.status).toBe("draft");
+      expect((await levels(widget)).on_hand).toBe(100);
+
+      const last = await approveChain(r.adjustmentId);
+      expect(last.success).toBe(true);
+      const [after] = await admin`
+        SELECT status FROM stock_adjustments WHERE id = ${r.adjustmentId}`;
+      expect(after.status).toBe("approved");
       expect((await levels(widget)).on_hand).toBe(90);
     });
 

@@ -50,6 +50,9 @@ function receiptForm(body) {
 
 suite("procurement actions (end to end)", () => {
   let admin;
+  // Signers tick every line (stock_changes_pass_three_approvers_who_tick_every_line).
+  const grnLineIds = async (db, id) =>
+    (await db`SELECT id::text AS id FROM goods_receipt_lines WHERE goods_receipt_id = ${id}::uuid`).map((r) => r.id);
   let companyUuid, mongoCompanyId, supplierId, widgetId, inventoryAcct;
 
   beforeAll(async () => {
@@ -337,9 +340,9 @@ suite("procurement actions (end to end)", () => {
 
       // No recordLineDecisionsPg call — straight to the two signatures.
       asRole("Sales Manager");
-      await grnActions.acceptGoodsReceiptPg(created.goodsReceiptId, "sales");
+      await grnActions.acceptGoodsReceiptPg(created.goodsReceiptId, "sales", null, await grnLineIds(admin, created.goodsReceiptId));
       asRole("Finance Manager");
-      const done = await grnActions.acceptGoodsReceiptPg(created.goodsReceiptId, "finance");
+      const done = await grnActions.acceptGoodsReceiptPg(created.goodsReceiptId, "finance", null, await grnLineIds(admin, created.goodsReceiptId));
 
       expect(done.success).toBe(true);
       expect(done.journalEntryId).toBeTruthy();
@@ -376,9 +379,9 @@ suite("procurement actions (end to end)", () => {
       await grnActions.recordLineDecisionsPg(created.goodsReceiptId, null, decisions);
 
       asRole("Sales Manager");
-      await grnActions.acceptGoodsReceiptPg(created.goodsReceiptId, "sales");
+      await grnActions.acceptGoodsReceiptPg(created.goodsReceiptId, "sales", null, await grnLineIds(admin, created.goodsReceiptId));
       asRole("Finance Manager");
-      const done = await grnActions.acceptGoodsReceiptPg(created.goodsReceiptId, "finance");
+      const done = await grnActions.acceptGoodsReceiptPg(created.goodsReceiptId, "finance", null, await grnLineIds(admin, created.goodsReceiptId));
       expect(done.success).toBe(true);
       // Nothing bought: a held line awaits its disposition.
       expect(done.journalEntryId).toBeNull();
@@ -411,14 +414,14 @@ suite("procurement actions (end to end)", () => {
       await grnActions.recordLineDecisionsPg(created.goodsReceiptId, null, decisions);
 
       asRole("Sales Manager");
-      const first = await grnActions.acceptGoodsReceiptPg(created.goodsReceiptId, "sales");
+      const first = await grnActions.acceptGoodsReceiptPg(created.goodsReceiptId, "sales", null, await grnLineIds(admin, created.goodsReceiptId));
       expect(first.success).toBe(true);
       // One signature is not acceptance.
       expect(first.journalEntryId).toBeNull();
       expect(first.message).toMatch(/waiting on the other side/i);
 
       asRole("Finance Manager");
-      const second = await grnActions.acceptGoodsReceiptPg(created.goodsReceiptId, "finance");
+      const second = await grnActions.acceptGoodsReceiptPg(created.goodsReceiptId, "finance", null, await grnLineIds(admin, created.goodsReceiptId));
       expect(second.success).toBe(true);
       expect(second.journalEntryId).toBeTruthy();
 

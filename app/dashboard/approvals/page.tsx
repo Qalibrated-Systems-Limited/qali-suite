@@ -31,6 +31,7 @@ import {
 } from "@/app/db/actions/pending-approvals";
 import { Banknote, CalendarDays, Coins, HandCoins, FileWarning } from "lucide-react";
 import ApprovalDecisionForm from "./components/ApprovalDecisionForm";
+import StepApprovalPanel, { StepTimeline } from "./components/StepApprovalPanel";
 
 // Per-domain approver allowlists imported from the central rules
 // module. Don't redefine them here — change @/lib/business-rules and
@@ -62,6 +63,8 @@ const TYPE_META: Record<string, { label: string; icon: React.ComponentType<{ cla
   price_change: { label: "Price change", icon: Tag },
   stock_writeoff: { label: "Stock write-off", icon: Package },
   stock_adjustment: { label: "Stock adjustment", icon: Package },
+  stock_valuation: { label: "Stock valuation", icon: Package },
+  expense_payment: { label: "Expense payment", icon: Receipt },
   bill_payment: { label: "Bill payment", icon: Receipt },
   credit_note: { label: "Credit note", icon: Receipt },
   discount: { label: "Discount", icon: Percent },
@@ -300,12 +303,15 @@ function ApprovalRow({
         </div>
       )}
       {(approval.type === "stock_adjustment" ||
-        approval.type === "stock_writeoff") && (
+        approval.type === "stock_writeoff") && !approval.chain && (
         <StockAdjustmentContext context={approval.context} />
       )}
 
+      {/* A chained stock change: steps, lines to tick, and the decision. */}
+      {approval.chain && <StepApprovalPanel approval={approval} />}
+
       {/* Decision panel */}
-      {approval.status === "submitted" && canDecide && (
+      {approval.status === "submitted" && canDecide && !approval.chain && (
         <ApprovalDecisionForm approvalId={approval._id} />
       )}
 
@@ -670,8 +676,8 @@ async function MySubmissions() {
       </header>
       <ul className="divide-y divide-border">
         {rows.map((r: any) => (
-          <li key={r._id} className="flex items-center justify-between px-4 py-2.5 text-sm">
-            <div className="min-w-0">
+          <li key={r._id} className="flex flex-wrap items-start justify-between gap-2 px-4 py-2.5 text-sm">
+            <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
                 <span className="font-mono text-xs text-muted-foreground">
                   {r.requestNumber}
@@ -682,6 +688,11 @@ async function MySubmissions() {
                 <p className="mt-0.5 truncate text-xs text-muted-foreground">
                   {r.reason}
                 </p>
+              )}
+              {r.chain && (
+                <div className="mt-2">
+                  <StepTimeline approval={r} compact />
+                </div>
               )}
             </div>
             <div className="flex items-center gap-3 text-[11px]">
@@ -755,11 +766,11 @@ export default async function ApprovalsPage() {
         </p>
       </header>
 
-      {canDecide && (
-        <Suspense fallback={<QueueSkeleton />}>
-          <PendingQueue canDecide={canDecide} />
-        </Suspense>
-      )}
+      {/* Everyone may sign a step of a chain their role is on; the queue
+          itself is filtered by role on the server. */}
+      <Suspense fallback={<QueueSkeleton />}>
+        <PendingQueue canDecide={canDecide} />
+      </Suspense>
 
       {/* Cross-domain pending sections. Each streams independently —
           a slow query in one domain won't block the others. Empty

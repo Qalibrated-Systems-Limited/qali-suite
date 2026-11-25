@@ -41,6 +41,9 @@ const grIr = await import("@/app/db/actions/gr-ir-actions");
 
 suite("GR/IR reconciliation", () => {
   let admin;
+  // Signers tick every line (stock_changes_pass_three_approvers_who_tick_every_line).
+  const grnLineIds = async (db, id) =>
+    (await db`SELECT id::text AS id FROM goods_receipt_lines WHERE goods_receipt_id = ${id}::uuid`).map((r) => r.id);
   let companyUuid;
   let mongoCompanyId;
   let supplierId;
@@ -90,11 +93,11 @@ suite("GR/IR reconciliation", () => {
 
     // The SOP's two signatures. The second one posts.
     asRole("Sales Manager");
-    const sales = await grn.acceptGoodsReceiptPg(grnId, "sales");
+    const sales = await grn.acceptGoodsReceiptPg(grnId, "sales", null, await grnLineIds(admin, grnId));
     expect(sales.success).toBe(true);
 
     asRole("Finance Manager");
-    const finance = await grn.acceptGoodsReceiptPg(grnId, "finance");
+    const finance = await grn.acceptGoodsReceiptPg(grnId, "finance", null, await grnLineIds(admin, grnId));
     expect(finance.success).toBe(true);
 
     return grnId;
@@ -453,9 +456,9 @@ suite("GR/IR reconciliation", () => {
       asRole("Storekeeper");
       await grn.submitGoodsReceiptPg(grnId);
       asRole("Sales Manager");
-      await grn.acceptGoodsReceiptPg(grnId, "sales");
+      await grn.acceptGoodsReceiptPg(grnId, "sales", null, await grnLineIds(admin, grnId));
       asRole("Finance Manager");
-      await grn.acceptGoodsReceiptPg(grnId, "finance");
+      await grn.acceptGoodsReceiptPg(grnId, "finance", null, await grnLineIds(admin, grnId));
 
       const s = await grIr.getGrIrSummaryPg();
       expect(s.ledgerBalance).toBe(10_000);

@@ -4,6 +4,8 @@ import {
   text,
   jsonb,
   timestamp,
+  integer,
+  primaryKey,
   index,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
@@ -80,6 +82,12 @@ export const approvalRequests = pgTable(
     appliedKind: text("applied_kind"),
     appliedId: text("applied_id"),
 
+    /* The chain (stock_changes_pass_three_approvers_who_tick_every_line). */
+    currentStep: integer("current_step").notNull().default(1),
+    totalSteps: integer("total_steps").notNull().default(1),
+    currentStepLabel: text("current_step_label").notNull().default(""),
+    currentStepRoles: text("current_step_roles").array().notNull().default([]),
+
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -109,4 +117,41 @@ export const approvalRequests = pgTable(
       t.targetId,
     ),
   ],
+);
+
+/** One approver's signature on one step, with the lines they ticked. */
+export const approvalStepDecisions = pgTable(
+  "approval_step_decisions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id").notNull().references(() => companies.id, { onDelete: "cascade" }),
+    approvalId: uuid("approval_id").notNull().references(() => approvalRequests.id, { onDelete: "cascade" }),
+    stepNo: integer("step_no").notNull(),
+    stepLabel: text("step_label").notNull(),
+    decidedById: text("decided_by_id").notNull(),
+    decidedByName: text("decided_by_name").notNull(),
+    decidedByRole: text("decided_by_role"),
+    note: text("note").notNull().default(""),
+    confirmedLines: jsonb("confirmed_lines").notNull().default([]),
+    decidedAt: timestamp("decided_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("approval_step_decisions_step_idx").on(t.approvalId, t.stepNo),
+    uniqueIndex("approval_step_decisions_one_signature_idx").on(t.approvalId, t.decidedById),
+  ],
+);
+
+/** A company's own chain for an approval type. No rows: the defaults. */
+export const approvalStepPolicies = pgTable(
+  "approval_step_policies",
+  {
+    companyId: uuid("company_id").notNull().references(() => companies.id, { onDelete: "cascade" }),
+    type: text("type").notNull(),
+    stepNo: integer("step_no").notNull(),
+    label: text("label").notNull(),
+    roles: text("roles").array().notNull(),
+    updatedByName: text("updated_by_name").notNull().default("System"),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.companyId, t.type, t.stepNo] })],
 );

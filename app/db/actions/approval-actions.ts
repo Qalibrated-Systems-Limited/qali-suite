@@ -4,9 +4,12 @@ import { revalidatePath } from "next/cache";
 import { withAuthorizedTenant } from "../tenant";
 import { userMessage } from "../errors";
 import * as approvals from "../repositories/approvals";
+import * as steps from "../repositories/approvalSteps";
+import * as adjustmentsRepo from "../repositories/stockAdjustments";
+import { raiseApprovalIn } from "../approvalService";
 import {
-  APPROVER_MATRIX,
   canApproveType,
+  canActOnStep,
   approvableTypesFor,
 } from "@/lib/business-rules";
 import {
@@ -115,27 +118,8 @@ export async function submitApproval(input: {
   context?: Record<string, unknown>;
 }): Promise<SubmitApprovalResult> {
   try {
-    const roles = (APPROVER_MATRIX as Record<string, string[]>)[input.type];
-    if (!roles?.length) {
-      return { success: false, error: `No approver matrix for type "${input.type}"` };
-    }
-
     const approval = await withAuthorizedTenant([], (tx, { user, companyId }) =>
-      approvals.submitApproval(tx, {
-        companyId,
-        type: input.type,
-        targetKind: input.targetRef.kind,
-        targetId: String(input.targetRef.id),
-        targetLabel: input.targetRef.label ?? null,
-        payload: input.payload ?? {},
-        context: input.context ?? {},
-        reason: input.reason ?? "",
-        requesterNote: input.requesterNote ?? "",
-        requiredApproverRoles: roles,
-        submittedById: actor(user).id,
-        submittedByName: actor(user).name,
-        submittedByRole: actor(user).role,
-      }),
+      raiseApprovalIn(tx, user, companyId, input),
     );
 
     // Best-effort: an approval must not fail because a bell or a mail did.
@@ -153,13 +137,17 @@ export async function submitApproval(input: {
 /** What is waiting that this caller may decide. */
 export async function getApprovalQueuePg(status = "submitted") {
   try {
-    return await withAuthorizedTenant([], (tx, { user }) =>
-      approvals.listQueue(
+    return await withAuthorizedTenant([], async (tx, { user }) => {
+      const rows = await approvals.listQueue(
         tx,
         approvableTypesFor(user.role),
         status as approvals.ApprovalStatus,
-      ),
-    );
+        100,
+        user.role,
+      );
+      // Chained requests carry their steps, signatures and the lines to tick.
+      return Promise.all(rows.map((r) => withChain(tx, r, String(user.id ?? ""), user.role)));
+    });
   } catch {
     return [];
   }
@@ -178,7 +166,7 @@ export async function getApprovalQueuePg(status = "submitted") {
 export async function countMyPendingApprovalsPg() {
   try {
     return await withAuthorizedTenant([], (tx, { user }) =>
-      approvals.countQueue(tx, approvableTypesFor(user.role)),
+      approvals.countQueue(tx, approvableTypesFor(user.role), user.role),
     );
   } catch {
     return 0;
@@ -188,7 +176,9 @@ export async function countMyPendingApprovalsPg() {
 export async function getMySubmittedApprovalsPg(limit = 20) {
   try {
     return await withAuthorizedTenant([], (tx, { user }) =>
-      approvals.listSubmittedBy(tx, actor(user).id, limit),
+      approvals.listSubmittedBy(tx, actor(user).id, limit).then((rows) =>
+        Promise.all(rows.map((r) => withChain(tx, r, String(user.id ?? ""), user.role))),
+      ),
     );
   } catch {
     return [];
@@ -197,7 +187,69 @@ export async function getMySubmittedApprovalsPg(limit = 20) {
 
 export async function getApprovalPg(approvalId: string) {
   if (!approvalId) return null;
-  return withAuthorizedTenant([], (tx) => approvals.getApproval(tx, approvalId));
+  return withAuthorizedTenant([], async (tx, { user }) => {
+    const a = await approvals.getApproval(tx, approvalId);
+    return a ? withChain(tx, a, String(user.id ?? ""), user.role) : null;
+  });
+}
+
+type Screen = NonNullable<Awaited<ReturnType<typeof approvals.getApproval>>>;
+type Tx = Parameters<Parameters<typeof withAuthorizedTenant>[1]>[0];
+
+/**
+ * A chained request with what its screen needs: every step and who signed it,
+ * the lines to confirm, and whether THIS viewer may sign the current step
+ * (and if not, why not).
+ */
+async function withChain(tx: Tx, a: Screen, userId: string, role: string | null | undefined) {
+  if (a.totalSteps <= 1) return { ...a, chain: null };
+  const [policy, decisions, lines] = await Promise.all([
+    steps.stepsFor(tx, a.type),
+    steps.decisionsFor(tx, a.id),
+    steps.previewLines(tx, a.targetRef.kind, a.targetRef.id),
+  ]);
+  // The labels of steps already signed come from the signatures, so editing
+  // the policy later does not rewrite history.
+  const labels = Array.from({ length: a.totalSteps }, (_, i) => {
+    const signed = decisions.find((d) => d.stepNo === i + 1);
+    if (signed) return signed.stepLabel;
+    if (i + 1 === a.currentStep) return a.currentStepLabel;
+    return policy[i]?.label ?? `Step ${i + 1}`;
+  });
+  const blockedBecause =
+    a.status !== "submitted"
+      ? null
+      : a.submittedBy.id === userId
+        ? "You raised this request, so another person must approve each step."
+        : decisions.some((d) => d.decidedById === userId)
+          ? "You have already signed an earlier step; a different person signs this one."
+          : !canActOnStep(role, a.currentStepRoles)
+            ? `Waiting for ${a.currentStepRoles.join(", ") || "the step's approvers"}.`
+            : null;
+  return {
+    ...a,
+    chain: {
+      steps: labels.map((label, i) => ({
+        stepNo: i + 1,
+        label,
+        roles: i + 1 === a.currentStep ? a.currentStepRoles : (policy[i]?.roles ?? []),
+        decision: decisions.find((d) => d.stepNo === i + 1) ?? null,
+      })),
+      lines,
+      canSign: a.status === "submitted" && blockedBecause === null,
+      blockedBecause,
+    },
+  };
+}
+
+/** The lines the approver ticked, as sent by the form. */
+function confirmedFrom(formData: FormData): string[] {
+  try {
+    const raw = JSON.parse(String(formData?.get?.("confirmedLines") ?? "[]"));
+    return Array.isArray(raw) ? raw.map(String) : [];
+  } catch {
+    return [];
+  }
 }
 
 // ── Applying ────────────────────────────────────────────────────────────────
@@ -269,11 +321,23 @@ async function applyApprovalPayload(approval: {
     case "stock_valuation": {
       const adjustmentId = targetId || String(payload.adjustmentId ?? "");
       if (!adjustmentId) return { success: false, error: "Missing adjustment reference" };
-      const { applyApprovedStockAdjustmentPg } = await import("./adjustment-actions");
-      const result = await applyApprovedStockAdjustmentPg(adjustmentId);
-      return result?.success
-        ? { success: true, appliedKind: "InventoryAdjustment", appliedId: adjustmentId }
-        : { success: false, error: result?.message ?? "Could not apply the adjustment." };
+      /*
+       * Applied here rather than through applyApprovedStockAdjustmentPg's role
+       * gate: the engine has just checked that this person may sign the final
+       * step, and a company may give that step to roles the gate never names.
+       */
+      try {
+        await withAuthorizedTenant([], (tx, { user }) =>
+          adjustmentsRepo.approveAdjustment(tx, adjustmentId, {
+            id: user.id ?? null,
+            name: user.name || user.email || "Approver",
+          }),
+        );
+      } catch (error) {
+        return { success: false, error: userMessage(error, "Could not apply the adjustment.") };
+      }
+      revalidatePath(`/dashboard/adjustments/${adjustmentId}`);
+      return { success: true, appliedKind: "InventoryAdjustment", appliedId: adjustmentId };
     }
 
     case "bill_payment": {
@@ -371,10 +435,12 @@ export async function approveApproval(
   formData: FormData,
 ): Promise<ActionResult> {
   const note = String(formData?.get?.("note") ?? "").slice(0, 1000);
+  const confirmed = confirmedFrom(formData);
 
   let claimed: Awaited<ReturnType<typeof approvals.claim>> = null;
+  let finalStep: Parameters<typeof steps.recordStep>[1] | null = null;
   try {
-    claimed = await withAuthorizedTenant([], async (tx, { user }) => {
+    const outcome = await withAuthorizedTenant([], async (tx, { user, companyId }) => {
       const peek = await approvals.getApproval(tx, approvalId);
       if (!peek) throw new Error("Approval not found.");
       if (peek.status !== "submitted") {
@@ -384,11 +450,58 @@ export async function approveApproval(
             : `Already ${peek.status}; it cannot be re-decided.`,
         );
       }
-      if (!canApproveType(user.role, peek.type)) {
+
+      if (peek.totalSteps > 1) {
+        /*
+         * A CHAIN. The viewer must be allowed on the current step, must not
+         * have raised it or signed another step, and must have ticked every
+         * line. Only the last step applies the change.
+         */
+        const view = await withChain(tx, peek, String(user.id ?? ""), user.role);
+        const chain = view.chain!;
+        if (!chain.canSign) throw new Error(chain.blockedBecause ?? "You cannot sign this step.");
+        const all = chain.lines.map((l) => l.id);
+        const missing = all.filter((id) => !confirmed.includes(id));
+        if (missing.length) {
+          throw new Error(
+            `Tick every line to confirm it before approving — ${missing.length} of ${all.length} not confirmed yet.`,
+          );
+        }
+        const signature = {
+          companyId,
+          approvalId,
+          stepNo: peek.currentStep,
+          stepLabel: peek.currentStepLabel || `Step ${peek.currentStep}`,
+          by: { id: String(user.id), name: user.name || user.email || "Approver", role: user.role ?? null },
+          note,
+          confirmedLines: all,
+        };
+        if (peek.currentStep < peek.totalSteps) {
+          await steps.recordStep(tx, signature);
+          const policy = await steps.stepsFor(tx, peek.type);
+          const next = policy[peek.currentStep] ?? {
+            label: `Step ${peek.currentStep + 1}`,
+            roles: peek.requiredApproverRoles,
+          };
+          await steps.advance(tx, approvalId, peek.currentStep, next);
+          return { advanced: await approvals.getApproval(tx, approvalId) };
+        }
+        finalStep = signature;
+      } else if (!canApproveType(user.role, peek.type)) {
         throw new Error("You don't have authority to approve this type of request.");
       }
-      return approvals.claim(tx, approvalId);
+      return { claimed: await approvals.claim(tx, approvalId) };
     });
+
+    if ("advanced" in outcome && outcome.advanced) {
+      await notifyApprovalSubmitted(outcome.advanced);
+      revalidateApprovals(approvalId);
+      return {
+        success: true,
+        message: `Step ${outcome.advanced.currentStep - 1} approved — sent on to ${outcome.advanced.currentStepLabel}.`,
+      };
+    }
+    claimed = "claimed" in outcome ? (outcome.claimed ?? null) : null;
   } catch (error) {
     return { success: false, error: userMessage(error, "Failed to approve") };
   }
@@ -411,15 +524,17 @@ export async function approveApproval(
   }
 
   try {
-    const finalised = await withAuthorizedTenant([], (tx, { user }) =>
-      approvals.finaliseApproved(
+    const signature = finalStep;
+    const finalised = await withAuthorizedTenant([], async (tx, { user }) => {
+      if (signature) await steps.recordStep(tx, signature);
+      return approvals.finaliseApproved(
         tx,
         approvalId,
         actor(user),
         { kind: applied.appliedKind, id: applied.appliedId },
         note,
-      ),
-    );
+      );
+    });
     await notifyApprovalDecided(finalised, "approved", finalised.decision?.by);
   } catch (error) {
     /*
@@ -452,7 +567,11 @@ export async function rejectApproval(
     const decided = await withAuthorizedTenant([], async (tx, { user }) => {
       const peek = await approvals.getApproval(tx, approvalId);
       if (!peek) throw new Error("Approval not found.");
-      if (!canApproveType(user.role, peek.type)) {
+      if (peek.totalSteps > 1) {
+        const view = await withChain(tx, peek, String(user.id ?? ""), user.role);
+        if (!view.chain!.canSign) throw new Error(view.chain!.blockedBecause ?? "You cannot decide this step.");
+        if (!note.trim()) throw new Error("Say why it is rejected, so the person who raised it can put it right.");
+      } else if (!canApproveType(user.role, peek.type)) {
         throw new Error("You don't have authority to decide this type of request.");
       }
       return approvals.decide(tx, approvalId, "rejected", actor(user), note);

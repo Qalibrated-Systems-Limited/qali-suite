@@ -3,6 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { eq } from "drizzle-orm";
 import { userMessage } from "../errors";
+import { raiseApprovalIn } from "../approvalService";
+import { notifyApprovalSubmitted } from "@/lib/notifications/approval-notify";
 import { withAuthorizedTenant } from "../tenant";
 import * as adjustmentsRepo from "../repositories/stockAdjustments";
 import { products } from "../schema";
@@ -119,6 +121,9 @@ export async function createStockAdjustmentPg(
             name: products.name,
             onHand: products.quantityOnHand,
             cost: products.costPrice,
+            committed: products.quantityCommitted,
+            onHold: products.quantityOnHold,
+            allowNegative: products.allowNegativeStock,
           })
           .from(products)
           .where(eq(products.id, item.productId));
@@ -132,6 +137,16 @@ export async function createStockAdjustmentPg(
 
         const delta =
           item.adjustmentType === "increase" ? item.quantity : -item.quantity;
+
+        // Refused now, not three approvals later: stock promised to orders
+        // or on hold cannot be adjusted away (the database refuses it too).
+        const reserved = Number(product.committed ?? 0) + Number(product.onHold ?? 0);
+        if (delta < 0 && !product.allowNegative && Number(product.onHand) + delta < reserved) {
+          return {
+            success: false,
+            message: `${product.name}: ${reserved} are committed to orders or on hold, so at most ${Math.max(0, Number(product.onHand) - reserved)} can be removed.`,
+          };
+        }
 
         lines.push({
           productId: product.id,
@@ -178,29 +193,18 @@ export async function createStockAdjustmentPg(
         await adjustmentsRepo.holdForValuation(tx, adjustment.id);
       }
 
-      if (routing.autoApprove) {
-        await adjustmentsRepo.approveAdjustment(tx, adjustment.id, {
-          id: user.id ?? null,
-          name: user.name || user.email || "Unknown User",
-        });
-
-        revalidatePath("/dashboard/adjustments");
-        return {
-          success: true,
-          message: `Stock adjustment ${adjustment.adjustmentNumber} created and approved successfully`,
-          adjustmentNumber: adjustment.adjustmentNumber,
-          adjustmentId: adjustment.id,
-        };
-      }
+      /*
+       * NO STOCK CHANGE IS SELF-APPROVED. Every adjustment — added stock,
+       * removed stock, a write-off — passes the approval chain (store check,
+       * operations review, finance approval by default), each approver
+       * ticking every line. `routing` still decides WHICH chain and why.
+       */
 
       // The draft stands whatever the engine does with it. Raising the request
       // is a separate logical step, as it was in Mongo — the difference is
       // that a failure there no longer leaves a half-written adjustment,
       // because this transaction has not committed until the handler returns.
-      const { submitApproval } = await import(
-        "@/app/db/actions/approval-actions"
-      );
-      const result = await submitApproval({
+      const approval = await raiseApprovalIn(tx, user, companyId, {
         // Valuation outranks the high-risk branch: a write-off that admits
         // nothing still needs its increase valued, and there is only one
         // request. `stock_valuation` is the narrower queue of the two.
@@ -222,20 +226,15 @@ export async function createStockAdjustmentPg(
         },
       });
 
+      await notifyApprovalSubmitted(approval);
       revalidatePath("/dashboard/adjustments");
-
-      if (!result?.success) {
-        return {
-          success: false,
-          message: result?.error ?? "Could not raise the approval.",
-        };
-      }
+      revalidatePath("/dashboard/approvals");
 
       return {
         success: true,
         message: routing.needsValuation
-          ? `Stock adjustment ${adjustment.adjustmentNumber} is awaiting a unit cost from finance or procurement (${result.approval.requestNumber})`
-          : `Stock adjustment ${adjustment.adjustmentNumber} submitted for approval (${result.approval.requestNumber})`,
+          ? `Stock adjustment ${adjustment.adjustmentNumber} is awaiting a unit cost from finance or procurement (${approval.requestNumber})`
+          : `Stock adjustment ${adjustment.adjustmentNumber} submitted for approval (${approval.requestNumber})`,
         adjustmentNumber: adjustment.adjustmentNumber,
         adjustmentId: adjustment.id,
       };
