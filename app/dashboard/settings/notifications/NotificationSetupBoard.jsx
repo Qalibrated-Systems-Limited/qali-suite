@@ -44,26 +44,40 @@ export default function NotificationSetupBoard({ setup }) {
           <h2 className="text-sm font-semibold">Email — invitations, approvals, supplier notices</h2>
         </header>
         <ul className="divide-y divide-border">
-          <Row ok={email.hasKey} label={email.hasKey ? "Email service key is set" : "No email service key"}>
-            {email.hasKey ? (
-              <>RESEND_API_KEY is present on the server.</>
-            ) : (
+          {email.transport === "smtp" ? (
+            <Row ok={email.smtpOk} label={`Sending through your mail server: ${email.smtpHost}`}>
+              {email.smtpOk ? (
+                <>The mail server accepted the login for {email.smtpUser || "(no user)"}.</>
+              ) : (
+                <>
+                  The mail server refused the connection or login: <strong>{email.smtpError || "unknown error"}</strong>. Check
+                  SMTP_HOST, SMTP_PORT, SMTP_USER and SMTP_PASSWORD in the server’s settings file.
+                </>
+              )}
+            </Row>
+          ) : (
+            <Row ok={email.hasKey} label={email.hasKey ? "Sending through Resend" : "No way to send email is set up"}>
+              {email.hasKey ? (
+                <>RESEND_API_KEY is set. To send from your own mailbox instead, set SMTP_HOST, SMTP_PORT, SMTP_USER and SMTP_PASSWORD.</>
+              ) : (
+                <>
+                  Nothing can be emailed. Either use your own mailbox (<span className={code}>SMTP_HOST</span>,{" "}
+                  <span className={code}>SMTP_PORT</span>, <span className={code}>SMTP_USER</span>,{" "}
+                  <span className={code}>SMTP_PASSWORD</span>) or a Resend key (<span className={code}>RESEND_API_KEY</span>), then redeploy.
+                </>
+              )}
+            </Row>
+          )}
+          <Row ok={email.transport === "smtp" || !email.sandboxSender} warn={email.transport !== "smtp" && email.sandboxSender} label={`Sender: ${email.from}`}>
+            {email.transport === "smtp" ? (
+              <>Must be the mailbox you log in with ({email.smtpUser || "SMTP_USER"}), or one it may send as, or the mail server refuses it.</>
+            ) : email.sandboxSender ? (
               <>
-                Nothing can be emailed. Create a key at resend.com → API Keys, put it in the server’s settings file as{" "}
-                <span className={code}>RESEND_API_KEY=re_…</span>, then redeploy.
-              </>
-            )}
-          </Row>
-          <Row ok={!email.sandboxSender} warn={email.sandboxSender} label={`Sender: ${email.from}`}>
-            {email.sandboxSender ? (
-              <>
-                This is Resend’s test sender. It only delivers to the email address that owns the Resend account —
-                invitations to anyone else are refused. Verify your domain at resend.com → Domains (add the DNS records it
-                shows), then set <span className={code}>FROM_EMAIL=QaliSuite &lt;noreply@yourdomain.com&gt;</span> and
-                redeploy.
+                This is Resend’s test sender. It only delivers to the email address that owns the Resend account. Verify your
+                domain at resend.com → Domains, then set <span className={code}>FROM_EMAIL=QaliSuite &lt;noreply@yourdomain.com&gt;</span>.
               </>
             ) : (
-              <>The sender’s domain must be verified at resend.com → Domains, or the email service refuses it.</>
+              <>The sender’s domain must be verified at resend.com → Domains, or Resend refuses it.</>
             )}
           </Row>
           <Row ok={!email.appUrlLooksWrong} label={`Links in emails go to: ${email.appUrl || "(not set)"}`}>

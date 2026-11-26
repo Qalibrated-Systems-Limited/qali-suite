@@ -85,8 +85,16 @@ export async function getNotificationSetup() {
            count(*) FILTER (WHERE user_id = ${String(u.id)})::int AS mine
       FROM push_subscriptions
   `)) as unknown as Array<{ devices: number; people: number; mine: number }>;
+  const { emailTransport, verifyEmailTransport } = await import("@/lib/email");
+  const transport = emailTransport();
+  const check = transport === "smtp" ? await verifyEmailTransport() : null;
   return {
     email: {
+      transport,
+      smtpHost: process.env.SMTP_HOST ? `${process.env.SMTP_HOST}:${process.env.SMTP_PORT || 587}` : null,
+      smtpUser: process.env.SMTP_USER || null,
+      smtpOk: check ? check.ok : null,
+      smtpError: check && !check.ok ? String(check.error ?? "") : null,
       hasKey: Boolean(process.env.RESEND_API_KEY),
       from,
       sandboxSender: /@resend\.dev>?$/i.test(from),
@@ -113,17 +121,18 @@ export async function sendTestEmail(to: string) {
     if (!ADMIN.includes(String(u.role))) return { success: false, error: "Only an administrator can send a test email." };
     const address = String(to ?? "").trim();
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(address)) return { success: false, error: "Enter an email address." };
-    if (!process.env.RESEND_API_KEY) return { success: false, error: "RESEND_API_KEY is not set on the server, so no email can be sent." };
-    const { Resend } = await import("resend");
-    const resend = new Resend(process.env.RESEND_API_KEY);
-    const { data, error } = await resend.emails.send({
+    const { deliver, emailTransport } = await import("@/lib/email");
+    const via = emailTransport();
+    if (!via) return { success: false, error: "Email is not set up on the server: set SMTP_HOST (your mail server) or RESEND_API_KEY." };
+    const { data, error } = await deliver({
       from: process.env.FROM_EMAIL || "QaliSuite <onboarding@resend.dev>",
       to: address,
       subject: "QaliSuite test email",
       html: `<p>This is a test from QaliSuite, sent by ${u.name ?? "an administrator"}. If you are reading it, invitations and notifications can reach this address.</p>`,
     });
-    if (error) return { success: false, error: `The email service refused it: ${error.message}` };
-    return { success: true, message: `Accepted by the email service (id ${data?.id ?? "—"}). Check ${address}, including spam.` };
+    const who = via === "smtp" ? "Your mail server" : "Resend";
+    if (error) return { success: false, error: `${who} refused it: ${error.message}` };
+    return { success: true, message: `Accepted by ${who.toLowerCase()} (id ${data?.id ?? "—"}). Check ${address}, including spam.` };
   } catch (e) {
     return { success: false, error: `Could not reach the email service: ${(e as Error).message}` };
   }

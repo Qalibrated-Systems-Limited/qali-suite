@@ -108,8 +108,8 @@ async function deliverInvite(input: {
     return {
       delivered: false,
       warning: `The invitation for ${input.email} was created, but the email could not be sent: ${
-        !process.env.RESEND_API_KEY
-          ? "email is not set up on the server (RESEND_API_KEY)."
+        !process.env.RESEND_API_KEY && !process.env.SMTP_HOST
+          ? "email is not set up on the server (SMTP_HOST or RESEND_API_KEY)."
           : (err as Error)?.message || "the email service refused it."
       } Check Settings → Email & notifications, then resend it from the users page.`,
     };
