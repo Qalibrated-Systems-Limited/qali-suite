@@ -146,6 +146,20 @@ export async function createMany(tx: Tx, rows: readonly NewNotification[]) {
     RETURNING id
   `)) as unknown as Array<{ id: string }>;
 
+  /*
+   * Also to their phones and browsers, when push is set up. Not awaited and
+   * never throws: a bell must not fail because a push service is slow.
+   */
+  if (process.env.VAPID_PUBLIC_KEY) {
+    void import("@/lib/push")
+      .then(({ sendPushToUsers }) =>
+        Promise.all(
+          rows.map((n) => sendPushToUsers([String(n.userId)], { title: n.title, body: n.body ?? null, href: n.href ?? null })),
+        ),
+      )
+      .catch((e) => console.error("[push]", e));
+  }
+
   return inserted.length;
 }
 

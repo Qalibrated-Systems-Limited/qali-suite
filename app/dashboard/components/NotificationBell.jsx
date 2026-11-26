@@ -10,6 +10,7 @@ import {
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import PushToggle from "./PushToggle";
 import {
   markAllNotificationsRead,
   markNotificationRead,
@@ -161,6 +162,7 @@ export default function NotificationBell({ items = [], unread = 0 }) {
             })
           )}
         </div>
+        <PushToggle />
       </DropdownMenuContent>
     </DropdownMenu>
   );

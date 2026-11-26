@@ -107,7 +107,11 @@ async function deliverInvite(input: {
     console.error("[invite-action] the invitation email could not be sent:", err);
     return {
       delivered: false,
-      warning: `The invitation for ${input.email} was created, but the email could not be sent. Resend it from the users page once email is configured.`,
+      warning: `The invitation for ${input.email} was created, but the email could not be sent: ${
+        !process.env.RESEND_API_KEY
+          ? "email is not set up on the server (RESEND_API_KEY)."
+          : (err as Error)?.message || "the email service refused it."
+      } Check Settings → Email & notifications, then resend it from the users page.`,
     };
   }
 }

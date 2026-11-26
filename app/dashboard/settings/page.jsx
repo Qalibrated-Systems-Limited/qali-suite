@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { Building2, Users, ShieldCheck, KeyRound, UserCog, KeySquare, Plug, Briefcase, Landmark, Lock, Wifi, ListChecks } from "lucide-react";
+import { Building2, Users, ShieldCheck, KeyRound, UserCog, KeySquare, Plug, Briefcase, Landmark, Lock, Wifi, ListChecks, Mail } from "lucide-react";
 import { auth } from "@/auth";
 import { can } from "@/lib/capabilities";
 import { planIncludes } from "@/lib/plans";
@@ -98,6 +98,16 @@ export default async function SettingsPage({ searchParams }) {
             iconBg="bg-sky-500/10"
             title="Remote access"
             description="Keep QaliSuite to the office network, and issue tokens to people working away"
+          />
+        )}
+        {can(session.user, "admin.manage") && (
+          <SettingsCard
+            href="/dashboard/settings/notifications"
+            icon={Mail}
+            iconColor="text-amber-500"
+            iconBg="bg-amber-500/10"
+            title="Email & notifications"
+            description="Check invitations and alerts can be sent, send a test, set up phone and browser notifications"
           />
         )}
         {can(session.user, "admin.manage") && (

@@ -71,3 +71,4 @@ export * from "./resourceRequests";
 export * from "./networkAccess";
 export * from "./reportDefinitions";
 export * from "./inventoryDocuments";
+export * from "./pushSubscriptions";
