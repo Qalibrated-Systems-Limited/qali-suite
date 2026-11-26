@@ -1,6 +1,7 @@
 "use server";
 
 import { sql } from "drizzle-orm";
+import { userMessage } from "../errors";
 
 import { revalidatePath } from "next/cache";
 import { randomUUID } from "node:crypto";
@@ -69,7 +70,12 @@ function fail(err: unknown): {
     return { success: false, error: message };
   }
   console.error("[user-action]", err);
-  return { success: false, error: "Something went wrong. Please try again." };
+  // A known database rule (an email already in use, …) is said in plain words.
+  const readable = userMessage(err, "Something went wrong. Please try again.");
+  if (/email address already belongs/i.test(readable)) {
+    return { success: false, error: readable, fieldErrors: { email: [readable] } };
+  }
+  return { success: false, error: readable };
 }
 
 export async function createUserPg(

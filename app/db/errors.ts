@@ -29,6 +29,8 @@ const NOT_NULL_VIOLATION = "23502";
  * already the sentence we wrote.
  */
 const CONSTRAINT_MESSAGES: Record<string, string> = {
+  users_email_uq:
+    "That email address already belongs to another user. Use a different address, or edit that user instead.",
   departments_company_code_uq: "A department with that code already exists.",
   departments_company_name_uq: "A department with that name already exists.",
   employees_company_number_uq:
